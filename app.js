@@ -15,6 +15,7 @@ const el = {
   snapshotCount: document.getElementById("snapshot-count"),
   cloudSummary: document.getElementById("cloud-summary"),
   cloudRecommendations: document.getElementById("cloud-recommendations"),
+  buildVersion: document.getElementById("build-version"),
   snapshotList: document.getElementById("snapshot-list"),
   jobsList: document.getElementById("jobs-list"),
   destinationMode: document.getElementById("destination-mode"),
@@ -226,6 +227,7 @@ function friendlyBackupMessage(status) {
 function renderMeta() {
   const version = state.meta?.version || "Unknown";
   const updateMessage = state.meta?.updateStatus?.message || "Update checks are not ready yet.";
+  el.buildVersion.textContent = `Version ${version}`;
   el.appVersion.textContent = version;
   el.updateStatus.textContent = updateMessage;
 }

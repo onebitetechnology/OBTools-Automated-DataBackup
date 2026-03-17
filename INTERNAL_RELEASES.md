@@ -4,6 +4,12 @@
 
 The app is prepared for local Electron development and Windows installer builds.
 
+Current app version:
+
+```text
+1.0.1
+```
+
 Desktop shortcut name:
 
 ```text
@@ -51,6 +57,14 @@ GH_TOKEN=your_github_token npm run release:win
 ```
 
 5. For manual internal testing, you can still upload the generated installer from `dist/` or share it directly.
+
+## Versioning Discipline
+
+Before shipping a new internal installer:
+
+1. Update the version in `package.json`
+2. Add the matching release notes to `CHANGELOG.md`
+3. Push to `main` so GitHub Actions builds an installer with the new version in its filename and app metadata
 
 ## Internet Updates
 

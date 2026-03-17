@@ -582,6 +582,14 @@ select:focus {
   display: none;
 }
 
+.build-version {
+  margin: 14px 0 0;
+  color: rgba(224, 241, 255, 0.82);
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .settings-drawer {
   position: fixed;
   inset: 0;
