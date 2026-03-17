@@ -14,6 +14,7 @@ const APP_ROOT = __dirname;
 const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : APP_ROOT;
 const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
 const WINDOWS_DIR = path.join(RESOURCE_ROOT, "windows");
+const SHELL_WORK_DIR = RESOURCE_ROOT;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -163,12 +164,25 @@ function runPowerShell(scriptName) {
       "pwsh.exe"
     ];
 
+    const resolvedShellCandidates = shellCandidates.filter((candidate) => {
+      if (!candidate.includes("\\") && !candidate.includes("/")) {
+        return true;
+      }
+
+      return fs.existsSync(candidate);
+    });
+
     const tryShell = (index) => {
-      if (index >= shellCandidates.length) {
-        const cmdPath = process.env.ComSpec || path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe");
+      if (index >= resolvedShellCandidates.length) {
+        const cmdCandidates = [
+          process.env.ComSpec,
+          path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe")
+        ].filter(Boolean);
+        const cmdPath = cmdCandidates.find((candidate) => fs.existsSync(candidate)) || "cmd.exe";
         const commandLine = `"powershell.exe" ${args.map((value) => `"${value}"`).join(" ")}`;
         const child = spawn(cmdPath, ["/d", "/s", "/c", commandLine], {
-          cwd: APP_ROOT
+          cwd: SHELL_WORK_DIR,
+          windowsHide: true
         });
 
         let stdout = "";
@@ -211,8 +225,9 @@ function runPowerShell(scriptName) {
         return;
       }
 
-      const child = spawn(shellCandidates[index], args, {
-        cwd: APP_ROOT
+      const child = spawn(resolvedShellCandidates[index], args, {
+        cwd: SHELL_WORK_DIR,
+        windowsHide: true
       });
 
       let stdout = "";
