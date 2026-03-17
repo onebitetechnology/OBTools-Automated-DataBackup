@@ -1,0 +1,75 @@
+{
+  "name": "onebite-backup-companion",
+  "version": "1.0.0",
+  "description": "Windows backup and sync desktop app for One Bite Technology customers.",
+  "main": "main.js",
+  "author": "One Bite Technology",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onebitetechnology/OBTools-Automated-DataBackup.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "start:web": "node server.js",
+    "dist:win": "electron-builder --win nsis",
+    "pack": "electron-builder --dir",
+    "release:win": "electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "^35.0.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "ca.onebitetechnology.backupcompanion",
+    "productName": "OBTools Automated Backups",
+    "files": [
+      "app.js",
+      "index.html",
+      "main.js",
+      "preload.js",
+      "server.js",
+      "styles.css"
+    ],
+    "extraResources": [
+      {
+        "from": "data",
+        "to": "data"
+      },
+      {
+        "from": "windows",
+        "to": "windows"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "OBTools-Automated-Backups-Setup-${version}.${ext}",
+      "publish": [
+        {
+          "provider": "github",
+          "owner": "onebitetechnology",
+          "repo": "OBTools-Automated-DataBackup",
+          "releaseType": "draft"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OBTools Automated Backups"
+    }
+  }
+}

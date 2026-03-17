@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>One Bite Technology Backup Companion</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <div class="brand-lockup">
+            <img src="assets/obtools-mark.svg" alt="OBTools logo" class="brand-logo">
+            <div class="brand-meta">
+              <p class="eyebrow">One Bite Technology</p>
+              <span class="brand-name">OBTools Automated Backups</span>
+            </div>
+            <span class="brand-badge">Backup Companion</span>
+          </div>
+          <h1>Protect important files.</h1>
+          <p class="lede">Set a backup drive once, choose what matters, and let the app keep your customer or household data safe with one-click sync and scheduled reminders.</p>
+          <div class="hero-points">
+            <span>USB and external HDD ready</span>
+            <span>Redundant snapshots</span>
+            <span>Cloud sync recommendations</span>
+          </div>
+        </div>
+        <div id="backup-status-card" class="hero-status card status-good">
+          <p class="status-label">Backup Status</p>
+          <h2 id="protection-state">Loading</h2>
+          <p id="protection-message">Checking backup health.</p>
+          <div class="status-strip">
+            <div>
+              <p class="mini-label">Last backup</p>
+              <p id="last-backup" class="mini-value">Never</p>
+            </div>
+            <div>
+              <p class="mini-label">Snapshots kept</p>
+              <p id="snapshot-count" class="mini-value">0</p>
+            </div>
+          </div>
+          <div class="hero-actions">
+            <button id="run-backup" class="primary">Run Backup Now</button>
+            <button id="open-settings" class="ghost">Settings</button>
+            <button id="run-cloud-check" class="secondary">Check Cloud Sync</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="card panel setup-panel wide">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Quick Setup</p>
+              <h3>Your backup in four steps</h3>
+            </div>
+          </div>
+          <div class="steps-grid">
+            <article class="step-card">
+              <p class="step-number">01</p>
+              <h4>Pick what to protect</h4>
+              <p>Add folders, files, and bookmark exports that matter most.</p>
+            </article>
+            <article class="step-card">
+              <p class="step-number">02</p>
+              <h4>Choose a backup drive</h4>
+              <p>Use a drive letter or volume label so the app can find the right USB or HDD.</p>
+            </article>
+            <article class="step-card">
+              <p class="step-number">03</p>
+              <h4>Set automatic reminders</h4>
+              <p>Get nudges if a backup hasn’t happened recently enough.</p>
+            </article>
+            <article class="step-card">
+              <p class="step-number">04</p>
+              <h4>Run and review</h4>
+              <p>See backup history, snapshots, and cloud sync recommendations in one place.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="card panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h3>Choose what gets backed up</h3>
+              <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
+            </div>
+            <button id="add-job" class="ghost">Add Item</button>
+          </div>
+          <div id="jobs-list" class="jobs-list"></div>
+        </section>
+
+        <section class="card panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Settings</p>
+              <h3>Backup configuration</h3>
+              <p class="section-note">Review where backups go, how many copies are kept, and whether automation is enabled.</p>
+            </div>
+          </div>
+          <div class="settings-summary-grid">
+            <article class="summary-card">
+              <p class="metric-label">Destination</p>
+              <p id="settings-destination-summary" class="summary-value">Not configured</p>
+            </article>
+            <article class="summary-card">
+              <p class="metric-label">Copies To Keep</p>
+              <p id="settings-retention-summary" class="summary-value">3 copies</p>
+            </article>
+            <article class="summary-card">
+              <p class="metric-label">Automation</p>
+              <p id="settings-schedule-summary" class="summary-value">Manual only</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="card panel wide">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Step 4</p>
+              <h3>Review backup health</h3>
+              <p class="section-note">Use this area to confirm the last run, inspect available snapshots, and review cloud sync recommendations.</p>
+            </div>
+          </div>
+          <div class="insights">
+            <div>
+              <p class="metric-label">Last Backup</p>
+              <p id="last-backup-detail" class="metric-value">Never</p>
+              <p id="last-backup-message" class="metric-note">No backup has been completed yet.</p>
+            </div>
+            <div>
+              <p class="metric-label">Snapshots</p>
+              <ul id="snapshot-list" class="snapshot-list"></ul>
+            </div>
+            <div>
+              <p class="metric-label">Cloud Health</p>
+              <p id="cloud-summary" class="metric-note">Cloud check has not been run yet.</p>
+              <ul id="cloud-recommendations" class="recommendations"></ul>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="job-template">
+      <article class="job-card">
+        <div class="job-row">
+          <label>
+            <span>Name</span>
+            <input data-field="name" type="text">
+          </label>
+          <label>
+            <span>Type</span>
+            <select data-field="type">
+              <option value="folder">Folder</option>
+              <option value="file">File</option>
+            </select>
+          </label>
+          <label class="checkbox inline-toggle">
+            <input data-field="enabled" type="checkbox">
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="job-row">
+          <label class="grow">
+            <span>Windows Path</span>
+            <input data-field="path" type="text" placeholder="%USERPROFILE%\\Documents">
+          </label>
+          <button data-action="browse" class="secondary">Browse</button>
+          <button data-action="remove" class="ghost danger">Remove</button>
+        </div>
+      </article>
+    </template>
+
+    <div id="settings-drawer" class="settings-drawer" hidden>
+      <div class="settings-backdrop"></div>
+      <aside class="settings-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Settings</p>
+            <h3>Backup configuration</h3>
+            <p class="section-note">Set the drive, choose how many copies to keep, and control backup automation.</p>
+          </div>
+          <button id="close-settings" class="ghost" type="button">Close</button>
+        </div>
+
+        <section class="settings-section">
+          <h4>Destination</h4>
+          <div class="grid two">
+            <label>
+              <span>Detection Mode</span>
+              <select id="destination-mode">
+                <option value="driveLetter">Drive Letter</option>
+                <option value="label">Volume Label</option>
+              </select>
+            </label>
+            <label>
+              <span>Base Folder</span>
+              <input id="destination-base-folder" type="text" placeholder="One Bite Backups">
+            </label>
+            <label>
+              <span>Drive Letter</span>
+              <input id="destination-drive-letter" type="text" placeholder="E">
+            </label>
+            <label>
+              <span>Volume Label</span>
+              <input id="destination-label" type="text" placeholder="BackupDrive">
+            </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h4>Retention</h4>
+          <div class="grid two">
+            <label>
+              <span>Copies To Keep</span>
+              <input id="retention-count" type="number" min="1" max="20">
+            </label>
+          </div>
+          <p class="hint">When the backup drive fills with more than this number of snapshots, the oldest copies are replaced first.</p>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <h4>Automation</h4>
+            <button id="install-automation" class="secondary" type="button">Install Windows Tasks</button>
+          </div>
+          <div class="grid three">
+            <label class="checkbox">
+              <input id="schedule-enabled" type="checkbox">
+              <span>Enable scheduled backups</span>
+            </label>
+            <label>
+              <span>Frequency</span>
+              <select id="schedule-frequency">
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
+            <label>
+              <span>Time</span>
+              <input id="schedule-time" type="time">
+            </label>
+            <label class="checkbox">
+              <input id="reminders-enabled" type="checkbox">
+              <span>Enable stale backup reminders</span>
+            </label>
+            <label>
+              <span>Warn After</span>
+              <input id="reminder-days" type="number" min="1" max="90">
+            </label>
+            <label class="checkbox">
+              <input id="cloud-check-enabled" type="checkbox">
+              <span>Include cloud health checks</span>
+            </label>
+          </div>
+        </section>
+
+        <div class="settings-actions">
+          <button id="save-config" class="primary" type="button">Save Settings</button>
+        </div>
+      </aside>
+    </div>
+
+    <div id="terms-gate" class="terms-gate" hidden>
+      <div class="terms-backdrop"></div>
+      <section class="terms-modal">
+        <button id="terms-skip" class="terms-skip" type="button" aria-label="Internal setup skip"></button>
+        <p class="eyebrow">Customer Acceptance</p>
+        <h2>Terms and Conditions</h2>
+        <p class="terms-intro">Before using OBTools Automated Backups, the customer must review and accept these terms.</p>
+        <div class="terms-copy">
+          <p>One Bite Technology provides this software as a convenience tool for local backup automation. The customer remains responsible for verifying that backups complete successfully and that restore copies are readable.</p>
+          <p>One Bite Technology is not liable for data loss, incomplete backups, device failure, media corruption, cloud sync problems, user error, malware, theft, or any direct or indirect damages arising from the use of this software.</p>
+          <p>The customer should maintain more than one copy of important data and should periodically test restore procedures. Continued use of this software indicates acceptance of these terms.</p>
+        </div>
+        <label class="checkbox terms-checkbox">
+          <input id="terms-confirm" type="checkbox">
+          <span>I have read and accept the terms and conditions.</span>
+        </label>
+        <div class="terms-actions">
+          <button id="terms-accept" class="primary" type="button" disabled>Accept and Continue</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

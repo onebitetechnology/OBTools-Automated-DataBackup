@@ -1,0 +1,50 @@
+{
+  "businessName": "One Bite Technology",
+  "destination": {
+    "mode": "driveLetter",
+    "driveLetter": "",
+    "label": "",
+    "baseFolder": "One Bite Backups"
+  },
+  "retentionCount": 3,
+  "schedule": {
+    "enabled": true,
+    "frequency": "daily",
+    "time": "18:30"
+  },
+  "reminders": {
+    "enabled": true,
+    "staleDays": 7
+  },
+  "jobs": [
+    {
+      "id": "documents",
+      "name": "Documents",
+      "path": "%USERPROFILE%\\Documents",
+      "type": "folder",
+      "enabled": true
+    },
+    {
+      "id": "desktop",
+      "name": "Desktop",
+      "path": "%USERPROFILE%\\Desktop",
+      "type": "folder",
+      "enabled": true
+    },
+    {
+      "id": "chrome-bookmarks",
+      "name": "Chrome Bookmarks",
+      "path": "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Bookmarks",
+      "type": "file",
+      "enabled": true
+    }
+  ],
+  "cloudCheck": {
+    "enabled": true
+  },
+  "terms": {
+    "version": "2026-03-16",
+    "acceptedAt": null,
+    "acceptedVersion": null
+  }
+}
