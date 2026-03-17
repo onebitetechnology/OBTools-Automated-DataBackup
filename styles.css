@@ -292,6 +292,24 @@ label span {
   gap: 12px;
 }
 
+.destination-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.choice-button {
+  justify-content: center;
+  min-height: 48px;
+}
+
+.choice-active {
+  background: linear-gradient(135deg, rgba(57, 210, 255, 0.24), rgba(44, 114, 255, 0.24));
+  color: #eaf6ff;
+  border: 1px solid rgba(118, 231, 255, 0.22);
+}
+
 .summary-card {
   padding: 16px;
   border-radius: 16px;

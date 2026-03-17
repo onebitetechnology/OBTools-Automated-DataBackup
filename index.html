@@ -192,28 +192,16 @@
             <p class="hint">Pick the external drive or an existing folder on that drive.</p>
             <button id="browse-destination" class="secondary" type="button">Browse For Backup Folder</button>
           </div>
-          <div class="grid two">
-            <label>
-              <span>Detection Mode</span>
-              <select id="destination-mode">
-                <option value="driveLetter">Drive Letter</option>
-                <option value="label">Volume Label</option>
-              </select>
-            </label>
-            <label>
-              <span>Base Folder</span>
-              <input id="destination-base-folder" type="text" placeholder="One Bite Backups">
-            </label>
-            <label>
-              <span>Drive Letter</span>
-              <input id="destination-drive-letter" type="text" placeholder="E">
-            </label>
-            <label>
-              <span>Volume Label</span>
-              <input id="destination-label" type="text" placeholder="BackupDrive">
-            </label>
+          <div class="destination-choice-grid">
+            <button id="use-managed-folder" class="ghost choice-button" type="button">Create or Use "One Bite Backups"</button>
+            <button id="use-existing-folder" class="ghost choice-button" type="button">Use The Selected Existing Folder</button>
           </div>
-          <p id="destination-picked-summary" class="hint">No backup folder selected yet.</p>
+          <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
+          <p id="destination-mode-summary" class="hint">The app will create and maintain a One Bite Backups folder on the selected drive.</p>
+          <input id="destination-mode" type="hidden" value="driveLetter">
+          <input id="destination-base-folder" type="hidden">
+          <input id="destination-drive-letter" type="hidden">
+          <input id="destination-label" type="hidden">
         </section>
 
         <section class="settings-section">

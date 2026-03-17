@@ -4,7 +4,9 @@
     "mode": "driveLetter",
     "driveLetter": "",
     "label": "",
-    "baseFolder": "One Bite Backups"
+    "baseFolder": "One Bite Backups",
+    "folderMode": "managed",
+    "selectedPath": ""
   },
   "retentionCount": 3,
   "schedule": {

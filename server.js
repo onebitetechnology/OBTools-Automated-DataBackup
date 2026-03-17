@@ -18,6 +18,26 @@ function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function defaultStatus() {
+  return {
+    lastBackupAt: null,
+    lastBackupResult: null,
+    lastBackupMessage: "No backups have been run yet.",
+    destinationStatus: "Unknown",
+    recentSnapshots: [],
+    cloud: {
+      checkedAt: null,
+      summary: "Cloud check has not been run yet.",
+      level: "info",
+      recommendations: []
+    },
+    automation: {
+      installedAt: null,
+      message: "Windows automation has not been installed yet."
+    }
+  };
+}
+
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json"
@@ -111,15 +131,7 @@ function runPowerShell(scriptName) {
     }
 
     const scriptPath = path.join(WINDOWS_DIR, scriptName);
-    const preferredShell = path.join(
-      process.env.SystemRoot || "C:\\Windows",
-      "System32",
-      "WindowsPowerShell",
-      "v1.0",
-      "powershell.exe"
-    );
-    const shellCommand = fs.existsSync(preferredShell) ? preferredShell : "powershell.exe";
-    const child = spawn(shellCommand, [
+    const args = [
       "-NoProfile",
       "-ExecutionPolicy",
       "Bypass",
@@ -129,47 +141,113 @@ function runPowerShell(scriptName) {
       CONFIG_PATH,
       "-StatusPath",
       STATUS_PATH
-    ], {
-      cwd: ROOT
-    });
+    ];
 
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
+    const shellCandidates = [
+      path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+      path.join(process.env.SystemRoot || "C:\\Windows", "SysWOW64", "WindowsPowerShell", "v1.0", "powershell.exe"),
+      path.join(process.env.ProgramFiles || "C:\\Program Files", "PowerShell", "7", "pwsh.exe"),
+      "powershell.exe",
+      "pwsh.exe"
+    ];
 
-    child.on("error", (error) => {
-      if (settled) {
+    const tryShell = (index) => {
+      if (index >= shellCandidates.length) {
+        const cmdPath = process.env.ComSpec || path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe");
+        const commandLine = `"powershell.exe" ${args.map((value) => `"${value}"`).join(" ")}`;
+        const child = spawn(cmdPath, ["/d", "/s", "/c", commandLine], {
+          cwd: ROOT
+        });
+
+        let stdout = "";
+        let stderr = "";
+        let settled = false;
+
+        child.on("error", (error) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          resolve({
+            ok: false,
+            code: -1,
+            message: `PowerShell could not be found on this Windows system. ${error.message}`
+          });
+        });
+
+        child.stdout.on("data", (chunk) => {
+          stdout += chunk.toString();
+        });
+
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+
+        child.on("close", (code) => {
+          if (settled) {
+            return;
+          }
+
+          settled = true;
+          resolve({
+            ok: code === 0,
+            code,
+            message: stderr.trim() || stdout.trim() || `Exited with code ${code}.`
+          });
+        });
         return;
       }
 
-      settled = true;
-      resolve({
-        ok: false,
-        code: -1,
-        message: `Failed to launch PowerShell: ${error.message}`
+      const child = spawn(shellCandidates[index], args, {
+        cwd: ROOT
       });
-    });
 
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
 
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
+      child.on("error", (error) => {
+        if (settled) {
+          return;
+        }
 
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
+        settled = true;
+        if (error.code === "ENOENT") {
+          tryShell(index + 1);
+          return;
+        }
 
-      settled = true;
-      resolve({
-        ok: code === 0,
-        code,
-        message: stderr.trim() || stdout.trim() || `Exited with code ${code}.`
+        resolve({
+          ok: false,
+          code: -1,
+          message: `Failed to launch PowerShell: ${error.message}`
+        });
       });
-    });
+
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("close", (code) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        resolve({
+          ok: code === 0,
+          code,
+          message: stderr.trim() || stdout.trim() || `Exited with code ${code}.`
+        });
+      });
+    };
+
+    tryShell(0);
   });
 }
 
@@ -293,5 +371,14 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(PORT, () => {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  const status = readJson(STATUS_PATH);
+  if (
+    (typeof status.lastBackupMessage === "string" && status.lastBackupMessage.startsWith("Preview mode:")) ||
+    status.destinationStatus === "Preview Mode" ||
+    (typeof status.cloud?.summary === "string" && status.cloud.summary.startsWith("Preview mode:")) ||
+    (typeof status.automation?.message === "string" && status.automation.message.startsWith("Preview mode:"))
+  ) {
+    writeJson(STATUS_PATH, defaultStatus());
+  }
   console.log(`One Bite Technology Backup Companion running at http://localhost:${PORT}`);
 });

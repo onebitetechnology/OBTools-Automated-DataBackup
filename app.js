@@ -21,6 +21,7 @@ const el = {
   destinationLabel: document.getElementById("destination-label"),
   destinationBaseFolder: document.getElementById("destination-base-folder"),
   destinationPickedSummary: document.getElementById("destination-picked-summary"),
+  destinationModeSummary: document.getElementById("destination-mode-summary"),
   retentionCount: document.getElementById("retention-count"),
   scheduleEnabled: document.getElementById("schedule-enabled"),
   scheduleFrequency: document.getElementById("schedule-frequency"),
@@ -33,6 +34,8 @@ const el = {
   runCloudCheck: document.getElementById("run-cloud-check"),
   installAutomation: document.getElementById("install-automation"),
   browseDestination: document.getElementById("browse-destination"),
+  useManagedFolder: document.getElementById("use-managed-folder"),
+  useExistingFolder: document.getElementById("use-existing-folder"),
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
   settingsDrawer: document.getElementById("settings-drawer"),
@@ -96,6 +99,15 @@ async function desktopRequest(url, options = {}) {
 function normalizeConfig(config) {
   return {
     ...config,
+    destination: {
+      mode: "driveLetter",
+      driveLetter: "",
+      label: "",
+      baseFolder: "One Bite Backups",
+      folderMode: "managed",
+      selectedPath: "",
+      ...(config.destination || {})
+    },
     cloudCheck: {
       enabled: true,
       ...(config.cloudCheck || {})
@@ -110,20 +122,35 @@ function normalizeConfig(config) {
 }
 
 function normalizeStatus(status) {
+  const shouldResetPreviewStatus =
+    (typeof status.lastBackupMessage === "string" &&
+      status.lastBackupMessage.startsWith("Preview mode:")) ||
+    status.destinationStatus === "Preview Mode" ||
+    (typeof status.cloud?.summary === "string" && status.cloud.summary.startsWith("Preview mode:")) ||
+    (typeof status.automation?.message === "string" && status.automation.message.startsWith("Preview mode:"));
+
   return {
-    ...status,
-    recentSnapshots: status.recentSnapshots || [],
+    ...(shouldResetPreviewStatus
+      ? {
+          lastBackupAt: null,
+          lastBackupResult: null,
+          lastBackupMessage: "No backups have been run yet.",
+          destinationStatus: "Unknown",
+          recentSnapshots: []
+        }
+      : status),
+    recentSnapshots: shouldResetPreviewStatus ? [] : status.recentSnapshots || [],
     cloud: {
       checkedAt: null,
       summary: "Cloud check has not been run yet.",
       level: "info",
       recommendations: [],
-      ...(status.cloud || {})
+      ...(shouldResetPreviewStatus ? {} : status.cloud || {})
     },
     automation: {
       installedAt: null,
       message: "Windows automation has not been installed yet.",
-      ...(status.automation || {})
+      ...(shouldResetPreviewStatus ? {} : status.automation || {})
     }
   };
 }
@@ -267,11 +294,10 @@ function closeSettingsDrawer() {
 
 function renderSettingsSummary() {
   const { destination, retentionCount, schedule } = state.config;
-  if (destination.mode === "label" && destination.label) {
-    el.settingsDestinationSummary.textContent = `Label: ${destination.label}`;
+  if (destination.selectedPath) {
+    el.settingsDestinationSummary.textContent = destination.selectedPath;
   } else if (destination.driveLetter) {
-    const folderSuffix = destination.baseFolder ? `\\${destination.baseFolder}` : "";
-    el.settingsDestinationSummary.textContent = `Drive ${destination.driveLetter.replace(":", "")}: ${folderSuffix || "\\\\"}`;
+    el.settingsDestinationSummary.textContent = `Drive ${destination.driveLetter.replace(":", "")}:`;
   } else {
     el.settingsDestinationSummary.textContent = "Not configured";
   }
@@ -308,13 +334,22 @@ function renderConfig() {
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
   el.destinationBaseFolder.value = destination.baseFolder;
-  if (destination.driveLetter) {
-    const folderSuffix = destination.baseFolder ? `\\${destination.baseFolder}` : "\\";
-    el.destinationPickedSummary.textContent = `Selected: ${destination.driveLetter.replace(":", "")}:${folderSuffix}`;
-  } else if (destination.label) {
-    el.destinationPickedSummary.textContent = `Selected by volume label: ${destination.label}`;
+  if (destination.selectedPath) {
+    el.destinationPickedSummary.textContent = `Selected: ${destination.selectedPath}`;
+  } else if (destination.driveLetter) {
+    el.destinationPickedSummary.textContent = `Selected drive: ${destination.driveLetter.replace(":", "")}:`;
   } else {
-    el.destinationPickedSummary.textContent = "No backup folder selected yet.";
+    el.destinationPickedSummary.textContent = "No backup drive or folder selected yet.";
+  }
+
+  if (destination.folderMode === "existing") {
+    el.destinationModeSummary.textContent = "The app will store backups inside the folder you selected.";
+    el.useExistingFolder.classList.add("choice-active");
+    el.useManagedFolder.classList.remove("choice-active");
+  } else {
+    el.destinationModeSummary.textContent = 'The app will create and maintain a "One Bite Backups" folder on the selected drive.';
+    el.useManagedFolder.classList.add("choice-active");
+    el.useExistingFolder.classList.remove("choice-active");
   }
   el.retentionCount.value = retentionCount;
   el.scheduleEnabled.checked = Boolean(schedule.enabled);
@@ -336,7 +371,9 @@ function collectConfig() {
       mode: el.destinationMode.value,
       driveLetter: el.destinationDriveLetter.value.trim(),
       label: el.destinationLabel.value.trim(),
-      baseFolder: el.destinationBaseFolder.value.trim()
+      baseFolder: el.destinationBaseFolder.value.trim(),
+      folderMode: state.config.destination.folderMode || "managed",
+      selectedPath: state.config.destination.selectedPath || ""
     },
     retentionCount: Number(el.retentionCount.value || 3),
     schedule: {
@@ -422,11 +459,38 @@ async function browseDestinationFolder() {
     return;
   }
 
+  state.config.destination.selectedPath = selected.displayPath;
   el.destinationMode.value = "driveLetter";
   el.destinationDriveLetter.value = selected.driveLetter;
   el.destinationLabel.value = "";
-  el.destinationBaseFolder.value = selected.baseFolder;
-  el.destinationPickedSummary.textContent = `Selected: ${selected.displayPath}`;
+  if ((state.config.destination.folderMode || "managed") === "existing") {
+    el.destinationBaseFolder.value = selected.baseFolder;
+  } else {
+    el.destinationBaseFolder.value = "One Bite Backups";
+  }
+  renderConfig();
+}
+
+function setDestinationFolderMode(folderMode) {
+  state.config.destination.folderMode = folderMode;
+
+  if (folderMode === "existing") {
+    const selectedPath = state.config.destination.selectedPath || "";
+    if (!selectedPath) {
+      el.destinationModeSummary.textContent = "Choose a folder first, then use it as the existing backup folder.";
+      return;
+    }
+
+    const rootPath = `${state.config.destination.driveLetter}:\\`;
+    const relativeFolder = selectedPath.startsWith(rootPath)
+      ? selectedPath.slice(rootPath.length).replaceAll("/", "\\")
+      : el.destinationBaseFolder.value.trim();
+    el.destinationBaseFolder.value = relativeFolder;
+  } else {
+    el.destinationBaseFolder.value = "One Bite Backups";
+  }
+
+  renderConfig();
 }
 
 el.saveConfig.addEventListener("click", saveConfig);
@@ -438,6 +502,12 @@ el.browseDestination.addEventListener("click", () => {
     el.protectionState.textContent = "Unavailable";
     el.protectionMessage.textContent = error.message;
   });
+});
+el.useManagedFolder.addEventListener("click", () => {
+  setDestinationFolderMode("managed");
+});
+el.useExistingFolder.addEventListener("click", () => {
+  setDestinationFolderMode("existing");
 });
 el.openSettings.addEventListener("click", openSettingsDrawer);
 el.closeSettings.addEventListener("click", closeSettingsDrawer);
