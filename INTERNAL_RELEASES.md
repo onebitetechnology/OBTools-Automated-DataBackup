@@ -36,13 +36,21 @@ npm install
 npm run dist:win
 ```
 
-3. Publish a draft GitHub release with the installer and update metadata:
+3. GitHub Actions can now build the Windows installer automatically on pushes to `main` and on manual runs.
+
+Workflow file:
+
+```text
+.github/workflows/build-windows-installer.yml
+```
+
+4. Publish a draft GitHub release with the installer and update metadata:
 
 ```bash
 GH_TOKEN=your_github_token npm run release:win
 ```
 
-4. For manual internal testing, you can still upload the generated installer from `dist/` or share it directly.
+5. For manual internal testing, you can still upload the generated installer from `dist/` or share it directly.
 
 ## Internet Updates
 

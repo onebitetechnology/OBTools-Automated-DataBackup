@@ -28,6 +28,7 @@
     "productName": "OBTools Automated Backups",
     "files": [
       "app.js",
+      "assets/**/*",
       "index.html",
       "main.js",
       "preload.js",
