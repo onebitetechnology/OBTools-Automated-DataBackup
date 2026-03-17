@@ -1,6 +1,7 @@
 const state = {
   config: null,
   status: null,
+  meta: null,
   termsBypassedForSession: false
 };
 
@@ -42,6 +43,9 @@ const el = {
   settingsDestinationSummary: document.getElementById("settings-destination-summary"),
   settingsRetentionSummary: document.getElementById("settings-retention-summary"),
   settingsScheduleSummary: document.getElementById("settings-schedule-summary"),
+  appVersion: document.getElementById("app-version"),
+  updateStatus: document.getElementById("update-status"),
+  checkUpdates: document.getElementById("check-updates"),
   addJob: document.getElementById("add-job"),
   jobTemplate: document.getElementById("job-template"),
   termsGate: document.getElementById("terms-gate"),
@@ -91,6 +95,10 @@ async function desktopRequest(url, options = {}) {
 
   if (url === "/api/install-automation" && options.method === "POST") {
     return window.onebiteDesktop.installAutomation();
+  }
+
+  if (url === "/api/check-updates" && options.method === "POST") {
+    return window.onebiteDesktop.checkForUpdates();
   }
 
   throw new Error(`Unsupported desktop request: ${url}`);
@@ -165,6 +173,15 @@ function formatDate(value) {
 
 function protectionSummary(status) {
   const staleDays = state.config?.reminders?.staleDays || 7;
+  const backupMessage = status.lastBackupMessage || "The latest backup needs review.";
+
+  if (status.destinationStatus === "Drive Not Connected") {
+    return {
+      tone: "warning",
+      title: "Backup Drive Missing",
+      message: "Reconnect the selected backup drive, then run the backup again."
+    };
+  }
 
   if (!status.lastBackupAt) {
     return {
@@ -178,7 +195,7 @@ function protectionSummary(status) {
     return {
       tone: "error",
       title: "Issue Detected",
-      message: status.lastBackupMessage || "The last backup needs review."
+      message: backupMessage
     };
   }
 
@@ -194,8 +211,23 @@ function protectionSummary(status) {
   return {
     tone: "good",
     title: "Up To Date",
-    message: status.lastBackupMessage || "The latest backup looks healthy."
+    message: backupMessage || "The latest backup looks healthy."
   };
+}
+
+function friendlyBackupMessage(status) {
+  if (status.destinationStatus === "Drive Not Connected") {
+    return "The selected backup drive is not connected. Plug it in and run the backup again.";
+  }
+
+  return status.lastBackupMessage || "No backup history yet.";
+}
+
+function renderMeta() {
+  const version = state.meta?.version || "Unknown";
+  const updateMessage = state.meta?.updateStatus?.message || "Update checks are not ready yet.";
+  el.appVersion.textContent = version;
+  el.updateStatus.textContent = updateMessage;
 }
 
 function renderJobs() {
@@ -249,7 +281,7 @@ function renderStatus() {
   el.protectionMessage.textContent = summary.message;
   el.lastBackup.textContent = formatDate(state.status.lastBackupAt);
   el.lastBackupDetail.textContent = formatDate(state.status.lastBackupAt);
-  el.lastBackupMessage.textContent = state.status.lastBackupMessage || "No backup history yet.";
+  el.lastBackupMessage.textContent = friendlyBackupMessage(state.status);
   el.cloudSummary.textContent = state.status.cloud?.summary || "Cloud check has not been run yet.";
 
   el.snapshotList.innerHTML = "";
@@ -360,6 +392,7 @@ function renderConfig() {
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
   renderJobs();
   renderSettingsSummary();
+  renderMeta();
   renderTermsGate();
 }
 
@@ -402,6 +435,7 @@ async function load() {
   const payload = await request("/api/state");
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
+  state.meta = payload.meta || null;
   renderConfig();
   renderStatus();
 }
@@ -414,6 +448,7 @@ async function saveConfig() {
   });
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
+  state.meta = payload.meta || state.meta;
   renderConfig();
   renderStatus();
   closeSettingsDrawer();
@@ -435,6 +470,7 @@ async function acceptTerms() {
   });
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
+  state.meta = payload.meta || state.meta;
   renderConfig();
   renderStatus();
 }
@@ -444,8 +480,19 @@ async function invokeAction(path) {
   const payload = await request(path, {
     method: "POST"
   });
-  state.status = payload.status;
+  state.status = normalizeStatus(payload.status);
+  state.meta = payload.meta || state.meta;
   renderStatus();
+  renderMeta();
+}
+
+async function checkForUpdates() {
+  el.updateStatus.textContent = "Checking for updates...";
+  const payload = await request("/api/check-updates", {
+    method: "POST"
+  });
+  state.meta = payload.meta || state.meta;
+  renderMeta();
 }
 
 async function browseDestinationFolder() {
@@ -497,6 +544,11 @@ el.saveConfig.addEventListener("click", saveConfig);
 el.runBackup.addEventListener("click", () => invokeAction("/api/run-backup"));
 el.runCloudCheck.addEventListener("click", () => invokeAction("/api/check-cloud"));
 el.installAutomation.addEventListener("click", () => invokeAction("/api/install-automation"));
+el.checkUpdates.addEventListener("click", () => {
+  checkForUpdates().catch((error) => {
+    el.updateStatus.textContent = error.message;
+  });
+});
 el.browseDestination.addEventListener("click", () => {
   browseDestinationFolder().catch((error) => {
     el.protectionState.textContent = "Unavailable";

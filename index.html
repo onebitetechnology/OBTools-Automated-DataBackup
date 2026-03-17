@@ -65,7 +65,7 @@
             <article class="step-card">
               <p class="step-number">02</p>
               <h4>Choose a backup drive</h4>
-              <p>Use a drive letter or volume label so the app can find the right USB or HDD.</p>
+              <p>Browse to the right USB or external HDD, then use its existing folder or let the app create one.</p>
             </article>
             <article class="step-card">
               <p class="step-number">03</p>
@@ -248,6 +248,23 @@
               <input id="cloud-check-enabled" type="checkbox">
               <span>Include cloud health checks</span>
             </label>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <h4>App Updates</h4>
+            <button id="check-updates" class="secondary" type="button">Check For Updates</button>
+          </div>
+          <div class="grid two">
+            <div>
+              <span class="metric-label">Installed Version</span>
+              <p id="app-version" class="settings-meta-value">Loading...</p>
+            </div>
+            <div>
+              <span class="metric-label">Update Status</span>
+              <p id="update-status" class="settings-meta-value">Checking update support...</p>
+            </div>
           </div>
         </section>
 

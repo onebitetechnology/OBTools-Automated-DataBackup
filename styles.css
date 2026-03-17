@@ -646,6 +646,13 @@ select:focus {
   margin: 0;
 }
 
+.settings-meta-value {
+  margin: 6px 0 0;
+  color: #ecf7ff;
+  font-size: 0.98rem;
+  line-height: 1.45;
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;

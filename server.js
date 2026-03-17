@@ -10,6 +10,7 @@ const STATUS_PATH = path.join(DATA_DIR, "status.json");
 const WINDOWS_DIR = path.join(ROOT, "windows");
 const PORT = Number(process.env.PORT || 3200);
 const SHELL_WORK_DIR = ROOT;
+const APP_VERSION = require(path.join(ROOT, "package.json")).version;
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -78,6 +79,34 @@ function mergeStatus(patch) {
   };
   writeJson(STATUS_PATH, next);
   return next;
+}
+
+function appMeta() {
+  return {
+    version: APP_VERSION,
+    updateStatus: {
+      supported: false,
+      checkedAt: null,
+      message: "Update checks are available in the installed Windows app.",
+      updateAvailable: false
+    }
+  };
+}
+
+function deriveDestinationStatus(message, ok) {
+  if (ok) {
+    return "Connected";
+  }
+
+  if (!message) {
+    return "Unknown";
+  }
+
+  if (/destination drive is not available/i.test(message) || /no destination drive could be resolved/i.test(message)) {
+    return "Drive Not Connected";
+  }
+
+  return "Issue Detected";
 }
 
 function simulateAction(scriptName) {
@@ -295,7 +324,8 @@ async function handleApi(request, response) {
   if (request.method === "GET" && request.url === "/api/state") {
     sendJson(response, 200, {
       config: readJson(CONFIG_PATH),
-      status: readJson(STATUS_PATH)
+      status: readJson(STATUS_PATH),
+      meta: appMeta()
     });
     return;
   }
@@ -305,7 +335,8 @@ async function handleApi(request, response) {
     writeJson(CONFIG_PATH, config);
     sendJson(response, 200, {
       config,
-      status: readJson(STATUS_PATH)
+      status: readJson(STATUS_PATH),
+      meta: appMeta()
     });
     return;
   }
@@ -313,10 +344,11 @@ async function handleApi(request, response) {
   if (request.method === "POST" && request.url === "/api/run-backup") {
     const result = await runPowerShell("backup-engine.ps1");
     const status = mergeStatus({
+      destinationStatus: deriveDestinationStatus(result.message, result.ok),
       lastBackupResult: result.ok ? "success" : "error",
       lastBackupMessage: result.message
     });
-    sendJson(response, 200, { status });
+    sendJson(response, 200, { status, meta: appMeta() });
     return;
   }
 
@@ -329,7 +361,7 @@ async function handleApi(request, response) {
         summary: result.message || "Cloud check completed."
       }
     });
-    sendJson(response, 200, { status });
+    sendJson(response, 200, { status, meta: appMeta() });
     return;
   }
 
@@ -338,7 +370,14 @@ async function handleApi(request, response) {
     const status = mergeStatus({
       lastBackupMessage: result.message
     });
-    sendJson(response, 200, { status });
+    sendJson(response, 200, { status, meta: appMeta() });
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/api/check-updates") {
+    sendJson(response, 200, {
+      meta: appMeta()
+    });
     return;
   }
 

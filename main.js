@@ -15,6 +15,23 @@ const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : APP_ROOT;
 const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
 const WINDOWS_DIR = path.join(RESOURCE_ROOT, "windows");
 const SHELL_WORK_DIR = RESOURCE_ROOT;
+let updateStatus = {
+  supported: false,
+  checkedAt: null,
+  message: "Update checks are only available in the installed Windows app.",
+  updateAvailable: false
+};
+
+function writeLauncherLog(message) {
+  try {
+    const logRoot = app.isReady() ? app.getPath("userData") : app.getPath("temp");
+    const logPath = path.join(logRoot, "obtools-launcher.log");
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch (_error) {
+    // Logging should never crash the app.
+  }
+}
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -84,6 +101,29 @@ function mergeStatus(patch) {
   };
   writeJson(statusPath, next);
   return next;
+}
+
+function appMeta() {
+  return {
+    version: app.getVersion(),
+    updateStatus
+  };
+}
+
+function deriveDestinationStatus(message, ok) {
+  if (ok) {
+    return "Connected";
+  }
+
+  if (!message) {
+    return "Unknown";
+  }
+
+  if (/destination drive is not available/i.test(message) || /no destination drive could be resolved/i.test(message)) {
+    return "Drive Not Connected";
+  }
+
+  return "Issue Detected";
 }
 
 function simulateAction(scriptName) {
@@ -279,6 +319,7 @@ function runPowerShell(scriptName) {
 }
 
 function createWindow() {
+  writeLauncherLog("Creating main window.");
   const window = new BrowserWindow({
     width: 1360,
     height: 920,
@@ -296,24 +337,85 @@ function createWindow() {
 
 function configureAutoUpdates() {
   if (!autoUpdater || !app.isPackaged || process.platform !== "win32") {
+    updateStatus = {
+      supported: false,
+      checkedAt: null,
+      message: "Update checks are only available in the installed Windows app.",
+      updateAvailable: false
+    };
     return;
   }
 
+  updateStatus = {
+    supported: true,
+    checkedAt: null,
+    message: "Check for updates to look for new internal releases.",
+    updateAvailable: false
+  };
+
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+
+  autoUpdater.on("checking-for-update", () => {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: "Checking for updates...",
+      updateAvailable: false
+    };
+  });
+
+  autoUpdater.on("update-available", (info) => {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Update ${info?.version || "available"} is ready to download through the release process.`,
+      updateAvailable: true
+    };
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: "This machine is already on the latest published build.",
+      updateAvailable: false
+    };
+  });
+
+  autoUpdater.on("error", (error) => {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Update check failed: ${error.message}`,
+      updateAvailable: false
+    };
+  });
 }
 
 app.whenReady().then(() => {
+  writeLauncherLog("App ready. Initializing data and window.");
   ensureDataFiles();
-  createWindow();
   configureAutoUpdates();
+  createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+});
+
+process.on("uncaughtException", (error) => {
+  writeLauncherLog(`Uncaught exception: ${error.stack || error.message}`);
+  if (app.isReady()) {
+    dialog.showErrorBox("OBTools Automated Backups", error.message);
+  }
+});
+
+process.on("unhandledRejection", (error) => {
+  const message = error && typeof error === "object" && "stack" in error ? error.stack : String(error);
+  writeLauncherLog(`Unhandled rejection: ${message}`);
 });
 
 app.on("window-all-closed", () => {
@@ -326,7 +428,8 @@ ipcMain.handle("state:get", () => {
   const { configPath, statusPath } = dataPaths();
   return {
     config: readJson(configPath),
-    status: readJson(statusPath)
+    status: readJson(statusPath),
+    meta: appMeta()
   };
 });
 
@@ -335,7 +438,8 @@ ipcMain.handle("config:save", (_event, config) => {
   writeJson(configPath, config);
   return {
     config,
-    status: readJson(statusPath)
+    status: readJson(statusPath),
+    meta: appMeta()
   };
 });
 
@@ -377,9 +481,11 @@ ipcMain.handle("backup:run", async () => {
   const result = await runPowerShell("backup-engine.ps1");
   return {
     status: mergeStatus({
+      destinationStatus: deriveDestinationStatus(result.message, result.ok),
       lastBackupResult: result.ok ? "success" : "error",
       lastBackupMessage: result.message
-    })
+    }),
+    meta: appMeta()
   };
 });
 
@@ -393,7 +499,8 @@ ipcMain.handle("cloud:check", async () => {
         checkedAt: new Date().toISOString(),
         summary: result.message || "Cloud check completed."
       }
-    })
+    }),
+    meta: appMeta()
   };
 });
 
@@ -402,6 +509,30 @@ ipcMain.handle("automation:install", async () => {
   return {
     status: mergeStatus({
       lastBackupMessage: result.message
-    })
+    }),
+    meta: appMeta()
+  };
+});
+
+ipcMain.handle("updates:check", async () => {
+  if (!updateStatus.supported || !autoUpdater) {
+    return {
+      meta: appMeta()
+    };
+  }
+
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Update check failed: ${error.message}`,
+      updateAvailable: false
+    };
+  }
+
+  return {
+    meta: appMeta()
   };
 });
