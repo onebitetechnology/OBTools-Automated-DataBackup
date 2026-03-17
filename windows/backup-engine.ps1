@@ -65,7 +65,11 @@ if (-not (Test-Path -LiteralPath $driveRoot)) {
   throw "Destination drive is not available: $driveRoot"
 }
 
-$baseRoot = Join-Path $driveRoot $config.destination.baseFolder
+$baseRoot = if ([string]::IsNullOrWhiteSpace($config.destination.baseFolder)) {
+  $driveRoot
+} else {
+  Join-Path $driveRoot $config.destination.baseFolder
+}
 $currentRoot = Join-Path $baseRoot "current"
 $snapshotsRoot = Join-Path $baseRoot "snapshots"
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"

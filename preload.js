@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   runBackup: () => ipcRenderer.invoke("backup:run"),
   checkCloud: () => ipcRenderer.invoke("cloud:check"),
   installAutomation: () => ipcRenderer.invoke("automation:install"),
-  pickPath: (type) => ipcRenderer.invoke("job:pick-path", type)
+  pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),
+  pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder")
 });

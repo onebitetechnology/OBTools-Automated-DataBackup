@@ -125,12 +125,34 @@ function runPowerShell(scriptName) {
       args.push("-ScriptRoot", WINDOWS_DIR);
     }
 
-    const child = spawn("powershell.exe", args, {
+    const preferredShell = path.join(
+      process.env.SystemRoot || "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const shellCommand = fs.existsSync(preferredShell) ? preferredShell : "powershell.exe";
+    const child = spawn(shellCommand, args, {
       cwd: APP_ROOT
     });
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      resolve({
+        ok: false,
+        code: -1,
+        message: `Failed to launch PowerShell: ${error.message}`
+      });
+    });
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -141,6 +163,11 @@ function runPowerShell(scriptName) {
     });
 
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
       resolve({
         ok: code === 0,
         code,
@@ -222,6 +249,27 @@ ipcMain.handle("job:pick-path", async (_event, type) => {
   }
 
   return result.filePaths[0];
+});
+
+ipcMain.handle("destination:pick-folder", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory"]
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  const selectedPath = result.filePaths[0];
+  const rootPath = path.parse(selectedPath).root;
+  const driveLetter = rootPath.replace(/\\+$/, "").replace(":", "");
+  const relativeFolder = path.relative(rootPath, selectedPath);
+
+  return {
+    driveLetter,
+    baseFolder: relativeFolder === "" ? "" : relativeFolder,
+    displayPath: selectedPath
+  };
 });
 
 ipcMain.handle("backup:run", async () => {

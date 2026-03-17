@@ -20,6 +20,7 @@ const el = {
   destinationDriveLetter: document.getElementById("destination-drive-letter"),
   destinationLabel: document.getElementById("destination-label"),
   destinationBaseFolder: document.getElementById("destination-base-folder"),
+  destinationPickedSummary: document.getElementById("destination-picked-summary"),
   retentionCount: document.getElementById("retention-count"),
   scheduleEnabled: document.getElementById("schedule-enabled"),
   scheduleFrequency: document.getElementById("schedule-frequency"),
@@ -31,6 +32,7 @@ const el = {
   runBackup: document.getElementById("run-backup"),
   runCloudCheck: document.getElementById("run-cloud-check"),
   installAutomation: document.getElementById("install-automation"),
+  browseDestination: document.getElementById("browse-destination"),
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
   settingsDrawer: document.getElementById("settings-drawer"),
@@ -268,7 +270,8 @@ function renderSettingsSummary() {
   if (destination.mode === "label" && destination.label) {
     el.settingsDestinationSummary.textContent = `Label: ${destination.label}`;
   } else if (destination.driveLetter) {
-    el.settingsDestinationSummary.textContent = `Drive ${destination.driveLetter.replace(":", "")}:`;
+    const folderSuffix = destination.baseFolder ? `\\${destination.baseFolder}` : "";
+    el.settingsDestinationSummary.textContent = `Drive ${destination.driveLetter.replace(":", "")}: ${folderSuffix || "\\\\"}`;
   } else {
     el.settingsDestinationSummary.textContent = "Not configured";
   }
@@ -305,6 +308,14 @@ function renderConfig() {
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
   el.destinationBaseFolder.value = destination.baseFolder;
+  if (destination.driveLetter) {
+    const folderSuffix = destination.baseFolder ? `\\${destination.baseFolder}` : "\\";
+    el.destinationPickedSummary.textContent = `Selected: ${destination.driveLetter.replace(":", "")}:${folderSuffix}`;
+  } else if (destination.label) {
+    el.destinationPickedSummary.textContent = `Selected by volume label: ${destination.label}`;
+  } else {
+    el.destinationPickedSummary.textContent = "No backup folder selected yet.";
+  }
   el.retentionCount.value = retentionCount;
   el.scheduleEnabled.checked = Boolean(schedule.enabled);
   el.scheduleFrequency.value = schedule.frequency;
@@ -400,10 +411,34 @@ async function invokeAction(path) {
   renderStatus();
 }
 
+async function browseDestinationFolder() {
+  if (!window.onebiteDesktop?.pickDestinationFolder) {
+    el.destinationPickedSummary.textContent = "Destination browsing is available in the installed desktop app.";
+    return;
+  }
+
+  const selected = await window.onebiteDesktop.pickDestinationFolder();
+  if (!selected) {
+    return;
+  }
+
+  el.destinationMode.value = "driveLetter";
+  el.destinationDriveLetter.value = selected.driveLetter;
+  el.destinationLabel.value = "";
+  el.destinationBaseFolder.value = selected.baseFolder;
+  el.destinationPickedSummary.textContent = `Selected: ${selected.displayPath}`;
+}
+
 el.saveConfig.addEventListener("click", saveConfig);
 el.runBackup.addEventListener("click", () => invokeAction("/api/run-backup"));
 el.runCloudCheck.addEventListener("click", () => invokeAction("/api/check-cloud"));
 el.installAutomation.addEventListener("click", () => invokeAction("/api/install-automation"));
+el.browseDestination.addEventListener("click", () => {
+  browseDestinationFolder().catch((error) => {
+    el.protectionState.textContent = "Unavailable";
+    el.protectionMessage.textContent = error.message;
+  });
+});
 el.openSettings.addEventListener("click", openSettingsDrawer);
 el.closeSettings.addEventListener("click", closeSettingsDrawer);
 el.addJob.addEventListener("click", () => {

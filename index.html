@@ -188,6 +188,10 @@
 
         <section class="settings-section">
           <h4>Destination</h4>
+          <div class="settings-section-head compact">
+            <p class="hint">Pick the external drive or an existing folder on that drive.</p>
+            <button id="browse-destination" class="secondary" type="button">Browse For Backup Folder</button>
+          </div>
           <div class="grid two">
             <label>
               <span>Detection Mode</span>
@@ -209,6 +213,7 @@
               <input id="destination-label" type="text" placeholder="BackupDrive">
             </label>
           </div>
+          <p id="destination-picked-summary" class="hint">No backup folder selected yet.</p>
         </section>
 
         <section class="settings-section">

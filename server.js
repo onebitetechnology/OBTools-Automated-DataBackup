@@ -111,7 +111,15 @@ function runPowerShell(scriptName) {
     }
 
     const scriptPath = path.join(WINDOWS_DIR, scriptName);
-    const child = spawn("powershell.exe", [
+    const preferredShell = path.join(
+      process.env.SystemRoot || "C:\\Windows",
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe"
+    );
+    const shellCommand = fs.existsSync(preferredShell) ? preferredShell : "powershell.exe";
+    const child = spawn(shellCommand, [
       "-NoProfile",
       "-ExecutionPolicy",
       "Bypass",
@@ -127,6 +135,20 @@ function runPowerShell(scriptName) {
 
     let stdout = "";
     let stderr = "";
+    let settled = false;
+
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      resolve({
+        ok: false,
+        code: -1,
+        message: `Failed to launch PowerShell: ${error.message}`
+      });
+    });
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -137,6 +159,11 @@ function runPowerShell(scriptName) {
     });
 
     child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
       resolve({
         ok: code === 0,
         code,

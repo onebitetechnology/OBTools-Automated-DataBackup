@@ -616,6 +616,14 @@ select:focus {
   margin-bottom: 12px;
 }
 
+.settings-section-head.compact {
+  margin-bottom: 12px;
+}
+
+.settings-section-head.compact .hint {
+  margin: 0;
+}
+
 .settings-section-head h4 {
   margin: 0;
 }
