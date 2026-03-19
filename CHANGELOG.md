@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.4 - 2026-03-18
+
+- Disabled hardware acceleration for packaged startup to reduce hidden-window and GPU-related launch failures.
+- Changed startup logging to write to the system temp directory before Electron is fully ready.
+- Changed the main window to show immediately so launch issues are easier to diagnose on affected PCs.
+
 ## 1.0.3 - 2026-03-18
 
 - Added window and renderer startup diagnostics for packaged Windows builds.

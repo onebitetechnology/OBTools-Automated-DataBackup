@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
@@ -24,7 +25,7 @@ let updateStatus = {
 
 function writeLauncherLog(message) {
   try {
-    const logRoot = app.isReady() ? app.getPath("userData") : app.getPath("temp");
+    const logRoot = app.isReady() ? app.getPath("userData") : os.tmpdir();
     const logPath = path.join(logRoot, "obtools-launcher.log");
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
@@ -32,6 +33,9 @@ function writeLauncherLog(message) {
     // Logging should never crash the app.
   }
 }
+
+app.disableHardwareAcceleration();
+writeLauncherLog("Process starting. Hardware acceleration disabled.");
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -336,7 +340,7 @@ function createWindow() {
     minHeight: 760,
     backgroundColor: "#f4efe7",
     title: "One Bite Technology Backup Companion",
-    show: false,
+    show: true,
     webPreferences: {
       preload: path.join(APP_ROOT, "preload.js")
     }
