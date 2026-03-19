@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.10 - 2026-03-19
+
+- Added estimated backup size and destination free-space analysis in Settings.
+- Clarified retention behavior in the UI and changed snapshot handling so the oldest snapshot is removed before the next backup when the limit is reached.
+- Improved destination guidance so the final backup location is shown more clearly in Settings.
+
 ## 1.0.10-beta.9 - 2026-03-19
 
 - Fixed the cloud-health footer so a completed cloud review no longer shows as “not checked.”

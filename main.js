@@ -142,6 +142,116 @@ function deriveDestinationStatus(message, ok) {
   return "Issue Detected";
 }
 
+function envValue(name) {
+  const exact = process.env[name];
+  if (exact) {
+    return exact;
+  }
+
+  const foundKey = Object.keys(process.env).find((key) => key.toLowerCase() === String(name).toLowerCase());
+  return foundKey ? process.env[foundKey] : undefined;
+}
+
+function expandEnvironmentVariables(value) {
+  return String(value || "").replace(/%([^%]+)%/g, (_match, name) => envValue(name) || `%${name}%`);
+}
+
+function resolveDestinationRoot(destination) {
+  if (!destination) {
+    return null;
+  }
+
+  if (destination.selectedPath) {
+    return path.parse(destination.selectedPath).root || null;
+  }
+
+  if (destination.driveLetter) {
+    return `${String(destination.driveLetter).replace(":", "")}:\\`;
+  }
+
+  return null;
+}
+
+function calculatePathSize(targetPath) {
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    return 0;
+  }
+
+  const stack = [targetPath];
+  let total = 0;
+
+  while (stack.length) {
+    const current = stack.pop();
+    let stats;
+
+    try {
+      stats = fs.lstatSync(current);
+    } catch (_error) {
+      continue;
+    }
+
+    if (stats.isSymbolicLink()) {
+      continue;
+    }
+
+    if (stats.isFile()) {
+      total += stats.size;
+      continue;
+    }
+
+    if (!stats.isDirectory()) {
+      continue;
+    }
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(current);
+    } catch (_error) {
+      continue;
+    }
+
+    for (const entry of entries) {
+      stack.push(path.join(current, entry));
+    }
+  }
+
+  return total;
+}
+
+function analyzeStorage(config) {
+  const destinationRoot = resolveDestinationRoot(config?.destination);
+  const enabledJobs = (config?.jobs || []).filter((job) => job.enabled);
+  const missingPaths = [];
+  let estimatedBytes = 0;
+
+  for (const job of enabledJobs) {
+    const resolvedPath = expandEnvironmentVariables(job.path);
+    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      missingPaths.push(resolvedPath || job.path || "(empty path)");
+      continue;
+    }
+    estimatedBytes += calculatePathSize(resolvedPath);
+  }
+
+  let freeBytes = null;
+  if (destinationRoot && fs.existsSync(destinationRoot) && typeof fs.statfsSync === "function") {
+    try {
+      const stats = fs.statfsSync(destinationRoot);
+      freeBytes = Number(stats.bavail) * Number(stats.bsize);
+    } catch (_error) {
+      freeBytes = null;
+    }
+  }
+
+  return {
+    estimatedBytes,
+    freeBytes,
+    destinationRoot,
+    missingPaths,
+    retentionCount: Math.max(Number(config?.retentionCount || 1), 1)
+  };
+}
+
 function detectInstalledBrowsers() {
   if (process.platform !== "win32") {
     return [];
@@ -723,6 +833,14 @@ ipcMain.handle("destination:pick-folder", async () => {
 ipcMain.handle("browsers:detect", async () => {
   return {
     browsers: detectInstalledBrowsers()
+  };
+});
+
+ipcMain.handle("storage:analyze", async () => {
+  const { configPath } = dataPaths();
+  const config = readJson(configPath);
+  return {
+    storage: analyzeStorage(config)
   };
 });
 

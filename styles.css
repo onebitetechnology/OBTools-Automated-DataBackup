@@ -812,6 +812,18 @@ select:focus {
   line-height: 1.5;
 }
 
+.storage-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.compact-summary {
+  padding: 14px;
+  min-height: 96px;
+}
+
 .updates-card {
   margin-top: 12px;
   padding: 16px;
@@ -1059,7 +1071,8 @@ select:focus {
   .insights,
   .steps-grid,
   .status-strip,
-  .settings-summary-grid {
+  .settings-summary-grid,
+  .storage-analysis-grid {
     grid-template-columns: 1fr;
   }
 

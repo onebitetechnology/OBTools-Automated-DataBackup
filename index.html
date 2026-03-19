@@ -206,6 +206,17 @@
           </div>
           <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
           <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
+          <div class="storage-analysis-grid">
+            <article class="summary-card compact-summary">
+              <p class="metric-label">Estimated Backup Size</p>
+              <p id="backup-size-estimate" class="summary-value">Waiting for analysis</p>
+            </article>
+            <article class="summary-card compact-summary">
+              <p class="metric-label">Destination Free Space</p>
+              <p id="destination-free-space" class="summary-value">Waiting for analysis</p>
+            </article>
+          </div>
+          <p id="retention-behavior-summary" class="hint">When the copy limit is reached, the oldest snapshot is removed before creating the next one.</p>
           <p id="destination-mode-summary" class="hint">The app will create and maintain a One Bite Backups folder on the selected drive.</p>
           <input id="destination-mode" type="hidden" value="driveLetter">
           <input id="destination-base-folder" type="hidden">

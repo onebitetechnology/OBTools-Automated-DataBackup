@@ -2,6 +2,7 @@ const state = {
   config: null,
   status: null,
   meta: null,
+  storage: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: []
@@ -28,6 +29,9 @@ const el = {
   destinationBaseFolder: document.getElementById("destination-base-folder"),
   destinationPickedSummary: document.getElementById("destination-picked-summary"),
   destinationFinalSummary: document.getElementById("destination-final-summary"),
+  backupSizeEstimate: document.getElementById("backup-size-estimate"),
+  destinationFreeSpace: document.getElementById("destination-free-space"),
+  retentionBehaviorSummary: document.getElementById("retention-behavior-summary"),
   destinationModeSummary: document.getElementById("destination-mode-summary"),
   retentionCount: document.getElementById("retention-count"),
   scheduleEnabled: document.getElementById("schedule-enabled"),
@@ -130,6 +134,10 @@ async function desktopRequest(url, options = {}) {
     return window.onebiteDesktop.detectBrowsers();
   }
 
+  if (url === "/api/storage-analysis") {
+    return window.onebiteDesktop.analyzeStorage();
+  }
+
   throw new Error(`Unsupported desktop request: ${url}`);
 }
 
@@ -198,6 +206,25 @@ function formatDate(value) {
   }
 
   return new Date(value).toLocaleString();
+}
+
+function formatBytes(bytes) {
+  const size = Number(bytes || 0);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = size;
+  let index = 0;
+
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+
+  const rounded = value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1);
+  return `${rounded} ${units[index]}`;
 }
 
 function protectionSummary(status) {
@@ -432,6 +459,10 @@ function addDetectedBrowserJobs() {
   });
 
   renderJobs();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
   closeBrowserModal();
 }
 
@@ -640,6 +671,34 @@ function renderSettingsSummary() {
   el.settingsScheduleSummary.textContent = `${schedule.frequency} at ${schedule.time}`;
 }
 
+function renderStorageAnalysis() {
+  if (!state.storage) {
+    el.backupSizeEstimate.textContent = "Waiting for analysis";
+    el.destinationFreeSpace.textContent = "Waiting for analysis";
+    el.retentionBehaviorSummary.textContent = "When the copy limit is reached, the oldest snapshot is removed before creating the next one.";
+    return;
+  }
+
+  el.backupSizeEstimate.textContent = formatBytes(state.storage.estimatedBytes);
+  el.destinationFreeSpace.textContent = state.storage.freeBytes == null ? "Unavailable" : formatBytes(state.storage.freeBytes);
+  el.retentionBehaviorSummary.textContent = `The app keeps ${state.storage.retentionCount} snapshot${state.storage.retentionCount === 1 ? "" : "s"}. When that limit is reached, the oldest snapshot is removed before creating the next one.`;
+}
+
+async function refreshStorageAnalysis() {
+  if (!window.onebiteDesktop?.analyzeStorage) {
+    state.storage = null;
+    renderStorageAnalysis();
+    return;
+  }
+
+  el.backupSizeEstimate.textContent = "Calculating...";
+  el.destinationFreeSpace.textContent = "Checking...";
+
+  const payload = await request("/api/storage-analysis");
+  state.storage = payload.storage || null;
+  renderStorageAnalysis();
+}
+
 function isTermsAccepted(config) {
   return Boolean(
     config?.terms?.acceptedAt &&
@@ -696,6 +755,7 @@ function renderConfig() {
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
   renderJobs();
   renderSettingsSummary();
+  renderStorageAnalysis();
   renderMeta();
   renderTermsGate();
 }
@@ -752,6 +812,10 @@ async function load() {
   }
   renderConfig();
   renderStatus();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
 }
 
 async function saveConfig() {
@@ -765,6 +829,10 @@ async function saveConfig() {
   state.meta = payload.meta || state.meta;
   renderConfig();
   renderStatus();
+  await refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
   closeSettingsDrawer();
 }
 
@@ -1030,6 +1098,10 @@ el.addJob.addEventListener("click", () => {
     enabled: true
   });
   renderJobs();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
 });
 el.detectBrowsers.addEventListener("click", () => {
   detectBrowsers().catch((error) => {

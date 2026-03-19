@@ -97,9 +97,16 @@ $currentRoot = Join-Path $baseRoot "current"
 $snapshotsRoot = Join-Path $baseRoot "snapshots"
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $snapshotPath = Join-Path $snapshotsRoot $timestamp
+$keep = [Math]::Max([int]$config.retentionCount, 1)
 
 New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
+
+$existingSnapshots = Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime
+if ($existingSnapshots.Count -ge $keep) {
+  $removeCount = ($existingSnapshots.Count - $keep) + 1
+  $existingSnapshots | Select-Object -First $removeCount | Remove-Item -Recurse -Force
+}
 
 foreach ($job in $config.jobs) {
   if ($job.enabled) {
@@ -109,7 +116,6 @@ foreach ($job in $config.jobs) {
 }
 
 $allSnapshots = Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime -Descending
-$keep = [Math]::Max([int]$config.retentionCount, 1)
 if ($allSnapshots.Count -gt $keep) {
   $allSnapshots | Select-Object -Skip $keep | Remove-Item -Recurse -Force
 }

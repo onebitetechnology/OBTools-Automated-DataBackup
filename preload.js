@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
     return () => ipcRenderer.removeListener("updates:status", listener);
   },
   detectBrowsers: () => ipcRenderer.invoke("browsers:detect"),
+  analyzeStorage: () => ipcRenderer.invoke("storage:analyze"),
   pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),
   pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder")
 });
