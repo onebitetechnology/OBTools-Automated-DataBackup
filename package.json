@@ -1,6 +1,6 @@
 {
   "name": "onebite-backup-companion",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Windows backup and sync desktop app for One Bite Technology customers.",
   "main": "main.js",
   "author": "One Bite Technology",
@@ -61,7 +61,7 @@
           "provider": "github",
           "owner": "onebitetechnology",
           "repo": "OBTools-Automated-DataBackup",
-          "releaseType": "draft"
+          "releaseType": "prerelease"
         }
       ]
     },

@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.9 - 2026-03-18
+
+- Switched GitHub publishing from draft releases to prereleases for internal update testing.
+- Configured the in-app updater to allow prerelease updates so `Check For Updates` can see internal test builds.
+- Renamed the manual GitHub Actions release job to reflect the internal prerelease flow.
+
 ## 1.0.8 - 2026-03-18
 
 - Added a result popup for cloud checks and backup runs so users get immediate feedback.
