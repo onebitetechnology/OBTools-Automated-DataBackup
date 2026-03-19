@@ -180,6 +180,7 @@ function runPowerShell(scriptName) {
 
     const { configPath, statusPath } = dataPaths();
     const scriptPath = path.join(WINDOWS_DIR, scriptName);
+    writeLauncherLog(`Running ${scriptName} with script path ${scriptPath}`);
     const args = [
       "-NoProfile",
       "-ExecutionPolicy",
@@ -219,6 +220,7 @@ function runPowerShell(scriptName) {
           path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe")
         ].filter(Boolean);
         const cmdPath = cmdCandidates.find((candidate) => fs.existsSync(candidate)) || "cmd.exe";
+        writeLauncherLog(`No direct PowerShell candidate succeeded for ${scriptName}. Falling back to ${cmdPath}.`);
         const commandLine = `"powershell.exe" ${args.map((value) => `"${value}"`).join(" ")}`;
         const child = spawn(cmdPath, ["/d", "/s", "/c", commandLine], {
           cwd: SHELL_WORK_DIR,
@@ -235,6 +237,7 @@ function runPowerShell(scriptName) {
           }
 
           settled = true;
+          writeLauncherLog(`Fallback shell launch failed for ${scriptName}: ${error.message}`);
           resolve({
             ok: false,
             code: -1,
@@ -256,6 +259,7 @@ function runPowerShell(scriptName) {
           }
 
           settled = true;
+          writeLauncherLog(`Fallback shell exited for ${scriptName} with code ${code}. stderr=${stderr.trim()} stdout=${stdout.trim()}`);
           resolve({
             ok: code === 0,
             code,
@@ -265,7 +269,9 @@ function runPowerShell(scriptName) {
         return;
       }
 
-      const child = spawn(resolvedShellCandidates[index], args, {
+      const shellPath = resolvedShellCandidates[index];
+      writeLauncherLog(`Trying shell ${shellPath} for ${scriptName}`);
+      const child = spawn(shellPath, args, {
         cwd: SHELL_WORK_DIR,
         windowsHide: true
       });
@@ -281,10 +287,12 @@ function runPowerShell(scriptName) {
 
         settled = true;
         if (error.code === "ENOENT") {
+          writeLauncherLog(`Shell not found for ${scriptName}: ${shellPath}`);
           tryShell(index + 1);
           return;
         }
 
+        writeLauncherLog(`Shell launch error for ${scriptName}: ${error.message}`);
         resolve({
           ok: false,
           code: -1,
@@ -306,6 +314,7 @@ function runPowerShell(scriptName) {
         }
 
         settled = true;
+        writeLauncherLog(`Shell exited for ${scriptName} with code ${code}. stderr=${stderr.trim()} stdout=${stdout.trim()}`);
         resolve({
           ok: code === 0,
           code,
@@ -478,7 +487,9 @@ ipcMain.handle("destination:pick-folder", async () => {
 });
 
 ipcMain.handle("backup:run", async () => {
+  writeLauncherLog("IPC backup:run received.");
   const result = await runPowerShell("backup-engine.ps1");
+  writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
   return {
     status: mergeStatus({
       destinationStatus: deriveDestinationStatus(result.message, result.ok),
@@ -490,7 +501,9 @@ ipcMain.handle("backup:run", async () => {
 });
 
 ipcMain.handle("cloud:check", async () => {
+  writeLauncherLog("IPC cloud:check received.");
   const result = await runPowerShell("check-cloud-health.ps1");
+  writeLauncherLog(`IPC cloud:check completed. ok=${result.ok} message=${result.message}`);
   const { statusPath } = dataPaths();
   return {
     status: mergeStatus({
@@ -505,7 +518,9 @@ ipcMain.handle("cloud:check", async () => {
 });
 
 ipcMain.handle("automation:install", async () => {
+  writeLauncherLog("IPC automation:install received.");
   const result = await runPowerShell("install-scheduled-backup.ps1");
+  writeLauncherLog(`IPC automation:install completed. ok=${result.ok} message=${result.message}`);
   return {
     status: mergeStatus({
       lastBackupMessage: result.message

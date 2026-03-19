@@ -2,6 +2,7 @@ const state = {
   config: null,
   status: null,
   meta: null,
+  actionInFlight: false,
   termsBypassedForSession: false
 };
 
@@ -230,6 +231,14 @@ function renderMeta() {
   el.buildVersion.textContent = `Version ${version}`;
   el.appVersion.textContent = version;
   el.updateStatus.textContent = updateMessage;
+}
+
+function setActionButtonsDisabled(disabled) {
+  state.actionInFlight = disabled;
+  el.runBackup.disabled = disabled;
+  el.runCloudCheck.disabled = disabled;
+  el.installAutomation.disabled = disabled;
+  el.checkUpdates.disabled = disabled;
 }
 
 function renderJobs() {
@@ -478,14 +487,45 @@ async function acceptTerms() {
 }
 
 async function invokeAction(path) {
-  await saveConfig();
-  const payload = await request(path, {
-    method: "POST"
-  });
-  state.status = normalizeStatus(payload.status);
-  state.meta = payload.meta || state.meta;
-  renderStatus();
-  renderMeta();
+  if (state.actionInFlight) {
+    return;
+  }
+
+  const originalTitle = el.protectionState.textContent;
+  const originalMessage = el.protectionMessage.textContent;
+  const pendingMessage = path === "/api/run-backup" ? "Running backup..." : "Checking...";
+
+  setActionButtonsDisabled(true);
+  el.protectionState.textContent = "Working";
+  el.protectionMessage.textContent = pendingMessage;
+
+  try {
+    await saveConfig();
+    const payload = await request(path, {
+      method: "POST"
+    });
+    state.status = normalizeStatus(payload.status);
+    state.meta = payload.meta || state.meta;
+    renderStatus();
+    renderMeta();
+  } catch (error) {
+    el.backupStatusCard.classList.remove("status-good", "status-warning");
+    el.backupStatusCard.classList.add("status-error");
+    el.protectionState.textContent = "Action Failed";
+    el.protectionMessage.textContent = error.message;
+    el.lastBackupMessage.textContent = error.message;
+
+    if (path === "/api/check-cloud") {
+      el.cloudSummary.textContent = error.message;
+    }
+  } finally {
+    setActionButtonsDisabled(false);
+
+    if (el.protectionState.textContent === "Working") {
+      el.protectionState.textContent = originalTitle;
+      el.protectionMessage.textContent = originalMessage;
+    }
+  }
 }
 
 async function checkForUpdates() {
@@ -543,9 +583,25 @@ function setDestinationFolderMode(folderMode) {
 }
 
 el.saveConfig.addEventListener("click", saveConfig);
-el.runBackup.addEventListener("click", () => invokeAction("/api/run-backup"));
-el.runCloudCheck.addEventListener("click", () => invokeAction("/api/check-cloud"));
-el.installAutomation.addEventListener("click", () => invokeAction("/api/install-automation"));
+el.runBackup.addEventListener("click", () => {
+  invokeAction("/api/run-backup").catch((error) => {
+    el.protectionState.textContent = "Action Failed";
+    el.protectionMessage.textContent = error.message;
+  });
+});
+el.runCloudCheck.addEventListener("click", () => {
+  invokeAction("/api/check-cloud").catch((error) => {
+    el.protectionState.textContent = "Action Failed";
+    el.protectionMessage.textContent = error.message;
+    el.cloudSummary.textContent = error.message;
+  });
+});
+el.installAutomation.addEventListener("click", () => {
+  invokeAction("/api/install-automation").catch((error) => {
+    el.protectionState.textContent = "Action Failed";
+    el.protectionMessage.textContent = error.message;
+  });
+});
 el.checkUpdates.addEventListener("click", () => {
   checkForUpdates().catch((error) => {
     el.updateStatus.textContent = error.message;
