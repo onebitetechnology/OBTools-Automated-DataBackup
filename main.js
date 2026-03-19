@@ -35,7 +35,8 @@ writeLauncherLog("Process starting. Hardware acceleration disabled.");
 let readyLogged = false;
 
 function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const raw = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+  return JSON.parse(raw);
 }
 
 function writeJson(filePath, value) {

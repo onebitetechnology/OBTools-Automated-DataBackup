@@ -13,7 +13,8 @@ const SHELL_WORK_DIR = ROOT;
 const APP_VERSION = require(path.join(ROOT, "package.json")).version;
 
 function readJson(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  const raw = fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+  return JSON.parse(raw);
 }
 
 function writeJson(filePath, value) {

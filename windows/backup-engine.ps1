@@ -13,7 +13,9 @@ function Read-Json([string]$Path) {
 }
 
 function Write-Json([string]$Path, $Value) {
-  $Value | ConvertTo-Json -Depth 8 | Set-Content -Path $Path -Encoding UTF8
+  $json = $Value | ConvertTo-Json -Depth 8
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
 function Resolve-Destination($Destination) {

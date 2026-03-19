@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.7 - 2026-03-18
+
+- Fixed packaged startup failures caused by BOM-prefixed JSON config/status files.
+- Updated the desktop app to strip UTF-8 BOM markers before parsing JSON.
+- Updated Windows backup and cloud-health scripts to write JSON without a BOM.
+
 ## 1.0.6 - 2026-03-18
 
 - Moved `electron-updater` loading out of normal startup and into the manual update-check path.
