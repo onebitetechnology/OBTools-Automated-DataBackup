@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.3 - 2026-03-18
+
+- Added window and renderer startup diagnostics for packaged Windows builds.
+- Added explicit logging for preload failures, load failures, renderer exits, and startup visibility issues.
+- Added a fallback that forces the main window to show if startup stalls before `ready-to-show`.
+
 ## 1.0.2 - 2026-03-18
 
 - Added stronger action feedback so backup and cloud-check buttons show a working state and clearer failures.

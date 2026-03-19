@@ -336,12 +336,77 @@ function createWindow() {
     minHeight: 760,
     backgroundColor: "#f4efe7",
     title: "One Bite Technology Backup Companion",
+    show: false,
     webPreferences: {
       preload: path.join(APP_ROOT, "preload.js")
     }
   });
 
-  window.loadFile(path.join(APP_ROOT, "index.html"));
+  const indexPath = path.join(APP_ROOT, "index.html");
+  writeLauncherLog(`Window preload path: ${path.join(APP_ROOT, "preload.js")}`);
+  writeLauncherLog(`Window index path: ${indexPath}`);
+
+  window.once("ready-to-show", () => {
+    writeLauncherLog("Main window ready-to-show.");
+    window.show();
+    window.focus();
+  });
+
+  window.on("show", () => {
+    writeLauncherLog("Main window shown.");
+  });
+
+  window.on("closed", () => {
+    writeLauncherLog("Main window closed.");
+  });
+
+  window.on("unresponsive", () => {
+    writeLauncherLog("Main window became unresponsive.");
+  });
+
+  window.webContents.on("did-start-loading", () => {
+    writeLauncherLog("Renderer started loading.");
+  });
+
+  window.webContents.on("did-finish-load", () => {
+    writeLauncherLog("Renderer finished loading.");
+  });
+
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    writeLauncherLog(`Renderer failed to load. code=${errorCode} description=${errorDescription} url=${validatedURL}`);
+    dialog.showErrorBox(
+      "OBTools Automated Backups",
+      `The app window failed to load.\n\n${errorDescription} (${errorCode})`
+    );
+  });
+
+  window.webContents.on("render-process-gone", (_event, details) => {
+    writeLauncherLog(`Renderer process gone. reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+
+  window.webContents.on("preload-error", (_event, preloadPath, error) => {
+    writeLauncherLog(`Preload error at ${preloadPath}: ${error.message}`);
+    dialog.showErrorBox("OBTools Automated Backups", `Preload failed: ${error.message}`);
+  });
+
+  window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) {
+      writeLauncherLog(`Renderer console level=${level} ${sourceId}:${line} ${message}`);
+    }
+  });
+
+  setTimeout(() => {
+    if (!window.isDestroyed() && !window.isVisible()) {
+      writeLauncherLog("Window was not visible after startup timeout. Forcing show.");
+      window.show();
+      window.focus();
+    }
+  }, 2500);
+
+  window.loadFile(indexPath).catch((error) => {
+    writeLauncherLog(`loadFile failed: ${error.stack || error.message}`);
+    dialog.showErrorBox("OBTools Automated Backups", error.message);
+  });
 }
 
 function configureAutoUpdates() {
