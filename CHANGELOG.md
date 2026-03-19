@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.6 - 2026-03-18
+
+- Moved `electron-updater` loading out of normal startup and into the manual update-check path.
+- Reduced packaged startup work so the app reaches `ready` with fewer pre-window dependencies.
+
 ## 1.0.5 - 2026-03-18
 
 - Added earlier Electron lifecycle logging for `will-finish-launching`, `ready`, `whenReady`, and child-process exits.

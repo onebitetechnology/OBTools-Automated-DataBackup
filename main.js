@@ -4,13 +4,6 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-let autoUpdater = null;
-try {
-  ({ autoUpdater } = require("electron-updater"));
-} catch (_error) {
-  autoUpdater = null;
-}
-
 const APP_ROOT = __dirname;
 const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : APP_ROOT;
 const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
@@ -22,6 +15,8 @@ let updateStatus = {
   message: "Update checks are only available in the installed Windows app.",
   updateAvailable: false
 };
+let autoUpdater = null;
+let autoUpdaterConfigured = false;
 
 function writeLauncherLog(message) {
   try {
@@ -416,7 +411,7 @@ function createWindow() {
 }
 
 function configureAutoUpdates() {
-  if (!autoUpdater || !app.isPackaged || process.platform !== "win32") {
+  if (!app.isPackaged || process.platform !== "win32") {
     updateStatus = {
       supported: false,
       checkedAt: null,
@@ -433,8 +428,26 @@ function configureAutoUpdates() {
     updateAvailable: false
   };
 
+  if (autoUpdaterConfigured) {
+    return;
+  }
+
+  try {
+    ({ autoUpdater } = require("electron-updater"));
+  } catch (error) {
+    writeLauncherLog(`electron-updater could not be loaded: ${error.message}`);
+    updateStatus = {
+      supported: false,
+      checkedAt: null,
+      message: `Update checks are unavailable: ${error.message}`,
+      updateAvailable: false
+    };
+    return;
+  }
+
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdaterConfigured = true;
 
   autoUpdater.on("checking-for-update", () => {
     updateStatus = {
@@ -493,7 +506,6 @@ app.on("child-process-gone", (_event, details) => {
 app.whenReady().then(() => {
   writeLauncherLog("App whenReady resolved. Initializing data and window.");
   ensureDataFiles();
-  configureAutoUpdates();
   createWindow();
 
   app.on("activate", () => {
@@ -627,6 +639,8 @@ ipcMain.handle("automation:install", async () => {
 });
 
 ipcMain.handle("updates:check", async () => {
+  configureAutoUpdates();
+
   if (!updateStatus.supported || !autoUpdater) {
     return {
       meta: appMeta()
