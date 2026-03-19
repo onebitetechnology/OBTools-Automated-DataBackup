@@ -489,6 +489,10 @@ function configureAutoUpdates() {
     return;
   }
 
+  if (autoUpdaterConfigured) {
+    return;
+  }
+
   updateStatus = {
     supported: true,
     checkedAt: null,
@@ -500,10 +504,6 @@ function configureAutoUpdates() {
     downloadProgress: null
   };
   publishUpdateStatus();
-
-  if (autoUpdaterConfigured) {
-    return;
-  }
 
   try {
     ({ autoUpdater } = require("electron-updater"));

@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.8 - 2026-03-19
+
+- Fixed the updater flow so `Install Update Now` no longer loses the downloaded-update state after a successful download.
+- Stopped updater reconfiguration from resetting the current update status between check, download, and install steps.
+
 ## 1.0.10-beta.7 - 2026-03-19
 
 - Added browser detection for common Windows browsers so their user-data folders can be added without browsing hidden AppData paths manually.
