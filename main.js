@@ -425,7 +425,7 @@ function configureAutoUpdates() {
   updateStatus = {
     supported: true,
     checkedAt: null,
-    message: "Check for updates to look for new internal test releases.",
+    message: "Check for updates to look for new internal beta releases.",
     updateAvailable: false
   };
 
@@ -448,9 +448,10 @@ function configureAutoUpdates() {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.channel = "beta";
   autoUpdater.allowPrerelease = true;
   autoUpdaterConfigured = true;
-  writeLauncherLog("Auto updater configured for internal prerelease channel.");
+  writeLauncherLog("Auto updater configured for internal beta channel.");
 
   autoUpdater.on("checking-for-update", () => {
     updateStatus = {

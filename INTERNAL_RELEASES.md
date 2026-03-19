@@ -7,7 +7,7 @@ The app is prepared for local Electron development and Windows installer builds.
 Current app version:
 
 ```text
-1.0.9
+1.0.10-beta.1
 ```
 
 Desktop shortcut name:
@@ -50,7 +50,7 @@ Workflow file:
 .github/workflows/build-windows-installer.yml
 ```
 
-4. Publish an internal GitHub prerelease with the installer and update metadata:
+4. Publish an internal GitHub beta prerelease with the installer and update metadata:
 
 ```bash
 GH_TOKEN=your_github_token npm run release:win
@@ -83,3 +83,4 @@ Implemented now:
 - GitHub publish configuration in `package.json`
 - packaged-app update checks in `main.js`
 - prerelease-aware internal update channel for GitHub release testing
+- explicit `beta` channel configuration for GitHub prerelease updates

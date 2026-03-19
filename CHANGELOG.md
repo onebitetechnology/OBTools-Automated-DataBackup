@@ -2,6 +2,13 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.1 - 2026-03-19
+
+- Switched the internal updater flow to a real beta channel using a prerelease semver version.
+- Explicitly configured the GitHub publish channel as `beta`.
+- Configured the app updater to request the `beta` channel during update checks.
+- Expanded the Windows installer artifact upload to include all generated update channel metadata files.
+
 ## 1.0.9 - 2026-03-18
 
 - Switched GitHub publishing from draft releases to prereleases for internal update testing.
