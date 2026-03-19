@@ -110,6 +110,68 @@ function deriveDestinationStatus(message, ok) {
   return "Issue Detected";
 }
 
+function resolveDestinationRoot(destination) {
+  if (!destination) {
+    return null;
+  }
+
+  if (destination.selectedPath) {
+    return path.parse(destination.selectedPath).root || null;
+  }
+
+  if (destination.driveLetter) {
+    return `${String(destination.driveLetter).replace(":", "")}:\\`;
+  }
+
+  return null;
+}
+
+function resolveDestinationBasePath(destination) {
+  const destinationRoot = resolveDestinationRoot(destination);
+  if (!destinationRoot) {
+    return null;
+  }
+
+  const baseFolder = String(destination?.baseFolder || "").trim();
+  return baseFolder ? path.join(destinationRoot, baseFolder) : destinationRoot;
+}
+
+function listRecentSnapshots(config) {
+  const baseRoot = resolveDestinationBasePath(config?.destination);
+  if (!baseRoot) {
+    return [];
+  }
+
+  const snapshotsRoot = path.join(baseRoot, "snapshots");
+  if (!fs.existsSync(snapshotsRoot)) {
+    return [];
+  }
+
+  try {
+    return fs.readdirSync(snapshotsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const fullPath = path.join(snapshotsRoot, entry.name);
+        let createdAt = 0;
+        try {
+          const stats = fs.statSync(fullPath);
+          createdAt = stats.birthtimeMs || stats.ctimeMs || 0;
+        } catch (_error) {
+          createdAt = 0;
+        }
+
+        return {
+          name: entry.name,
+          createdAt
+        };
+      })
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((entry) => entry.name);
+  } catch (_error) {
+    return [];
+  }
+}
+
 function simulateAction(scriptName) {
   const status = readJson(STATUS_PATH);
   const now = new Date();
@@ -343,11 +405,13 @@ async function handleApi(request, response) {
   }
 
   if (request.method === "POST" && request.url === "/api/run-backup") {
+    const config = readJson(CONFIG_PATH);
     const result = await runPowerShell("backup-engine.ps1");
     const status = mergeStatus({
       destinationStatus: deriveDestinationStatus(result.message, result.ok),
       lastBackupResult: result.ok ? "success" : "error",
-      lastBackupMessage: result.message
+      lastBackupMessage: result.message,
+      recentSnapshots: listRecentSnapshots(config)
     });
     sendJson(response, 200, { status, meta: appMeta() });
     return;

@@ -172,6 +172,51 @@ function resolveDestinationRoot(destination) {
   return null;
 }
 
+function resolveDestinationBasePath(destination) {
+  const destinationRoot = resolveDestinationRoot(destination);
+  if (!destinationRoot) {
+    return null;
+  }
+
+  const baseFolder = String(destination?.baseFolder || "").trim();
+  return baseFolder ? path.join(destinationRoot, baseFolder) : destinationRoot;
+}
+
+function listRecentSnapshots(config) {
+  const baseRoot = resolveDestinationBasePath(config?.destination);
+  if (!baseRoot) {
+    return [];
+  }
+
+  const snapshotsRoot = path.join(baseRoot, "snapshots");
+  if (!fs.existsSync(snapshotsRoot)) {
+    return [];
+  }
+
+  try {
+    return fs.readdirSync(snapshotsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const fullPath = path.join(snapshotsRoot, entry.name);
+        let createdAt = 0;
+        try {
+          createdAt = fs.statSync(fullPath).birthtimeMs || fs.statSync(fullPath).ctimeMs || 0;
+        } catch (_error) {
+          createdAt = 0;
+        }
+
+        return {
+          name: entry.name,
+          createdAt
+        };
+      })
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((entry) => entry.name);
+  } catch (_error) {
+    return [];
+  }
+}
+
 function calculatePathSize(targetPath) {
   if (!targetPath || !fs.existsSync(targetPath)) {
     return 0;
@@ -846,13 +891,16 @@ ipcMain.handle("storage:analyze", async () => {
 
 ipcMain.handle("backup:run", async () => {
   writeLauncherLog("IPC backup:run received.");
+  const { configPath } = dataPaths();
+  const config = readJson(configPath);
   const result = await runPowerShell("backup-engine.ps1");
   writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
   return {
     status: mergeStatus({
       destinationStatus: deriveDestinationStatus(result.message, result.ok),
       lastBackupResult: result.ok ? "success" : "error",
-      lastBackupMessage: result.message
+      lastBackupMessage: result.message,
+      recentSnapshots: listRecentSnapshots(config)
     }),
     meta: appMeta()
   };
