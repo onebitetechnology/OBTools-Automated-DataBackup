@@ -47,8 +47,14 @@ const el = {
   settingsScheduleSummary: document.getElementById("settings-schedule-summary"),
   appVersion: document.getElementById("app-version"),
   settingsVersionCopy: document.getElementById("settings-version-copy"),
+  updateLatestVersion: document.getElementById("update-latest-version"),
   updateStatus: document.getElementById("update-status"),
   checkUpdates: document.getElementById("check-updates"),
+  downloadUpdate: document.getElementById("download-update"),
+  installUpdate: document.getElementById("install-update"),
+  updateProgressShell: document.getElementById("update-progress-shell"),
+  updateProgressBar: document.getElementById("update-progress-bar"),
+  updateProgressLabel: document.getElementById("update-progress-label"),
   resultModal: document.getElementById("result-modal"),
   resultModalTitle: document.getElementById("result-modal-title"),
   resultModalMessage: document.getElementById("result-modal-message"),
@@ -234,11 +240,30 @@ function friendlyBackupMessage(status) {
 
 function renderMeta() {
   const version = state.meta?.version || "Unknown";
-  const updateMessage = state.meta?.updateStatus?.message || "Update checks are not ready yet.";
+  const updateInfo = state.meta?.updateStatus || {};
+  const updateMessage = updateInfo.message || "Update checks are not ready yet.";
+  const latestVersion = updateInfo.availableVersion || "Not checked yet";
+  const showProgress = Boolean(updateInfo.downloading || updateInfo.downloaded);
+  const progressValue = updateInfo.downloaded
+    ? 100
+    : Math.max(0, Math.min(100, Number(updateInfo.downloadProgress || 0)));
+  const updateSupported = Boolean(window.onebiteDesktop && updateInfo.supported);
+
   el.buildVersion.textContent = `Version ${version}`;
   el.appVersion.textContent = version;
   el.settingsVersionCopy.textContent = version;
+  el.updateLatestVersion.textContent = latestVersion;
   el.updateStatus.textContent = updateMessage;
+  el.updateStatus.classList.toggle("warning-copy", Boolean(updateInfo.updateAvailable && !updateInfo.downloaded) && !/failed/i.test(updateMessage));
+  el.updateStatus.classList.toggle("error-copy", /failed/i.test(updateMessage));
+
+  el.updateProgressShell.hidden = !showProgress;
+  el.updateProgressBar.style.width = `${progressValue}%`;
+  el.updateProgressLabel.textContent = `${progressValue}%`;
+
+  el.checkUpdates.disabled = state.actionInFlight || !updateSupported || Boolean(updateInfo.downloading);
+  el.downloadUpdate.disabled = state.actionInFlight || !updateSupported || !updateInfo.updateAvailable || Boolean(updateInfo.downloading) || Boolean(updateInfo.downloaded);
+  el.installUpdate.disabled = state.actionInFlight || !updateSupported || !updateInfo.downloaded;
 }
 
 function summarizeActionMessage(message) {
@@ -367,7 +392,7 @@ function setActionButtonsDisabled(disabled) {
   el.runBackup.disabled = disabled;
   el.runCloudCheck.disabled = disabled;
   el.installAutomation.disabled = disabled;
-  el.checkUpdates.disabled = disabled;
+  renderMeta();
 }
 
 function renderJobs() {
@@ -578,6 +603,16 @@ async function load() {
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
   state.meta = payload.meta || null;
+  if (window.onebiteDesktop?.onUpdateStatus) {
+    window.onebiteDesktop.onUpdateStatus((updateStatus) => {
+      state.meta = {
+        ...(state.meta || {}),
+        version: state.meta?.version || "Unknown",
+        updateStatus
+      };
+      renderMeta();
+    });
+  }
   renderConfig();
   renderStatus();
 }
@@ -706,6 +741,39 @@ async function checkForUpdates() {
   });
 }
 
+async function downloadUpdate() {
+  if (!window.onebiteDesktop?.downloadUpdate) {
+    return;
+  }
+
+  const payload = await window.onebiteDesktop.downloadUpdate();
+  state.meta = payload.meta || state.meta;
+  renderMeta();
+
+  if (state.meta?.updateStatus?.downloaded) {
+    showResultModal({
+      title: "Update Ready",
+      message: state.meta.updateStatus.message || "The update has been downloaded and is ready to install.",
+      secondaryAction: updateModalSecondaryAction()
+    });
+  }
+}
+
+async function installUpdate() {
+  if (!window.onebiteDesktop?.installUpdate) {
+    return;
+  }
+
+  const payload = await window.onebiteDesktop.installUpdate();
+  state.meta = payload.meta || state.meta;
+  renderMeta();
+
+  showResultModal({
+    title: payload.ok ? "Installing Update" : "Install Update",
+    message: payload.message || "The update could not be installed."
+  });
+}
+
 async function browseDestinationFolder() {
   if (!window.onebiteDesktop?.pickDestinationFolder) {
     el.destinationPickedSummary.textContent = "Destination browsing is available in the installed desktop app.";
@@ -780,6 +848,16 @@ el.installAutomation.addEventListener("click", () => {
 });
 el.checkUpdates.addEventListener("click", () => {
   checkForUpdates().catch((error) => {
+    el.updateStatus.textContent = error.message;
+  });
+});
+el.downloadUpdate.addEventListener("click", () => {
+  downloadUpdate().catch((error) => {
+    el.updateStatus.textContent = error.message;
+  });
+});
+el.installUpdate.addEventListener("click", () => {
+  installUpdate().catch((error) => {
     el.updateStatus.textContent = error.message;
   });
 });

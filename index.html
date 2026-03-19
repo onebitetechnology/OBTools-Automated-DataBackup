@@ -257,21 +257,28 @@
         </section>
 
         <section class="settings-section">
-          <div class="settings-section-head">
-            <div>
-              <div class="settings-section-title">App Updates</div>
-              <div class="settings-section-copy">Use the beta release channel to test new internal builds before general rollout.</div>
+          <div class="settings-section-title">App Updates</div>
+          <div class="settings-section-copy">Use the beta release channel to test new internal builds before general rollout.</div>
+          <div class="updates-card">
+            <div class="updates-meta-row">
+              <span class="updates-meta-label">Current Version:</span>
+              <span id="app-version" class="updates-meta-value">Loading...</span>
             </div>
-            <button id="check-updates" class="secondary" type="button">Check For Updates</button>
-          </div>
-          <div class="grid two">
-            <div>
-              <span class="metric-label">Installed Version</span>
-              <p id="app-version" class="settings-meta-value">Loading...</p>
+            <div class="updates-meta-row">
+              <span class="updates-meta-label">Latest Version:</span>
+              <span id="update-latest-version" class="updates-meta-value">Not checked yet</span>
             </div>
-            <div>
-              <span class="metric-label">Update Status</span>
-              <p id="update-status" class="settings-meta-value">Checking update support...</p>
+            <p id="update-status" class="settings-meta-value">Checking update support...</p>
+            <div id="update-progress-shell" class="update-progress-shell" hidden>
+              <div class="update-progress-track">
+                <div id="update-progress-bar" class="update-progress-bar"></div>
+              </div>
+              <div id="update-progress-label" class="update-progress-label">0%</div>
+            </div>
+            <div class="updates-actions">
+              <button id="check-updates" class="primary" type="button">Check for Updates</button>
+              <button id="download-update" class="secondary" type="button" disabled>Download Update</button>
+              <button id="install-update" class="primary" type="button" disabled>Install Update Now</button>
             </div>
           </div>
         </section>

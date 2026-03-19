@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   downloadUpdate: () => ipcRenderer.invoke("updates:download"),
   installUpdate: () => ipcRenderer.invoke("updates:install"),
   openReleasesPage: () => ipcRenderer.invoke("updates:open-releases"),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("updates:status", listener);
+    return () => ipcRenderer.removeListener("updates:status", listener);
+  },
   pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),
   pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder")
 });

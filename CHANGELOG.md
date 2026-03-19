@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.4 - 2026-03-19
+
+- Reworked the Settings updater section to match the `PC AutoSpec` pattern more closely.
+- Added a dedicated updates card with current version, latest version, status text, progress bar, and action buttons.
+- Added live updater status pushes from the Electron main process so download progress updates inside Settings instead of only after the download finishes.
+
 ## 1.0.10-beta.3 - 2026-03-19
 
 - Added an in-app `Download Update` action when a newer beta build is found.

@@ -22,6 +22,14 @@ let updateStatus = {
 let autoUpdater = null;
 let autoUpdaterConfigured = false;
 
+function publishUpdateStatus() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send("updates:status", updateStatus);
+    }
+  }
+}
+
 function writeLauncherLog(message) {
   try {
     const logRoot = app.isReady() ? app.getPath("userData") : os.tmpdir();
@@ -427,6 +435,7 @@ function configureAutoUpdates() {
       downloaded: false,
       downloadProgress: null
     };
+    publishUpdateStatus();
     return;
   }
 
@@ -440,6 +449,7 @@ function configureAutoUpdates() {
     downloaded: false,
     downloadProgress: null
   };
+  publishUpdateStatus();
 
   if (autoUpdaterConfigured) {
     return;
@@ -459,6 +469,7 @@ function configureAutoUpdates() {
       downloaded: false,
       downloadProgress: null
     };
+    publishUpdateStatus();
     return;
   }
 
@@ -480,6 +491,7 @@ function configureAutoUpdates() {
       downloaded: false,
       downloadProgress: null
     };
+    publishUpdateStatus();
   });
 
   autoUpdater.on("update-available", (info) => {
@@ -493,6 +505,7 @@ function configureAutoUpdates() {
       downloaded: false,
       downloadProgress: null
     };
+    publishUpdateStatus();
   });
 
   autoUpdater.on("update-not-available", () => {
@@ -501,11 +514,12 @@ function configureAutoUpdates() {
       checkedAt: new Date().toISOString(),
       message: "This machine is already on the latest published build.",
       updateAvailable: false,
-      availableVersion: null,
+      availableVersion: app.getVersion(),
       downloading: false,
       downloaded: false,
       downloadProgress: null
     };
+    publishUpdateStatus();
   });
 
   autoUpdater.on("download-progress", (progress) => {
@@ -518,6 +532,7 @@ function configureAutoUpdates() {
       downloaded: false,
       downloadProgress: percent
     };
+    publishUpdateStatus();
   });
 
   autoUpdater.on("update-downloaded", (info) => {
@@ -531,6 +546,7 @@ function configureAutoUpdates() {
       downloaded: true,
       downloadProgress: 100
     };
+    publishUpdateStatus();
   });
 
   autoUpdater.on("error", (error) => {
@@ -540,6 +556,7 @@ function configureAutoUpdates() {
       message: `Update check failed: ${error.message}`,
       downloading: false
     };
+    publishUpdateStatus();
   });
 }
 
@@ -713,6 +730,7 @@ ipcMain.handle("updates:check", async () => {
       message: `Update check failed: ${error.message}`,
       updateAvailable: false
     };
+    publishUpdateStatus();
   }
 
   return {
@@ -744,6 +762,7 @@ ipcMain.handle("updates:download", async () => {
       downloaded: false,
       downloadProgress: updateStatus.downloadProgress || 0
     };
+    publishUpdateStatus();
     await autoUpdater.downloadUpdate();
   } catch (error) {
     updateStatus = {
@@ -753,6 +772,7 @@ ipcMain.handle("updates:download", async () => {
       downloading: false,
       downloaded: false
     };
+    publishUpdateStatus();
   }
 
   return {
@@ -776,6 +796,7 @@ ipcMain.handle("updates:install", async () => {
     checkedAt: new Date().toISOString(),
     message: "Installing update and restarting the app..."
   };
+  publishUpdateStatus();
 
   setTimeout(() => {
     autoUpdater.quitAndInstall(false, true);
