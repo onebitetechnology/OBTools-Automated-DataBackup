@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.2 - 2026-03-18
+
+- Added stronger action feedback so backup and cloud-check buttons show a working state and clearer failures.
+- Added more detailed Windows launcher logging around backup, cloud-check, and automation actions.
+- Configured the Windows uninstaller to offer removal of app data during uninstall.
+
 ## 1.0.1 - 2026-03-17
 
 - Added visible in-app version information in the main screen and Settings drawer.
