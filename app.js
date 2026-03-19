@@ -285,6 +285,14 @@ function summarizeActionMessage(message) {
     return match ? `One of the backup items could not be found: ${match[1].trim()}` : "One of the backup items could not be found.";
   }
 
+  if (/Some files in .* could not be copied/i.test(raw)) {
+    return raw;
+  }
+
+  if (/Robocopy failed for /i.test(raw)) {
+    return "Some files could not be copied. Close open files or cloud-sync apps, then try the backup again.";
+  }
+
   const primaryLine = raw
     .split("\n")
     .map((line) => line.trim())

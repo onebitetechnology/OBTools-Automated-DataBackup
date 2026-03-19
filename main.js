@@ -10,9 +10,11 @@ const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
 const WINDOWS_DIR = path.join(RESOURCE_ROOT, "windows");
 const SHELL_WORK_DIR = RESOURCE_ROOT;
 let updateStatus = {
-  supported: false,
+  supported: app.isPackaged && process.platform === "win32",
   checkedAt: null,
-  message: "Update checks are only available in the installed Windows app.",
+  message: app.isPackaged && process.platform === "win32"
+    ? "Check for updates to look for new internal beta releases."
+    : "Update checks are only available in the installed Windows app.",
   updateAvailable: false,
   availableVersion: null,
   downloading: false,
@@ -617,6 +619,7 @@ app.on("window-all-closed", () => {
 });
 
 ipcMain.handle("state:get", () => {
+  configureAutoUpdates();
   const { configPath, statusPath } = dataPaths();
   return {
     config: readJson(configPath),

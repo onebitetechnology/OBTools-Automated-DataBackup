@@ -48,9 +48,26 @@ function Copy-BackupItem($Job, [string]$RootPath) {
 
   if ($Job.type -eq "folder") {
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
-    robocopy $source $destination /MIR /FFT /R:1 /W:1 /XD "System Volume Information" '$RECYCLE.BIN' | Out-Null
+    $robocopyOutput = @(robocopy $source $destination /MIR /FFT /R:1 /W:1 /XJ /XD "System Volume Information" '$RECYCLE.BIN' 2>&1)
     if ($LASTEXITCODE -ge 8) {
-      throw "Robocopy failed for $source with exit code $LASTEXITCODE"
+      $detail = $robocopyOutput |
+        ForEach-Object { "$_".Trim() } |
+        Where-Object {
+          $_ -and (
+            $_ -match 'ERROR' -or
+            $_ -match 'Access is denied' -or
+            $_ -match 'cannot access the file' -or
+            $_ -match 'used by another process' -or
+            $_ -match 'mismatch'
+          )
+        } |
+        Select-Object -First 1
+
+      if ($detail) {
+        throw "Some files in $source could not be copied. $detail"
+      }
+
+      throw "Some files in $source could not be copied. Close open files or cloud-sync apps, then try the backup again."
     }
     return
   }

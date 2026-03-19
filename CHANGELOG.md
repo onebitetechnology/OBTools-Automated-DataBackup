@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.5 - 2026-03-19
+
+- Fixed updater initialization so the Settings update controls are active immediately in the installed Windows app.
+- Changed backup failures from raw `Robocopy exit code 8` errors into friendlier guidance for locked or inaccessible files.
+- Added `/XJ` to folder copy operations to avoid common junction-related backup failures.
+
 ## 1.0.10-beta.4 - 2026-03-19
 
 - Reworked the Settings updater section to match the `PC AutoSpec` pattern more closely.
