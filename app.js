@@ -46,6 +46,7 @@ const el = {
   settingsRetentionSummary: document.getElementById("settings-retention-summary"),
   settingsScheduleSummary: document.getElementById("settings-schedule-summary"),
   appVersion: document.getElementById("app-version"),
+  settingsVersionCopy: document.getElementById("settings-version-copy"),
   updateStatus: document.getElementById("update-status"),
   checkUpdates: document.getElementById("check-updates"),
   resultModal: document.getElementById("result-modal"),
@@ -181,7 +182,7 @@ function formatDate(value) {
 
 function protectionSummary(status) {
   const staleDays = state.config?.reminders?.staleDays || 7;
-  const backupMessage = status.lastBackupMessage || "The latest backup needs review.";
+  const backupMessage = summarizeActionMessage(status.lastBackupMessage || "The latest backup needs review.");
 
   if (status.destinationStatus === "Drive Not Connected") {
     return {
@@ -228,7 +229,7 @@ function friendlyBackupMessage(status) {
     return "The selected backup drive is not connected. Plug it in and run the backup again.";
   }
 
-  return status.lastBackupMessage || "No backup history yet.";
+  return summarizeActionMessage(status.lastBackupMessage || "No backup history yet.");
 }
 
 function renderMeta() {
@@ -236,7 +237,35 @@ function renderMeta() {
   const updateMessage = state.meta?.updateStatus?.message || "Update checks are not ready yet.";
   el.buildVersion.textContent = `Version ${version}`;
   el.appVersion.textContent = version;
+  el.settingsVersionCopy.textContent = version;
   el.updateStatus.textContent = updateMessage;
+}
+
+function summarizeActionMessage(message) {
+  const raw = String(message || "").replace(/\r/g, "").trim();
+  if (!raw) {
+    return "The action finished, but no details were returned.";
+  }
+
+  if (/No destination drive could be resolved/i.test(raw)) {
+    return "Choose a backup drive in Settings before running the first backup.";
+  }
+
+  if (/Destination drive is not available/i.test(raw)) {
+    return "The selected backup drive is not connected. Reconnect it and try again.";
+  }
+
+  if (/Backup source missing:/i.test(raw)) {
+    const match = raw.match(/Backup source missing:\s*(.+)/i);
+    return match ? `One of the backup items could not be found: ${match[1].trim()}` : "One of the backup items could not be found.";
+  }
+
+  const primaryLine = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line && !/^(at |CategoryInfo:|FullyQualifiedErrorId:|\+|~)/.test(line));
+
+  return primaryLine || raw;
 }
 
 function showResultModal({ title, message, list = [], secondaryAction = null }) {
@@ -336,6 +365,8 @@ function renderStatus() {
   el.lastBackupDetail.textContent = formatDate(state.status.lastBackupAt);
   el.lastBackupMessage.textContent = friendlyBackupMessage(state.status);
   el.cloudSummary.textContent = state.status.cloud?.summary || "Cloud check has not been run yet.";
+  el.cloudSummary.classList.toggle("warning-copy", state.status.cloud?.level === "warning");
+  el.cloudSummary.classList.toggle("error-copy", state.status.cloud?.level === "error");
 
   el.snapshotList.innerHTML = "";
   const snapshots = state.status.recentSnapshots || [];
@@ -553,8 +584,8 @@ async function invokeAction(path) {
 
     if (path === "/api/check-cloud") {
       showResultModal({
-        title: "Cloud Sync Review",
-        message: state.status.cloud?.summary || "Cloud check completed.",
+        title: state.status.cloud?.level === "warning" ? "Cloud Sync Needs Attention" : "Cloud Sync Review",
+        message: summarizeActionMessage(state.status.cloud?.summary || "Cloud check completed."),
         list: state.status.cloud?.recommendations || [],
         secondaryAction: window.onebiteDesktop?.openOneDrive
           ? {
@@ -576,7 +607,7 @@ async function invokeAction(path) {
       const success = state.status.lastBackupResult === "success";
       showResultModal({
         title: success ? "Backup Complete" : "Backup Needs Attention",
-        message: state.status.lastBackupMessage || "Backup finished.",
+        message: summarizeActionMessage(state.status.lastBackupMessage || "Backup finished."),
         list: (state.status.recentSnapshots || []).slice(0, 5).map((snapshot) => `Snapshot: ${snapshot}`)
       });
       return;
@@ -608,6 +639,24 @@ async function checkForUpdates() {
   });
   state.meta = payload.meta || state.meta;
   renderMeta();
+
+  const updateMessage = state.meta?.updateStatus?.message || "Update check finished.";
+  showResultModal({
+    title: state.meta?.updateStatus?.updateAvailable ? "Update Available" : "Update Check Complete",
+    message: updateMessage,
+    secondaryAction: window.onebiteDesktop?.openReleasesPage
+      ? {
+          label: "Open Releases",
+          onClick: async () => {
+            const result = await window.onebiteDesktop.openReleasesPage();
+            if (!result.ok) {
+              throw new Error(result.message);
+            }
+            el.resultModalMessage.textContent = result.message;
+          }
+        }
+      : null
+  });
 }
 
 async function browseDestinationFolder() {
@@ -622,12 +671,17 @@ async function browseDestinationFolder() {
   }
 
   state.config.destination.selectedPath = selected.displayPath;
+  state.config.destination.mode = "driveLetter";
+  state.config.destination.driveLetter = selected.driveLetter;
+  state.config.destination.label = "";
   el.destinationMode.value = "driveLetter";
   el.destinationDriveLetter.value = selected.driveLetter;
   el.destinationLabel.value = "";
   if ((state.config.destination.folderMode || "managed") === "existing") {
+    state.config.destination.baseFolder = selected.baseFolder;
     el.destinationBaseFolder.value = selected.baseFolder;
   } else {
+    state.config.destination.baseFolder = "One Bite Backups";
     el.destinationBaseFolder.value = "One Bite Backups";
   }
   renderConfig();
@@ -647,8 +701,10 @@ function setDestinationFolderMode(folderMode) {
     const relativeFolder = selectedPath.startsWith(rootPath)
       ? selectedPath.slice(rootPath.length).replaceAll("/", "\\")
       : el.destinationBaseFolder.value.trim();
+    state.config.destination.baseFolder = relativeFolder;
     el.destinationBaseFolder.value = relativeFolder;
   } else {
+    state.config.destination.baseFolder = "One Bite Backups";
     el.destinationBaseFolder.value = "One Bite Backups";
   }
 

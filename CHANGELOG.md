@@ -2,6 +2,14 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.2 - 2026-03-19
+
+- Fixed destination selection so browsing for a backup drive updates the saved backup target correctly.
+- Cleaned up backup error messages so unresolved-drive failures read as user guidance instead of raw PowerShell traces.
+- Added an update-check result popup with a shortcut to the GitHub releases page.
+- Added stronger cloud warning presentation when the cloud sync check reports issues.
+- Restyled the Settings drawer to match the structure and footer pattern used in the other One Bite dashboard apps.
+
 ## 1.0.10-beta.1 - 2026-03-19
 
 - Switched the internal updater flow to a real beta channel using a prerelease semver version.

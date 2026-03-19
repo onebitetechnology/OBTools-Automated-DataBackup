@@ -178,19 +178,19 @@
     <div id="settings-drawer" class="settings-drawer" hidden>
       <div class="settings-backdrop"></div>
       <aside class="settings-panel">
-        <div class="panel-head">
-          <div>
-            <p class="eyebrow">Settings</p>
-            <h3>Backup configuration</h3>
-            <p class="section-note">Set the drive, choose how many copies to keep, and control backup automation.</p>
+        <div class="settings-modal-header">
+          <div class="settings-modal-title-wrap">
+            <div class="settings-modal-title">Settings</div>
+            <div class="settings-modal-subtitle">Version <strong id="settings-version-copy">Loading...</strong>. Configure destination, retention, automation, and internal updates from one place.</div>
           </div>
           <button id="close-settings" class="ghost" type="button">Close</button>
         </div>
+        <div class="settings-modal-body">
 
         <section class="settings-section">
-          <h4>Destination</h4>
+          <div class="settings-section-title">Destination</div>
+          <div class="settings-section-copy">Pick the external drive or an existing folder on that drive.</div>
           <div class="settings-section-head compact">
-            <p class="hint">Pick the external drive or an existing folder on that drive.</p>
             <button id="browse-destination" class="secondary" type="button">Browse For Backup Folder</button>
           </div>
           <div class="destination-choice-grid">
@@ -206,7 +206,8 @@
         </section>
 
         <section class="settings-section">
-          <h4>Retention</h4>
+          <div class="settings-section-title">Retention</div>
+          <div class="settings-section-copy">Choose how many backup copies to keep before the oldest snapshots are replaced.</div>
           <div class="grid two">
             <label>
               <span>Copies To Keep</span>
@@ -218,7 +219,10 @@
 
         <section class="settings-section">
           <div class="settings-section-head">
-            <h4>Automation</h4>
+            <div>
+              <div class="settings-section-title">Automation</div>
+              <div class="settings-section-copy">Set the backup schedule, stale-backup reminders, and cloud health checks.</div>
+            </div>
             <button id="install-automation" class="secondary" type="button">Install Windows Tasks</button>
           </div>
           <div class="grid three">
@@ -254,7 +258,10 @@
 
         <section class="settings-section">
           <div class="settings-section-head">
-            <h4>App Updates</h4>
+            <div>
+              <div class="settings-section-title">App Updates</div>
+              <div class="settings-section-copy">Use the beta release channel to test new internal builds before general rollout.</div>
+            </div>
             <button id="check-updates" class="secondary" type="button">Check For Updates</button>
           </div>
           <div class="grid two">
@@ -268,9 +275,13 @@
             </div>
           </div>
         </section>
+        </div>
 
-        <div class="settings-actions">
-          <button id="save-config" class="primary" type="button">Save Settings</button>
+        <div class="settings-modal-footer">
+          <div class="settings-footer-copy">Settings save to this machine. Destination and job changes apply the next time a backup or cloud check runs.</div>
+          <div class="settings-actions">
+            <button id="save-config" class="primary" type="button">Save Settings</button>
+          </div>
         </div>
       </aside>
     </div>

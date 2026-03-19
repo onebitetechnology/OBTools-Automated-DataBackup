@@ -630,14 +630,41 @@ select:focus {
   -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
 
-.settings-section {
-  margin-top: 22px;
+.settings-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(112, 168, 255, 0.14);
 }
 
-.settings-section h4 {
-  margin: 0 0 12px;
+.settings-modal-title-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-modal-title {
   font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", sans-serif;
-  font-size: 1.08rem;
+  font-size: 1.22rem;
+  font-weight: 700;
+  color: #eef6ff;
+}
+
+.settings-modal-subtitle {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.settings-modal-body {
+  padding-top: 18px;
+}
+
+.settings-section {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(112, 168, 255, 0.12);
 }
 
 .settings-section-head {
@@ -656,8 +683,17 @@ select:focus {
   margin: 0;
 }
 
-.settings-section-head h4 {
-  margin: 0;
+.settings-section-title {
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: #eef6ff;
+}
+
+.settings-section-copy {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .settings-meta-value {
@@ -670,7 +706,32 @@ select:focus {
 .settings-actions {
   display: flex;
   justify-content: flex-end;
+  margin-top: 0;
+}
+
+.settings-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
   margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(112, 168, 255, 0.14);
+}
+
+.settings-footer-copy {
+  max-width: 46ch;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.warning-copy {
+  color: #ffd968;
+}
+
+.error-copy {
+  color: #ff8a9f;
 }
 
 .terms-backdrop {
@@ -777,7 +838,9 @@ select:focus {
   }
 
   .job-row,
-  .panel-head {
+  .panel-head,
+  .settings-modal-header,
+  .settings-modal-footer {
     flex-direction: column;
     align-items: stretch;
   }

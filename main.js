@@ -667,6 +667,21 @@ ipcMain.handle("updates:check", async () => {
   };
 });
 
+ipcMain.handle("updates:open-releases", async () => {
+  try {
+    await shell.openExternal("https://github.com/onebitetechnology/OBTools-Automated-DataBackup/releases");
+    return {
+      ok: true,
+      message: "Opened the GitHub releases page."
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error.message
+    };
+  }
+});
+
 ipcMain.handle("cloud:open-onedrive", async () => {
   const oneDriveExe = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "OneDrive", "OneDrive.exe");
   const oneDriveFolder = path.join(process.env.USERPROFILE || "", "OneDrive");
