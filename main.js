@@ -37,6 +37,8 @@ function writeLauncherLog(message) {
 app.disableHardwareAcceleration();
 writeLauncherLog("Process starting. Hardware acceleration disabled.");
 
+let readyLogged = false;
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -471,18 +473,44 @@ function configureAutoUpdates() {
   });
 }
 
+app.on("will-finish-launching", () => {
+  writeLauncherLog("App will-finish-launching fired.");
+});
+
+app.on("ready", () => {
+  readyLogged = true;
+  writeLauncherLog("App ready event fired.");
+});
+
+app.on("browser-window-created", () => {
+  writeLauncherLog("Browser window created event fired.");
+});
+
+app.on("child-process-gone", (_event, details) => {
+  writeLauncherLog(`Child process gone. type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);
+});
+
 app.whenReady().then(() => {
-  writeLauncherLog("App ready. Initializing data and window.");
+  writeLauncherLog("App whenReady resolved. Initializing data and window.");
   ensureDataFiles();
   configureAutoUpdates();
   createWindow();
 
   app.on("activate", () => {
+    writeLauncherLog("App activate event fired.");
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+}).catch((error) => {
+  writeLauncherLog(`App whenReady rejected: ${error.stack || error.message}`);
 });
+
+setTimeout(() => {
+  if (!readyLogged) {
+    writeLauncherLog("Startup watchdog: app ready was not reached within 10 seconds.");
+  }
+}, 10000);
 
 process.on("uncaughtException", (error) => {
   writeLauncherLog(`Uncaught exception: ${error.stack || error.message}`);
