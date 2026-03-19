@@ -733,6 +733,18 @@ select:focus {
   justify-content: flex-end;
 }
 
+.result-modal {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.result-list {
+  margin: 0 0 18px;
+}
+
+.result-actions {
+  gap: 12px;
+}
+
 .terms-skip {
   position: absolute;
   top: 10px;

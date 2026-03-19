@@ -48,6 +48,12 @@ const el = {
   appVersion: document.getElementById("app-version"),
   updateStatus: document.getElementById("update-status"),
   checkUpdates: document.getElementById("check-updates"),
+  resultModal: document.getElementById("result-modal"),
+  resultModalTitle: document.getElementById("result-modal-title"),
+  resultModalMessage: document.getElementById("result-modal-message"),
+  resultModalList: document.getElementById("result-modal-list"),
+  resultModalSecondary: document.getElementById("result-modal-secondary"),
+  resultModalClose: document.getElementById("result-modal-close"),
   addJob: document.getElementById("add-job"),
   jobTemplate: document.getElementById("job-template"),
   termsGate: document.getElementById("terms-gate"),
@@ -231,6 +237,42 @@ function renderMeta() {
   el.buildVersion.textContent = `Version ${version}`;
   el.appVersion.textContent = version;
   el.updateStatus.textContent = updateMessage;
+}
+
+function showResultModal({ title, message, list = [], secondaryAction = null }) {
+  el.resultModalTitle.textContent = title;
+  el.resultModalMessage.textContent = message;
+  el.resultModalList.innerHTML = "";
+
+  if (!list.length) {
+    el.resultModalList.hidden = true;
+  } else {
+    el.resultModalList.hidden = false;
+    list.forEach((entry) => {
+      const item = document.createElement("li");
+      item.textContent = entry;
+      el.resultModalList.appendChild(item);
+    });
+  }
+
+  if (secondaryAction) {
+    el.resultModalSecondary.hidden = false;
+    el.resultModalSecondary.textContent = secondaryAction.label;
+    el.resultModalSecondary.onclick = () => {
+      secondaryAction.onClick().catch((error) => {
+        el.resultModalMessage.textContent = error.message;
+      });
+    };
+  } else {
+    el.resultModalSecondary.hidden = true;
+    el.resultModalSecondary.onclick = null;
+  }
+
+  el.resultModal.hidden = false;
+}
+
+function closeResultModal() {
+  el.resultModal.hidden = true;
 }
 
 function setActionButtonsDisabled(disabled) {
@@ -508,6 +550,37 @@ async function invokeAction(path) {
     state.meta = payload.meta || state.meta;
     renderStatus();
     renderMeta();
+
+    if (path === "/api/check-cloud") {
+      showResultModal({
+        title: "Cloud Sync Review",
+        message: state.status.cloud?.summary || "Cloud check completed.",
+        list: state.status.cloud?.recommendations || [],
+        secondaryAction: window.onebiteDesktop?.openOneDrive
+          ? {
+              label: "Open OneDrive",
+              onClick: async () => {
+                const result = await window.onebiteDesktop.openOneDrive();
+                if (!result.ok) {
+                  throw new Error(result.message);
+                }
+                el.resultModalMessage.textContent = result.message;
+              }
+            }
+          : null
+      });
+      return;
+    }
+
+    if (path === "/api/run-backup") {
+      const success = state.status.lastBackupResult === "success";
+      showResultModal({
+        title: success ? "Backup Complete" : "Backup Needs Attention",
+        message: state.status.lastBackupMessage || "Backup finished.",
+        list: (state.status.recentSnapshots || []).slice(0, 5).map((snapshot) => `Snapshot: ${snapshot}`)
+      });
+      return;
+    }
   } catch (error) {
     el.backupStatusCard.classList.remove("status-good", "status-warning");
     el.backupStatusCard.classList.add("status-error");
@@ -607,6 +680,7 @@ el.checkUpdates.addEventListener("click", () => {
     el.updateStatus.textContent = error.message;
   });
 });
+el.resultModalClose.addEventListener("click", closeResultModal);
 el.browseDestination.addEventListener("click", () => {
   browseDestinationFolder().catch((error) => {
     el.protectionState.textContent = "Unavailable";

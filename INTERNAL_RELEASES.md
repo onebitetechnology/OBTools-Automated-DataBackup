@@ -7,7 +7,7 @@ The app is prepared for local Electron development and Windows installer builds.
 Current app version:
 
 ```text
-1.0.7
+1.0.8
 ```
 
 Desktop shortcut name:

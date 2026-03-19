@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.8 - 2026-03-18
+
+- Added a result popup for cloud checks and backup runs so users get immediate feedback.
+- Added a OneDrive launcher button to the cloud-check result popup when the desktop app can open it.
+
 ## 1.0.7 - 2026-03-18
 
 - Fixed packaged startup failures caused by BOM-prefixed JSON config/status files.

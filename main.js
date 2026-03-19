@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -661,5 +661,31 @@ ipcMain.handle("updates:check", async () => {
 
   return {
     meta: appMeta()
+  };
+});
+
+ipcMain.handle("cloud:open-onedrive", async () => {
+  const oneDriveExe = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "OneDrive", "OneDrive.exe");
+  const oneDriveFolder = path.join(process.env.USERPROFILE || "", "OneDrive");
+
+  if (oneDriveExe && fs.existsSync(oneDriveExe)) {
+    const result = await shell.openPath(oneDriveExe);
+    return {
+      ok: result === "",
+      message: result || "OneDrive opened."
+    };
+  }
+
+  if (oneDriveFolder && fs.existsSync(oneDriveFolder)) {
+    const result = await shell.openPath(oneDriveFolder);
+    return {
+      ok: result === "",
+      message: result || "Opened the OneDrive folder."
+    };
+  }
+
+  return {
+    ok: false,
+    message: "OneDrive is not installed or no local OneDrive folder was found."
   };
 });
