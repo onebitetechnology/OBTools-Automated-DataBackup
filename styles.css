@@ -801,6 +801,17 @@ select:focus {
   line-height: 1.45;
 }
 
+.destination-final-summary {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 31, 74, 0.34);
+  border: 1px solid rgba(112, 168, 255, 0.12);
+  color: #eef6ff;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .updates-card {
   margin-top: 12px;
   padding: 16px;
@@ -1015,6 +1026,10 @@ select:focus {
 
 .result-actions {
   gap: 12px;
+}
+
+.result-actions:has(#result-modal-close[hidden]) {
+  justify-content: flex-start;
 }
 
 .terms-skip {

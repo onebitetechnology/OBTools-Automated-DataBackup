@@ -50,6 +50,10 @@ function Copy-BackupItem($Job, [string]$RootPath) {
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
     $robocopyOutput = @(robocopy $source $destination /MIR /FFT /R:1 /W:1 /XJ /XD "System Volume Information" '$RECYCLE.BIN' 2>&1)
     if ($LASTEXITCODE -ge 8) {
+      if ($robocopyOutput -match 'ERROR 112' -or $robocopyOutput -match 'not enough space on the disk') {
+        throw "The backup drive ran out of space while copying files from $source. Free up space or use a larger drive, then try again."
+      }
+
       $detail = $robocopyOutput |
         ForEach-Object { "$_".Trim() } |
         Where-Object {

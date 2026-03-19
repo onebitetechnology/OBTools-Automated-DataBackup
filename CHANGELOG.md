@@ -2,6 +2,13 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.9 - 2026-03-19
+
+- Fixed the cloud-health footer so a completed cloud review no longer shows as “not checked.”
+- Added an in-progress backup modal so `Run Backup Now` gives immediate status feedback while files are copying.
+- Improved destination guidance in Settings so the final backup location is spelled out more clearly.
+- Cleaned backup failure messaging for disk-full and partial-copy cases so they read as user guidance instead of stack traces.
+
 ## 1.0.10-beta.8 - 2026-03-19
 
 - Fixed the updater flow so `Install Update Now` no longer loses the downloaded-update state after a successful download.

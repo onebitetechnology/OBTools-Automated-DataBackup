@@ -198,13 +198,14 @@
           <div class="settings-section-title">Destination</div>
           <div class="settings-section-copy">Pick the external drive or an existing folder on that drive.</div>
           <div class="settings-section-head compact">
-            <button id="browse-destination" class="secondary" type="button">Browse For Backup Folder</button>
+            <button id="browse-destination" class="secondary" type="button">Browse To Drive Or Folder</button>
           </div>
           <div class="destination-choice-grid">
-            <button id="use-managed-folder" class="ghost choice-button" type="button">Create or Use "One Bite Backups"</button>
-            <button id="use-existing-folder" class="ghost choice-button" type="button">Use The Selected Existing Folder</button>
+            <button id="use-managed-folder" class="ghost choice-button" type="button">Recommended: Use "One Bite Backups"</button>
+            <button id="use-existing-folder" class="ghost choice-button" type="button">Use This Exact Folder</button>
           </div>
           <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
+          <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
           <p id="destination-mode-summary" class="hint">The app will create and maintain a One Bite Backups folder on the selected drive.</p>
           <input id="destination-mode" type="hidden" value="driveLetter">
           <input id="destination-base-folder" type="hidden">

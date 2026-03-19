@@ -27,6 +27,7 @@ const el = {
   destinationLabel: document.getElementById("destination-label"),
   destinationBaseFolder: document.getElementById("destination-base-folder"),
   destinationPickedSummary: document.getElementById("destination-picked-summary"),
+  destinationFinalSummary: document.getElementById("destination-final-summary"),
   destinationModeSummary: document.getElementById("destination-mode-summary"),
   retentionCount: document.getElementById("retention-count"),
   scheduleEnabled: document.getElementById("schedule-enabled"),
@@ -298,8 +299,13 @@ function summarizeActionMessage(message) {
     return match ? `One of the backup items could not be found: ${match[1].trim()}` : "One of the backup items could not be found.";
   }
 
+  if (/ERROR 112|not enough space on the disk/i.test(raw)) {
+    return "The backup drive ran out of space while copying files. Free up space or use a larger drive, then run the backup again.";
+  }
+
   if (/Some files in .* could not be copied/i.test(raw)) {
-    return raw;
+    const firstSentence = raw.match(/Some files in .*? could not be copied\.[^\n]*/i);
+    return firstSentence ? firstSentence[0].trim() : "Some files could not be copied. Close open files or sync apps, then try the backup again.";
   }
 
   if (/Robocopy failed for /i.test(raw)) {
@@ -314,7 +320,7 @@ function summarizeActionMessage(message) {
   return primaryLine || raw;
 }
 
-function showResultModal({ title, message, list = [], secondaryAction = null }) {
+function showResultModal({ title, message, list = [], secondaryAction = null, hideClose = false, closeLabel = "Close" }) {
   el.resultModalTitle.textContent = title;
   el.resultModalMessage.textContent = message;
   el.resultModalList.innerHTML = "";
@@ -343,6 +349,8 @@ function showResultModal({ title, message, list = [], secondaryAction = null }) 
     el.resultModalSecondary.onclick = null;
   }
 
+  el.resultModalClose.hidden = hideClose;
+  el.resultModalClose.textContent = closeLabel;
   el.resultModal.hidden = false;
 }
 
@@ -545,8 +553,10 @@ function renderJobs() {
 function renderStatus() {
   const summary = protectionSummary(state.status);
   const cloudLevel = state.status.cloud?.level || "info";
-  const cloudHealthy = cloudLevel === "success";
-  const cloudProblem = cloudLevel === "warning" || cloudLevel === "error";
+  const cloudChecked = Boolean(state.status.cloud?.checkedAt);
+  const cloudSummary = state.status.cloud?.summary || "";
+  const cloudHealthy = cloudLevel === "success" || (cloudChecked && cloudLevel === "info" && /OneDrive is installed/i.test(cloudSummary) && /running/i.test(cloudSummary));
+  const cloudProblem = cloudChecked && (cloudLevel === "warning" || cloudLevel === "error");
 
   el.backupStatusCard.classList.remove("status-good", "status-warning", "status-error");
   el.backupStatusCard.classList.add(`status-${summary.tone}`);
@@ -566,7 +576,9 @@ function renderStatus() {
     ? "OneDrive backup looks healthy"
     : cloudProblem
       ? "Cloud backup needs attention"
-      : "Cloud health not checked yet";
+      : cloudChecked
+        ? "Cloud sync reviewed"
+        : "Cloud health not checked yet";
 
   el.snapshotList.innerHTML = "";
   const snapshots = state.status.recentSnapshots || [];
@@ -662,10 +674,18 @@ function renderConfig() {
     el.destinationModeSummary.textContent = "The app will store backups inside the folder you selected.";
     el.useExistingFolder.classList.add("choice-active");
     el.useManagedFolder.classList.remove("choice-active");
+    el.destinationFinalSummary.textContent = destination.selectedPath
+      ? `Backups will be saved inside: ${destination.selectedPath}`
+      : "Backups will use the exact folder you browse to.";
   } else {
     el.destinationModeSummary.textContent = 'The app will create and maintain a "One Bite Backups" folder on the selected drive.';
     el.useManagedFolder.classList.add("choice-active");
     el.useExistingFolder.classList.remove("choice-active");
+    if (destination.driveLetter) {
+      el.destinationFinalSummary.textContent = `Backups will be saved to: ${destination.driveLetter.replace(":", "")}:\\One Bite Backups`;
+    } else {
+      el.destinationFinalSummary.textContent = "Backups will appear here once a destination is selected.";
+    }
   }
   el.retentionCount.value = retentionCount;
   el.scheduleEnabled.checked = Boolean(schedule.enabled);
@@ -781,6 +801,14 @@ async function invokeAction(path) {
   setActionButtonsDisabled(true);
   el.protectionState.textContent = "Working";
   el.protectionMessage.textContent = pendingMessage;
+
+  if (path === "/api/run-backup") {
+    showResultModal({
+      title: "Backup In Progress",
+      message: "Copying files to the selected backup drive. This may take a while for large folders.",
+      hideClose: true
+    });
+  }
 
   try {
     await saveConfig();
