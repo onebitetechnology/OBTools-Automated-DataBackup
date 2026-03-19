@@ -42,7 +42,7 @@ npm install
 npm run dist:win
 ```
 
-3. GitHub Actions can now build the Windows installer automatically on pushes to `main` and on manual runs.
+3. GitHub Actions now builds the Windows installer and publishes the internal beta prerelease automatically on pushes to `main`.
 
 Workflow file:
 
@@ -50,7 +50,7 @@ Workflow file:
 .github/workflows/build-windows-installer.yml
 ```
 
-4. Publish an internal GitHub beta prerelease with the installer and update metadata:
+4. You can still publish manually if needed from a machine with GitHub token access:
 
 ```bash
 GH_TOKEN=your_github_token npm run release:win
@@ -84,3 +84,4 @@ Implemented now:
 - packaged-app update checks in `main.js`
 - prerelease-aware internal update channel for GitHub release testing
 - explicit `beta` channel configuration for GitHub prerelease updates
+- automatic prerelease publishing from GitHub Actions on pushes to `main`

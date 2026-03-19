@@ -39,7 +39,6 @@ jobs:
           if-no-files-found: error
 
   publish-prerelease:
-    if: github.event_name == 'workflow_dispatch'
     needs: build-windows-installer
     runs-on: windows-latest
 
