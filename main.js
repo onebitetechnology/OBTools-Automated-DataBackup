@@ -142,6 +142,54 @@ function deriveDestinationStatus(message, ok) {
   return "Issue Detected";
 }
 
+function detectInstalledBrowsers() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const roamingAppData = process.env.APPDATA || "";
+  const checks = [
+    {
+      id: "chrome-user-data",
+      name: "Google Chrome",
+      path: path.join(localAppData, "Google", "Chrome", "User Data"),
+      detail: "Chrome profiles, bookmarks, extensions, and browser settings"
+    },
+    {
+      id: "edge-user-data",
+      name: "Microsoft Edge",
+      path: path.join(localAppData, "Microsoft", "Edge", "User Data"),
+      detail: "Edge profiles, bookmarks, extensions, and browser settings"
+    },
+    {
+      id: "brave-user-data",
+      name: "Brave",
+      path: path.join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
+      detail: "Brave profiles, bookmarks, extensions, and browser settings"
+    },
+    {
+      id: "firefox-profiles",
+      name: "Mozilla Firefox",
+      path: path.join(roamingAppData, "Mozilla", "Firefox"),
+      detail: "Firefox profiles, bookmarks, and browser settings"
+    },
+    {
+      id: "opera-stable",
+      name: "Opera",
+      path: path.join(roamingAppData, "Opera Software"),
+      detail: "Opera profiles and browser settings"
+    }
+  ];
+
+  return checks
+    .filter((entry) => entry.path && fs.existsSync(entry.path))
+    .map((entry) => ({
+      ...entry,
+      type: "folder"
+    }));
+}
+
 function simulateAction(scriptName) {
   const { statusPath } = dataPaths();
   const status = readJson(statusPath);
@@ -669,6 +717,12 @@ ipcMain.handle("destination:pick-folder", async () => {
     driveLetter,
     baseFolder: relativeFolder === "" ? "" : relativeFolder,
     displayPath: selectedPath
+  };
+});
+
+ipcMain.handle("browsers:detect", async () => {
+  return {
+    browsers: detectInstalledBrowsers()
   };
 });
 

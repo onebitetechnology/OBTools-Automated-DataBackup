@@ -266,6 +266,12 @@ label span {
   gap: 12px;
 }
 
+.panel-head-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .hero-actions {
   margin-top: 14px;
   flex-wrap: wrap;
@@ -955,6 +961,52 @@ select:focus {
 
 .result-modal {
   width: min(640px, calc(100vw - 32px));
+}
+
+.browser-modal {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.browser-list {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.browser-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(112, 168, 255, 0.12);
+  background: rgba(15, 31, 74, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.browser-option input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex: 0 0 18px;
+}
+
+.browser-option-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.browser-option-title {
+  color: #eef6ff;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.browser-option-detail {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .result-list {

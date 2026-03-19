@@ -88,7 +88,10 @@
               <h3>Choose what gets backed up</h3>
               <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
             </div>
-            <button id="add-job" class="ghost">Add Item</button>
+            <div class="panel-head-actions">
+              <button id="detect-browsers" class="secondary" type="button">Find Browsers</button>
+              <button id="add-job" class="ghost">Add Item</button>
+            </div>
           </div>
           <div id="jobs-list" class="jobs-list"></div>
         </section>
@@ -328,6 +331,19 @@
         <div class="terms-actions result-actions">
           <button id="result-modal-secondary" class="secondary" type="button" hidden>Open OneDrive</button>
           <button id="result-modal-close" class="primary" type="button">Close</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="browser-modal" class="terms-gate" hidden>
+      <div class="terms-backdrop"></div>
+      <section class="terms-modal browser-modal">
+        <h2>Browser Backups</h2>
+        <p id="browser-modal-message" class="terms-intro">Check the browsers you want to include in backups.</p>
+        <div id="browser-modal-list" class="browser-list"></div>
+        <div class="terms-actions result-actions">
+          <button id="browser-modal-close" class="secondary" type="button">Close</button>
+          <button id="browser-modal-apply" class="primary" type="button">Add Selected</button>
         </div>
       </section>
     </div>

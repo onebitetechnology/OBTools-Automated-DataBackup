@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.7 - 2026-03-19
+
+- Added browser detection for common Windows browsers so their user-data folders can be added without browsing hidden AppData paths manually.
+- Added a browser selection popup that lets users choose which detected browsers to include in backups.
+- Added duplicate-safe browser backup job creation for Chrome, Edge, Brave, Firefox, and Opera when their profile folders are present.
+
 ## 1.0.10-beta.6 - 2026-03-19
 
 - Hid the updater progress bar until an update is actively downloading.

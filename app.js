@@ -3,7 +3,8 @@ const state = {
   status: null,
   meta: null,
   actionInFlight: false,
-  termsBypassedForSession: false
+  termsBypassedForSession: false,
+  detectedBrowsers: []
 };
 
 const el = {
@@ -64,7 +65,13 @@ const el = {
   resultModalSecondary: document.getElementById("result-modal-secondary"),
   resultModalClose: document.getElementById("result-modal-close"),
   addJob: document.getElementById("add-job"),
+  detectBrowsers: document.getElementById("detect-browsers"),
   jobTemplate: document.getElementById("job-template"),
+  browserModal: document.getElementById("browser-modal"),
+  browserModalMessage: document.getElementById("browser-modal-message"),
+  browserModalList: document.getElementById("browser-modal-list"),
+  browserModalClose: document.getElementById("browser-modal-close"),
+  browserModalApply: document.getElementById("browser-modal-apply"),
   termsGate: document.getElementById("terms-gate"),
   termsConfirm: document.getElementById("terms-confirm"),
   termsAccept: document.getElementById("terms-accept"),
@@ -116,6 +123,10 @@ async function desktopRequest(url, options = {}) {
 
   if (url === "/api/check-updates" && options.method === "POST") {
     return window.onebiteDesktop.checkForUpdates();
+  }
+
+  if (url === "/api/detect-browsers") {
+    return window.onebiteDesktop.detectBrowsers();
   }
 
   throw new Error(`Unsupported desktop request: ${url}`);
@@ -337,6 +348,89 @@ function showResultModal({ title, message, list = [], secondaryAction = null }) 
 
 function closeResultModal() {
   el.resultModal.hidden = true;
+}
+
+function renderBrowserModal() {
+  el.browserModalList.innerHTML = "";
+
+  if (!state.detectedBrowsers.length) {
+    el.browserModalMessage.textContent = "No supported browsers were found on this PC.";
+    el.browserModalApply.disabled = true;
+    return;
+  }
+
+  el.browserModalMessage.textContent = "Check the browsers you want to include in backups.";
+  el.browserModalApply.disabled = false;
+
+  state.detectedBrowsers.forEach((browser) => {
+    const row = document.createElement("label");
+    row.className = "browser-option";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = true;
+    input.value = browser.id;
+
+    const copy = document.createElement("div");
+    copy.className = "browser-option-copy";
+
+    const title = document.createElement("div");
+    title.className = "browser-option-title";
+    title.textContent = browser.name;
+
+    const detail = document.createElement("div");
+    detail.className = "browser-option-detail";
+    detail.textContent = `${browser.detail} | ${browser.path}`;
+
+    copy.append(title, detail);
+    row.append(input, copy);
+    el.browserModalList.appendChild(row);
+  });
+}
+
+function openBrowserModal() {
+  renderBrowserModal();
+  el.browserModal.hidden = false;
+}
+
+function closeBrowserModal() {
+  el.browserModal.hidden = true;
+}
+
+function addDetectedBrowserJobs() {
+  const selectedIds = Array.from(el.browserModalList.querySelectorAll("input[type='checkbox']:checked"))
+    .map((input) => input.value);
+
+  if (!selectedIds.length) {
+    closeBrowserModal();
+    return;
+  }
+
+  const existingPaths = new Set(state.config.jobs.map((job) => String(job.path || "").toLowerCase()));
+  const toAdd = state.detectedBrowsers.filter((browser) => selectedIds.includes(browser.id));
+
+  toAdd.forEach((browser) => {
+    if (existingPaths.has(browser.path.toLowerCase())) {
+      return;
+    }
+
+    state.config.jobs.push({
+      id: `job-${Date.now()}-${browser.id}`,
+      name: `${browser.name} User Data`,
+      path: browser.path,
+      type: "folder",
+      enabled: true
+    });
+  });
+
+  renderJobs();
+  closeBrowserModal();
+}
+
+async function detectBrowsers() {
+  const payload = await request("/api/detect-browsers");
+  state.detectedBrowsers = payload.browsers || [];
+  openBrowserModal();
 }
 
 function updateModalSecondaryAction() {
@@ -909,6 +1003,16 @@ el.addJob.addEventListener("click", () => {
   });
   renderJobs();
 });
+el.detectBrowsers.addEventListener("click", () => {
+  detectBrowsers().catch((error) => {
+    showResultModal({
+      title: "Browser Detection",
+      message: error.message
+    });
+  });
+});
+el.browserModalClose.addEventListener("click", closeBrowserModal);
+el.browserModalApply.addEventListener("click", addDetectedBrowserJobs);
 el.termsConfirm.addEventListener("change", () => {
   el.termsAccept.disabled = !el.termsConfirm.checked;
 });
