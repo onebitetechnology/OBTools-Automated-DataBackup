@@ -13,7 +13,11 @@ let updateStatus = {
   supported: false,
   checkedAt: null,
   message: "Update checks are only available in the installed Windows app.",
-  updateAvailable: false
+  updateAvailable: false,
+  availableVersion: null,
+  downloading: false,
+  downloaded: false,
+  downloadProgress: null
 };
 let autoUpdater = null;
 let autoUpdaterConfigured = false;
@@ -417,7 +421,11 @@ function configureAutoUpdates() {
       supported: false,
       checkedAt: null,
       message: "Update checks are only available in the installed Windows app.",
-      updateAvailable: false
+      updateAvailable: false,
+      availableVersion: null,
+      downloading: false,
+      downloaded: false,
+      downloadProgress: null
     };
     return;
   }
@@ -426,7 +434,11 @@ function configureAutoUpdates() {
     supported: true,
     checkedAt: null,
     message: "Check for updates to look for new internal beta releases.",
-    updateAvailable: false
+    updateAvailable: false,
+    availableVersion: null,
+    downloading: false,
+    downloaded: false,
+    downloadProgress: null
   };
 
   if (autoUpdaterConfigured) {
@@ -441,7 +453,11 @@ function configureAutoUpdates() {
       supported: false,
       checkedAt: null,
       message: `Update checks are unavailable: ${error.message}`,
-      updateAvailable: false
+      updateAvailable: false,
+      availableVersion: null,
+      downloading: false,
+      downloaded: false,
+      downloadProgress: null
     };
     return;
   }
@@ -458,7 +474,11 @@ function configureAutoUpdates() {
       ...updateStatus,
       checkedAt: new Date().toISOString(),
       message: "Checking for updates...",
-      updateAvailable: false
+      updateAvailable: false,
+      availableVersion: null,
+      downloading: false,
+      downloaded: false,
+      downloadProgress: null
     };
   });
 
@@ -466,8 +486,12 @@ function configureAutoUpdates() {
     updateStatus = {
       ...updateStatus,
       checkedAt: new Date().toISOString(),
-      message: `Update ${info?.version || "available"} is ready to download through the release process.`,
-      updateAvailable: true
+      message: `Update ${info?.version || "available"} is available to download.`,
+      updateAvailable: true,
+      availableVersion: info?.version || null,
+      downloading: false,
+      downloaded: false,
+      downloadProgress: null
     };
   });
 
@@ -476,7 +500,36 @@ function configureAutoUpdates() {
       ...updateStatus,
       checkedAt: new Date().toISOString(),
       message: "This machine is already on the latest published build.",
-      updateAvailable: false
+      updateAvailable: false,
+      availableVersion: null,
+      downloading: false,
+      downloaded: false,
+      downloadProgress: null
+    };
+  });
+
+  autoUpdater.on("download-progress", (progress) => {
+    const percent = Math.round(progress?.percent || 0);
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Downloading update${updateStatus.availableVersion ? ` ${updateStatus.availableVersion}` : ""}... ${percent}%`,
+      downloading: true,
+      downloaded: false,
+      downloadProgress: percent
+    };
+  });
+
+  autoUpdater.on("update-downloaded", (info) => {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Update ${info?.version || updateStatus.availableVersion || ""} downloaded and ready to install.`.trim(),
+      updateAvailable: true,
+      availableVersion: info?.version || updateStatus.availableVersion || null,
+      downloading: false,
+      downloaded: true,
+      downloadProgress: 100
     };
   });
 
@@ -485,7 +538,7 @@ function configureAutoUpdates() {
       ...updateStatus,
       checkedAt: new Date().toISOString(),
       message: `Update check failed: ${error.message}`,
-      updateAvailable: false
+      downloading: false
     };
   });
 }
@@ -664,6 +717,74 @@ ipcMain.handle("updates:check", async () => {
 
   return {
     meta: appMeta()
+  };
+});
+
+ipcMain.handle("updates:download", async () => {
+  configureAutoUpdates();
+
+  if (!updateStatus.supported || !autoUpdater) {
+    return {
+      meta: appMeta()
+    };
+  }
+
+  if (updateStatus.downloaded) {
+    return {
+      meta: appMeta()
+    };
+  }
+
+  try {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Downloading update${updateStatus.availableVersion ? ` ${updateStatus.availableVersion}` : ""}...`,
+      downloading: true,
+      downloaded: false,
+      downloadProgress: updateStatus.downloadProgress || 0
+    };
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    updateStatus = {
+      ...updateStatus,
+      checkedAt: new Date().toISOString(),
+      message: `Update download failed: ${error.message}`,
+      downloading: false,
+      downloaded: false
+    };
+  }
+
+  return {
+    meta: appMeta()
+  };
+});
+
+ipcMain.handle("updates:install", async () => {
+  configureAutoUpdates();
+
+  if (!updateStatus.supported || !autoUpdater || !updateStatus.downloaded) {
+    return {
+      ok: false,
+      meta: appMeta(),
+      message: "No downloaded update is ready to install yet."
+    };
+  }
+
+  updateStatus = {
+    ...updateStatus,
+    checkedAt: new Date().toISOString(),
+    message: "Installing update and restarting the app..."
+  };
+
+  setTimeout(() => {
+    autoUpdater.quitAndInstall(false, true);
+  }, 200);
+
+  return {
+    ok: true,
+    meta: appMeta(),
+    message: "Installing update and restarting the app..."
   };
 });
 

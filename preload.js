@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   openOneDrive: () => ipcRenderer.invoke("cloud:open-onedrive"),
   installAutomation: () => ipcRenderer.invoke("automation:install"),
   checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  downloadUpdate: () => ipcRenderer.invoke("updates:download"),
+  installUpdate: () => ipcRenderer.invoke("updates:install"),
   openReleasesPage: () => ipcRenderer.invoke("updates:open-releases"),
   pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),
   pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder")

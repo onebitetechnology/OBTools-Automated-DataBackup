@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.3 - 2026-03-19
+
+- Added an in-app `Download Update` action when a newer beta build is found.
+- Added an in-app `Install Now` action after the update package finishes downloading.
+- Surfaced updater download progress and install-ready state through the existing update status messaging.
+
 ## 1.0.10-beta.2 - 2026-03-19
 
 - Fixed destination selection so browsing for a backup drive updates the saved backup target correctly.

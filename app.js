@@ -304,6 +304,64 @@ function closeResultModal() {
   el.resultModal.hidden = true;
 }
 
+function updateModalSecondaryAction() {
+  const updateInfo = state.meta?.updateStatus || {};
+
+  if (window.onebiteDesktop?.installUpdate && updateInfo.downloaded) {
+    return {
+      label: "Install Now",
+      onClick: async () => {
+        const result = await window.onebiteDesktop.installUpdate();
+        state.meta = result.meta || state.meta;
+        renderMeta();
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+        el.resultModalMessage.textContent = result.message;
+        el.resultModalSecondary.hidden = true;
+      }
+    };
+  }
+
+  if (window.onebiteDesktop?.downloadUpdate && updateInfo.updateAvailable) {
+    return {
+      label: "Download Update",
+      onClick: async () => {
+        el.resultModalMessage.textContent = "Downloading update...";
+        const result = await window.onebiteDesktop.downloadUpdate();
+        state.meta = result.meta || state.meta;
+        renderMeta();
+
+        if (state.meta?.updateStatus?.downloaded) {
+          showResultModal({
+            title: "Update Ready",
+            message: state.meta.updateStatus.message,
+            secondaryAction: updateModalSecondaryAction()
+          });
+          return;
+        }
+
+        el.resultModalMessage.textContent = state.meta?.updateStatus?.message || "Update download finished.";
+      }
+    };
+  }
+
+  if (window.onebiteDesktop?.openReleasesPage && updateInfo.updateAvailable) {
+    return {
+      label: "Open Releases",
+      onClick: async () => {
+        const result = await window.onebiteDesktop.openReleasesPage();
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+        el.resultModalMessage.textContent = result.message;
+      }
+    };
+  }
+
+  return null;
+}
+
 function setActionButtonsDisabled(disabled) {
   state.actionInFlight = disabled;
   el.runBackup.disabled = disabled;
@@ -644,18 +702,7 @@ async function checkForUpdates() {
   showResultModal({
     title: state.meta?.updateStatus?.updateAvailable ? "Update Available" : "Update Check Complete",
     message: updateMessage,
-    secondaryAction: window.onebiteDesktop?.openReleasesPage
-      ? {
-          label: "Open Releases",
-          onClick: async () => {
-            const result = await window.onebiteDesktop.openReleasesPage();
-            if (!result.ok) {
-              throw new Error(result.message);
-            }
-            el.resultModalMessage.textContent = result.message;
-          }
-        }
-      : null
+    secondaryAction: updateModalSecondaryAction()
   });
 }
 
