@@ -504,6 +504,98 @@ button:disabled {
   font-family: "Space Grotesk", sans-serif;
 }
 
+.cloud-health-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 8px;
+}
+
+.health-label {
+  margin: 0;
+  color: #eef6ff;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.health-indicator {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  flex: 0 0 18px;
+}
+
+.health-indicator::before,
+.health-indicator::after {
+  content: "";
+  position: absolute;
+  background: #fff;
+}
+
+.health-indicator-neutral {
+  background: rgba(154, 181, 220, 0.5);
+  box-shadow: 0 0 0 1px rgba(154, 181, 220, 0.18);
+}
+
+.health-indicator-neutral::before {
+  top: 8px;
+  left: 4px;
+  width: 10px;
+  height: 2px;
+  border-radius: 999px;
+}
+
+.health-indicator-neutral::after {
+  display: none;
+}
+
+.health-indicator-success {
+  background: linear-gradient(180deg, #2ad3a2, #179b71);
+  box-shadow: 0 0 0 1px rgba(53, 211, 162, 0.18), 0 0 18px rgba(42, 211, 162, 0.24);
+}
+
+.health-indicator-success::before {
+  top: 9px;
+  left: 4px;
+  width: 4px;
+  height: 2px;
+  transform: rotate(45deg);
+  border-radius: 999px;
+}
+
+.health-indicator-success::after {
+  top: 7px;
+  left: 7px;
+  width: 7px;
+  height: 2px;
+  transform: rotate(-45deg);
+  border-radius: 999px;
+}
+
+.health-indicator-error {
+  background: linear-gradient(180deg, #ff6f87, #d93c57);
+  box-shadow: 0 0 0 1px rgba(255, 111, 135, 0.18), 0 0 18px rgba(255, 111, 135, 0.24);
+}
+
+.health-indicator-error::before {
+  top: 8px;
+  left: 4px;
+  width: 10px;
+  height: 2px;
+  transform: rotate(45deg);
+  border-radius: 999px;
+}
+
+.health-indicator-error::after {
+  top: 8px;
+  left: 4px;
+  width: 10px;
+  height: 2px;
+  transform: rotate(-45deg);
+  border-radius: 999px;
+}
+
 .metric-note,
 .hint {
   color: var(--muted);
@@ -735,6 +827,10 @@ select:focus {
   display: grid;
   gap: 8px;
   margin-top: 14px;
+}
+
+.update-progress-shell[hidden] {
+  display: none;
 }
 
 .update-progress-track {

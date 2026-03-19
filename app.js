@@ -15,6 +15,8 @@ const el = {
   lastBackupMessage: document.getElementById("last-backup-message"),
   snapshotCount: document.getElementById("snapshot-count"),
   cloudSummary: document.getElementById("cloud-summary"),
+  cloudHealthIndicator: document.getElementById("cloud-health-indicator"),
+  cloudHealthLabel: document.getElementById("cloud-health-label"),
   cloudRecommendations: document.getElementById("cloud-recommendations"),
   buildVersion: document.getElementById("build-version"),
   snapshotList: document.getElementById("snapshot-list"),
@@ -243,7 +245,7 @@ function renderMeta() {
   const updateInfo = state.meta?.updateStatus || {};
   const updateMessage = updateInfo.message || "Update checks are not ready yet.";
   const latestVersion = updateInfo.availableVersion || "Not checked yet";
-  const showProgress = Boolean(updateInfo.downloading || updateInfo.downloaded);
+  const showProgress = Boolean(updateInfo.downloading);
   const progressValue = updateInfo.downloaded
     ? 100
     : Math.max(0, Math.min(100, Number(updateInfo.downloadProgress || 0)));
@@ -448,6 +450,10 @@ function renderJobs() {
 
 function renderStatus() {
   const summary = protectionSummary(state.status);
+  const cloudLevel = state.status.cloud?.level || "info";
+  const cloudHealthy = cloudLevel === "success";
+  const cloudProblem = cloudLevel === "warning" || cloudLevel === "error";
+
   el.backupStatusCard.classList.remove("status-good", "status-warning", "status-error");
   el.backupStatusCard.classList.add(`status-${summary.tone}`);
   el.protectionState.textContent = summary.title;
@@ -458,6 +464,15 @@ function renderStatus() {
   el.cloudSummary.textContent = state.status.cloud?.summary || "Cloud check has not been run yet.";
   el.cloudSummary.classList.toggle("warning-copy", state.status.cloud?.level === "warning");
   el.cloudSummary.classList.toggle("error-copy", state.status.cloud?.level === "error");
+  el.cloudHealthIndicator.classList.remove("health-indicator-neutral", "health-indicator-success", "health-indicator-error");
+  el.cloudHealthIndicator.classList.add(
+    cloudHealthy ? "health-indicator-success" : cloudProblem ? "health-indicator-error" : "health-indicator-neutral"
+  );
+  el.cloudHealthLabel.textContent = cloudHealthy
+    ? "OneDrive backup looks healthy"
+    : cloudProblem
+      ? "Cloud backup needs attention"
+      : "Cloud health not checked yet";
 
   el.snapshotList.innerHTML = "";
   const snapshots = state.status.recentSnapshots || [];

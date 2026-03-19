@@ -22,6 +22,7 @@ $status = Read-Json $StatusPath
 $recommendations = New-Object System.Collections.Generic.List[string]
 $summaryParts = New-Object System.Collections.Generic.List[string]
 $level = "info"
+$healthy = $true
 
 $oneDriveExe = Join-Path $env:LOCALAPPDATA "Microsoft\OneDrive\OneDrive.exe"
 $oneDriveFolder = Join-Path $env:USERPROFILE "OneDrive"
@@ -33,6 +34,7 @@ if (Test-Path -LiteralPath $oneDriveExe) {
   $summaryParts.Add("OneDrive is not installed.")
   $recommendations.Add("Install or re-enable OneDrive if the customer expects cloud protection.")
   $level = "warning"
+  $healthy = $false
 }
 
 if ($process) {
@@ -43,6 +45,7 @@ if ($process) {
   if ($level -eq "info") {
     $level = "warning"
   }
+  $healthy = $false
 }
 
 if (Test-Path -LiteralPath $oneDriveFolder) {
@@ -51,6 +54,7 @@ if (Test-Path -LiteralPath $oneDriveFolder) {
   $summaryParts.Add("No OneDrive user folder was found.")
   $recommendations.Add("Open OneDrive setup and confirm a local sync folder has been created.")
   $level = "warning"
+  $healthy = $false
 }
 
 $desktop = [Environment]::GetFolderPath("Desktop")
@@ -59,6 +63,12 @@ if ($desktop -like "*OneDrive*" -or $documents -like "*OneDrive*") {
   $summaryParts.Add("Known folders appear to be redirected into OneDrive.")
 } else {
   $recommendations.Add("Consider enabling OneDrive Known Folder Backup for Desktop and Documents.")
+  $healthy = $false
+}
+
+if ($healthy -and $recommendations.Count -eq 0) {
+  $level = "success"
+  $summaryParts.Add("Known folders appear protected and OneDrive looks healthy.")
 }
 
 $status.cloud = [ordered]@{

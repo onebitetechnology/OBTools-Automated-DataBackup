@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.6 - 2026-03-19
+
+- Hid the updater progress bar until an update is actively downloading.
+- Added a clearer cloud-health badge with green healthy and red attention states.
+- Upgraded OneDrive health checks to report a `success` state when installed, running, and protecting known folders.
+
 ## 1.0.10-beta.5 - 2026-03-19
 
 - Fixed updater initialization so the Settings update controls are active immediately in the installed Windows app.
