@@ -45,6 +45,9 @@ function Write-ProgressMarker(
   [string]$Detail
 ) {
   $percent = if ($TotalSteps -le 0) { 0 } else { [Math]::Min([Math]::Round(($Step / $TotalSteps) * 100), 100) }
+  if ($Phase -ne "complete" -and $percent -ge 100) {
+    $percent = 96
+  }
   $payload = @{
     phase = $Phase
     jobName = $JobName

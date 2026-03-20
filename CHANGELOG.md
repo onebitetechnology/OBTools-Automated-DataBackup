@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.15 - 2026-03-19
+
+- Added a user-facing runtime log and a Settings button to open the local logs folder.
+- Backup progress events are now written to `obtools-runtime.log` so long-running or stuck-feeling copies can be diagnosed after the fact.
+- Smoothed backup progress percentages so non-final phases no longer sit at `100%` before the run is actually finished.
+
 ## 1.0.10-beta.14 - 2026-03-19
 
 - Reconciled existing snapshot folders on startup so the dashboard no longer shows `Never` and `0` when backups already exist on the selected drive.

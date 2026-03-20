@@ -61,6 +61,7 @@ const el = {
   checkUpdates: document.getElementById("check-updates"),
   downloadUpdate: document.getElementById("download-update"),
   installUpdate: document.getElementById("install-update"),
+  openLogsFolder: document.getElementById("open-logs-folder"),
   updateProgressShell: document.getElementById("update-progress-shell"),
   updateProgressBar: document.getElementById("update-progress-bar"),
   updateProgressLabel: document.getElementById("update-progress-label"),
@@ -1059,6 +1060,22 @@ async function installUpdate() {
   });
 }
 
+async function openLogsFolder() {
+  if (!window.onebiteDesktop?.openLogsFolder) {
+    showResultModal({
+      title: "Logs Folder",
+      message: "Log access is available in the installed desktop app."
+    });
+    return;
+  }
+
+  const payload = await window.onebiteDesktop.openLogsFolder();
+  showResultModal({
+    title: payload.ok ? "Logs Folder Opened" : "Logs Folder",
+    message: payload.message || "The logs folder could not be opened."
+  });
+}
+
 async function browseDestinationFolder() {
   if (!window.onebiteDesktop?.pickDestinationFolder) {
     el.destinationPickedSummary.textContent = "Destination browsing is available in the installed desktop app.";
@@ -1134,6 +1151,14 @@ el.installAutomation.addEventListener("click", () => {
 el.checkUpdates.addEventListener("click", () => {
   checkForUpdates().catch((error) => {
     el.updateStatus.textContent = error.message;
+  });
+});
+el.openLogsFolder.addEventListener("click", () => {
+  openLogsFolder().catch((error) => {
+    showResultModal({
+      title: "Logs Folder",
+      message: error.message
+    });
   });
 });
 el.downloadUpdate.addEventListener("click", () => {

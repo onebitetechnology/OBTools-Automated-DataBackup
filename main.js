@@ -33,6 +33,7 @@ function publishUpdateStatus() {
 }
 
 function publishBackupProgress(progress) {
+  writeRuntimeLog(`Backup progress: phase=${progress?.phase || "unknown"} percent=${progress?.percent ?? "?"} job=${progress?.jobName || ""} detail=${progress?.detail || ""}`);
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.webContents.send("backup:progress", progress);
@@ -44,6 +45,21 @@ function writeLauncherLog(message) {
   try {
     const logRoot = app.isReady() ? app.getPath("userData") : os.tmpdir();
     const logPath = path.join(logRoot, "obtools-launcher.log");
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch (_error) {
+    // Logging should never crash the app.
+  }
+}
+
+function runtimeLogPath() {
+  const logRoot = app.isReady() ? app.getPath("userData") : os.tmpdir();
+  return path.join(logRoot, "obtools-runtime.log");
+}
+
+function writeRuntimeLog(message) {
+  try {
+    const logPath = runtimeLogPath();
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
   } catch (_error) {
@@ -1033,6 +1049,7 @@ ipcMain.handle("storage:analyze", async () => {
 
 ipcMain.handle("backup:run", async () => {
   writeLauncherLog("IPC backup:run received.");
+  writeRuntimeLog("Backup run requested.");
   publishBackupProgress({
     phase: "starting",
     jobName: "",
@@ -1045,6 +1062,7 @@ ipcMain.handle("backup:run", async () => {
   const config = readJson(configPath);
   const result = await runPowerShell("backup-engine.ps1");
   writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
+  writeRuntimeLog(`Backup run completed. ok=${result.ok} message=${result.message}`);
   publishBackupProgress({
     phase: result.ok ? "complete" : "finished-with-issue",
     jobName: "",
@@ -1066,8 +1084,10 @@ ipcMain.handle("backup:run", async () => {
 
 ipcMain.handle("cloud:check", async () => {
   writeLauncherLog("IPC cloud:check received.");
+  writeRuntimeLog("Cloud sync check requested.");
   const result = await runPowerShell("check-cloud-health.ps1");
   writeLauncherLog(`IPC cloud:check completed. ok=${result.ok} message=${result.message}`);
+  writeRuntimeLog(`Cloud sync check completed. ok=${result.ok} message=${result.message}`);
   const { statusPath } = dataPaths();
   return {
     status: mergeStatus({
@@ -1083,8 +1103,10 @@ ipcMain.handle("cloud:check", async () => {
 
 ipcMain.handle("automation:install", async () => {
   writeLauncherLog("IPC automation:install received.");
+  writeRuntimeLog("Automation install requested.");
   const result = await runPowerShell("install-scheduled-backup.ps1");
   writeLauncherLog(`IPC automation:install completed. ok=${result.ok} message=${result.message}`);
+  writeRuntimeLog(`Automation install completed. ok=${result.ok} message=${result.message}`);
   return {
     status: mergeStatus({
       lastBackupMessage: result.message
@@ -1203,6 +1225,27 @@ ipcMain.handle("updates:open-releases", async () => {
       message: error.message
     };
   }
+});
+
+ipcMain.handle("logs:open-folder", async () => {
+  const { userDataDir } = dataPaths();
+
+  if (!fs.existsSync(runtimeLogPath())) {
+    writeRuntimeLog("Runtime log initialized.");
+  }
+
+  const result = await shell.openPath(userDataDir);
+  if (result) {
+    return {
+      ok: false,
+      message: `Could not open the logs folder. ${result}`
+    };
+  }
+
+  return {
+    ok: true,
+    message: `Opened the logs folder: ${userDataDir}`
+  };
 });
 
 ipcMain.handle("cloud:open-onedrive", async () => {
