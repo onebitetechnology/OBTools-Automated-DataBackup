@@ -339,6 +339,15 @@
       <section class="terms-modal result-modal">
         <h2 id="result-modal-title">Action Result</h2>
         <p id="result-modal-message" class="terms-intro">Details will appear here.</p>
+        <div id="result-progress-shell" class="result-progress-shell" hidden>
+          <div class="result-progress-track">
+            <div id="result-progress-bar" class="result-progress-bar"></div>
+          </div>
+          <div class="result-progress-meta">
+            <p id="result-progress-label" class="result-progress-label">0%</p>
+            <p id="result-progress-detail" class="result-progress-detail">Preparing backup...</p>
+          </div>
+        </div>
         <ul id="result-modal-list" class="recommendations result-list"></ul>
         <div class="terms-actions result-actions">
           <button id="result-modal-secondary" class="secondary" type="button" hidden>Open OneDrive</button>

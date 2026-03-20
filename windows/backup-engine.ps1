@@ -37,6 +37,26 @@ function Expand-WindowsPath([string]$Value) {
   [Environment]::ExpandEnvironmentVariables($Value)
 }
 
+function Write-ProgressMarker(
+  [string]$Phase,
+  [string]$JobName,
+  [int]$Step,
+  [int]$TotalSteps,
+  [string]$Detail
+) {
+  $percent = if ($TotalSteps -le 0) { 0 } else { [Math]::Min([Math]::Round(($Step / $TotalSteps) * 100), 100) }
+  $payload = @{
+    phase = $Phase
+    jobName = $JobName
+    step = $Step
+    totalSteps = $TotalSteps
+    percent = [int]$percent
+    detail = $Detail
+  } | ConvertTo-Json -Compress
+
+  Write-Output "__OB_PROGRESS__:$payload"
+}
+
 function Copy-BackupItem($Job, [string]$RootPath) {
   $source = Expand-WindowsPath $Job.path
   if (-not (Test-Path -LiteralPath $source)) {
@@ -98,21 +118,28 @@ $snapshotsRoot = Join-Path $baseRoot "snapshots"
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $snapshotPath = Join-Path $snapshotsRoot $timestamp
 $keep = [Math]::Max([int]$config.retentionCount, 1)
+$enabledJobs = @($config.jobs | Where-Object { $_.enabled })
+$totalSteps = [Math]::Max(($enabledJobs.Count * 2) + 1, 1)
 
 New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
 
 $existingSnapshots = @(Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime)
+Write-ProgressMarker -Phase "preparing" -JobName "" -Step 1 -TotalSteps $totalSteps -Detail "Preparing the backup destination."
 if ($existingSnapshots.Count -ge $keep) {
   $removeCount = ($existingSnapshots.Count - $keep) + 1
   $existingSnapshots | Select-Object -First $removeCount | Remove-Item -Recurse -Force
 }
 
-foreach ($job in $config.jobs) {
-  if ($job.enabled) {
-    Copy-BackupItem $job $currentRoot
-    Copy-BackupItem $job $snapshotPath
-  }
+for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
+  $job = $enabledJobs[$index]
+  $currentStep = 2 + ($index * 2)
+
+  Write-ProgressMarker -Phase "copying-current" -JobName $job.name -Step $currentStep -TotalSteps $totalSteps -Detail "Copying to the current backup set."
+  Copy-BackupItem $job $currentRoot
+
+  Write-ProgressMarker -Phase "copying-snapshot" -JobName $job.name -Step ($currentStep + 1) -TotalSteps $totalSteps -Detail "Creating the dated snapshot copy."
+  Copy-BackupItem $job $snapshotPath
 }
 
 $allSnapshots = @(Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime -Descending)
@@ -128,4 +155,5 @@ $status.destinationStatus = "Connected"
 $status.recentSnapshots = @($remaining)
 
 Write-Json $StatusPath $status
+Write-ProgressMarker -Phase "complete" -JobName "" -Step $totalSteps -TotalSteps $totalSteps -Detail "Backup completed successfully."
 Write-Output "Backup completed successfully."

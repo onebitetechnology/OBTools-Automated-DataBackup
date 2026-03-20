@@ -32,6 +32,14 @@ function publishUpdateStatus() {
   }
 }
 
+function publishBackupProgress(progress) {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send("backup:progress", progress);
+    }
+  }
+}
+
 function writeLauncherLog(message) {
   try {
     const logRoot = app.isReady() ? app.getPath("userData") : os.tmpdir();
@@ -351,6 +359,22 @@ function simulateAction(scriptName) {
   const now = new Date();
 
   if (scriptName === "backup-engine.ps1") {
+    publishBackupProgress({
+      phase: "preparing",
+      jobName: "",
+      step: 1,
+      totalSteps: 3,
+      percent: 20,
+      detail: "Preparing the backup destination."
+    });
+    publishBackupProgress({
+      phase: "copying-current",
+      jobName: "Preview Files",
+      step: 2,
+      totalSteps: 3,
+      percent: 65,
+      detail: "Copying to the current backup set."
+    });
     const timestamp = now.toISOString().replace(/[:.]/g, "-");
     status.lastBackupAt = now.toISOString();
     status.lastBackupResult = "success";
@@ -358,6 +382,14 @@ function simulateAction(scriptName) {
     status.destinationStatus = "Preview Mode";
     status.recentSnapshots = [timestamp, ...(status.recentSnapshots || [])].slice(0, 5);
     writeJson(statusPath, status);
+    publishBackupProgress({
+      phase: "complete",
+      jobName: "",
+      step: 3,
+      totalSteps: 3,
+      percent: 100,
+      detail: "Backup completed successfully."
+    });
     return { ok: true, message: status.lastBackupMessage };
   }
 
@@ -432,6 +464,54 @@ function runPowerShell(scriptName) {
       return fs.existsSync(candidate);
     });
 
+    const progressPrefix = "__OB_PROGRESS__:";
+
+    const handleOutputChunk = (chunk, state, scriptForLog) => {
+      state.buffer += chunk.toString();
+      const lines = state.buffer.split(/\r?\n/);
+      state.buffer = lines.pop() || "";
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          continue;
+        }
+
+        if (line.startsWith(progressPrefix)) {
+          const rawPayload = line.slice(progressPrefix.length);
+          try {
+            const progress = JSON.parse(rawPayload);
+            publishBackupProgress(progress);
+            writeLauncherLog(`Backup progress from ${scriptForLog}: ${rawPayload}`);
+          } catch (error) {
+            writeLauncherLog(`Failed to parse backup progress from ${scriptForLog}: ${error.message}`);
+          }
+          continue;
+        }
+
+        state.stdout += `${line}\n`;
+      }
+    };
+
+    const flushOutputBuffer = (state) => {
+      const line = state.buffer.trim();
+      if (!line) {
+        return;
+      }
+
+      if (line.startsWith(progressPrefix)) {
+        const rawPayload = line.slice(progressPrefix.length);
+        try {
+          publishBackupProgress(JSON.parse(rawPayload));
+        } catch (_error) {
+          // Ignore malformed trailing progress lines.
+        }
+        return;
+      }
+
+      state.stdout += `${line}\n`;
+    };
+
     const tryShell = (index) => {
       if (index >= resolvedShellCandidates.length) {
         const cmdCandidates = [
@@ -446,7 +526,10 @@ function runPowerShell(scriptName) {
           windowsHide: true
         });
 
-        let stdout = "";
+        const outputState = {
+          stdout: "",
+          buffer: ""
+        };
         let stderr = "";
         let settled = false;
 
@@ -465,7 +548,7 @@ function runPowerShell(scriptName) {
         });
 
         child.stdout.on("data", (chunk) => {
-          stdout += chunk.toString();
+          handleOutputChunk(chunk, outputState, scriptName);
         });
 
         child.stderr.on("data", (chunk) => {
@@ -478,11 +561,12 @@ function runPowerShell(scriptName) {
           }
 
           settled = true;
-          writeLauncherLog(`Fallback shell exited for ${scriptName} with code ${code}. stderr=${stderr.trim()} stdout=${stdout.trim()}`);
+          flushOutputBuffer(outputState);
+          writeLauncherLog(`Fallback shell exited for ${scriptName} with code ${code}. stderr=${stderr.trim()} stdout=${outputState.stdout.trim()}`);
           resolve({
             ok: code === 0,
             code,
-            message: stderr.trim() || stdout.trim() || `Exited with code ${code}.`
+            message: stderr.trim() || outputState.stdout.trim() || `Exited with code ${code}.`
           });
         });
         return;
@@ -495,7 +579,10 @@ function runPowerShell(scriptName) {
         windowsHide: true
       });
 
-      let stdout = "";
+      const outputState = {
+        stdout: "",
+        buffer: ""
+      };
       let stderr = "";
       let settled = false;
 
@@ -520,7 +607,7 @@ function runPowerShell(scriptName) {
       });
 
       child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString();
+        handleOutputChunk(chunk, outputState, scriptName);
       });
 
       child.stderr.on("data", (chunk) => {
@@ -533,11 +620,12 @@ function runPowerShell(scriptName) {
         }
 
         settled = true;
-        writeLauncherLog(`Shell exited for ${scriptName} with code ${code}. stderr=${stderr.trim()} stdout=${stdout.trim()}`);
+        flushOutputBuffer(outputState);
+        writeLauncherLog(`Shell exited for ${scriptName} with code ${code}. stderr=${stderr.trim()} stdout=${outputState.stdout.trim()}`);
         resolve({
           ok: code === 0,
           code,
-          message: stderr.trim() || stdout.trim() || `Exited with code ${code}.`
+          message: stderr.trim() || outputState.stdout.trim() || `Exited with code ${code}.`
         });
       });
     };
@@ -891,10 +979,26 @@ ipcMain.handle("storage:analyze", async () => {
 
 ipcMain.handle("backup:run", async () => {
   writeLauncherLog("IPC backup:run received.");
+  publishBackupProgress({
+    phase: "starting",
+    jobName: "",
+    step: 0,
+    totalSteps: 1,
+    percent: 2,
+    detail: "Starting the backup process."
+  });
   const { configPath } = dataPaths();
   const config = readJson(configPath);
   const result = await runPowerShell("backup-engine.ps1");
   writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
+  publishBackupProgress({
+    phase: result.ok ? "complete" : "finished-with-issue",
+    jobName: "",
+    step: 1,
+    totalSteps: 1,
+    percent: result.ok ? 100 : 100,
+    detail: result.ok ? "Backup completed." : "Backup finished with an issue."
+  });
   return {
     status: mergeStatus({
       destinationStatus: deriveDestinationStatus(result.message, result.ok),

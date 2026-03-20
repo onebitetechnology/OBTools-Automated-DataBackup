@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
     ipcRenderer.on("updates:status", listener);
     return () => ipcRenderer.removeListener("updates:status", listener);
   },
+  onBackupProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress);
+    ipcRenderer.on("backup:progress", listener);
+    return () => ipcRenderer.removeListener("backup:progress", listener);
+  },
   detectBrowsers: () => ipcRenderer.invoke("browsers:detect"),
   analyzeStorage: () => ipcRenderer.invoke("storage:analyze"),
   pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),

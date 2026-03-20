@@ -3,6 +3,7 @@ const state = {
   status: null,
   meta: null,
   storage: null,
+  backupProgress: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: []
@@ -66,6 +67,10 @@ const el = {
   resultModal: document.getElementById("result-modal"),
   resultModalTitle: document.getElementById("result-modal-title"),
   resultModalMessage: document.getElementById("result-modal-message"),
+  resultProgressShell: document.getElementById("result-progress-shell"),
+  resultProgressBar: document.getElementById("result-progress-bar"),
+  resultProgressLabel: document.getElementById("result-progress-label"),
+  resultProgressDetail: document.getElementById("result-progress-detail"),
   resultModalList: document.getElementById("result-modal-list"),
   resultModalSecondary: document.getElementById("result-modal-secondary"),
   resultModalClose: document.getElementById("result-modal-close"),
@@ -347,9 +352,10 @@ function summarizeActionMessage(message) {
   return primaryLine || raw;
 }
 
-function showResultModal({ title, message, list = [], secondaryAction = null, hideClose = false, closeLabel = "Close" }) {
+function showResultModal({ title, message, list = [], secondaryAction = null, hideClose = false, closeLabel = "Close", progress = null }) {
   el.resultModalTitle.textContent = title;
   el.resultModalMessage.textContent = message;
+  renderResultProgress(progress);
   el.resultModalList.innerHTML = "";
 
   if (!list.length) {
@@ -383,6 +389,26 @@ function showResultModal({ title, message, list = [], secondaryAction = null, hi
 
 function closeResultModal() {
   el.resultModal.hidden = true;
+  renderResultProgress(null);
+}
+
+function renderResultProgress(progress = null) {
+  if (!progress) {
+    el.resultProgressShell.hidden = true;
+    el.resultProgressBar.classList.remove("indeterminate");
+    el.resultProgressBar.style.width = "0%";
+    el.resultProgressLabel.textContent = "0%";
+    el.resultProgressDetail.textContent = "";
+    return;
+  }
+
+  const percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+  const indeterminate = Boolean(progress.indeterminate);
+  el.resultProgressShell.hidden = false;
+  el.resultProgressBar.classList.toggle("indeterminate", indeterminate);
+  el.resultProgressBar.style.width = indeterminate ? "45%" : `${percent}%`;
+  el.resultProgressLabel.textContent = indeterminate ? "Working..." : `${percent}%`;
+  el.resultProgressDetail.textContent = progress.detail || "Processing backup files...";
 }
 
 function renderBrowserModal() {
@@ -810,6 +836,25 @@ async function load() {
       renderMeta();
     });
   }
+  if (window.onebiteDesktop?.onBackupProgress) {
+    window.onebiteDesktop.onBackupProgress((progress) => {
+      state.backupProgress = progress || null;
+      if (el.resultModal.hidden || el.resultModalTitle.textContent !== "Backup In Progress") {
+        return;
+      }
+
+      const detail = progress?.jobName
+        ? `${progress.detail || "Copying files"} ${progress.jobName}`
+        : (progress?.detail || "Processing backup files...");
+
+      renderResultProgress({
+        percent: progress?.percent || 0,
+        detail,
+        indeterminate: progress?.phase === "starting"
+      });
+      el.resultModalMessage.textContent = detail;
+    });
+  }
   renderConfig();
   renderStatus();
   refreshStorageAnalysis().catch(() => {
@@ -871,10 +916,20 @@ async function invokeAction(path) {
   el.protectionMessage.textContent = pendingMessage;
 
   if (path === "/api/run-backup") {
+    state.backupProgress = {
+      phase: "starting",
+      percent: 2,
+      detail: "Starting the backup process."
+    };
     showResultModal({
       title: "Backup In Progress",
       message: "Copying files to the selected backup drive. This may take a while for large folders.",
-      hideClose: true
+      hideClose: true,
+      progress: {
+        percent: 2,
+        detail: "Starting the backup process.",
+        indeterminate: true
+      }
     });
   }
 
@@ -910,6 +965,7 @@ async function invokeAction(path) {
     }
 
     if (path === "/api/run-backup") {
+      state.backupProgress = null;
       const success = state.status.lastBackupResult === "success";
       showResultModal({
         title: success ? "Backup Complete" : "Backup Needs Attention",
@@ -927,6 +983,10 @@ async function invokeAction(path) {
 
     if (path === "/api/check-cloud") {
       el.cloudSummary.textContent = error.message;
+    }
+
+    if (path === "/api/run-backup") {
+      state.backupProgress = null;
     }
   } finally {
     setActionButtonsDisabled(false);

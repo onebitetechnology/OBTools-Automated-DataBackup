@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.13 - 2026-03-19
+
+- Added live backup progress updates in the result modal so long-running copies show an active progress bar, current phase, and current item.
+- The Windows backup script now emits structured progress markers during preparation, current-copy, and snapshot-copy phases.
+
 ## 1.0.10-beta.12 - 2026-03-19
 
 - Fixed a retention-rotation PowerShell error when the destination had zero or one snapshot folder, which could surface as `The property 'Count' cannot be found`.
