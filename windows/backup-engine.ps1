@@ -60,6 +60,67 @@ function Write-ProgressMarker(
   Write-Output "__OB_PROGRESS__:$payload"
 }
 
+function Get-RobocopyExcludedDirectories([string]$Source) {
+  $normalized = $Source.ToLowerInvariant()
+  $isChromiumUserData =
+    $normalized -like "*\google\chrome\user data" -or
+    $normalized -like "*\microsoft\edge\user data" -or
+    $normalized -like "*\bravesoftware\brave-browser\user data"
+
+  if (-not $isChromiumUserData) {
+    return @("System Volume Information", '$RECYCLE.BIN')
+  }
+
+  $excluded = New-Object System.Collections.Generic.List[string]
+  $excluded.Add("System Volume Information")
+  $excluded.Add('$RECYCLE.BIN')
+
+  $topLevelCandidates = @(
+    "Crashpad",
+    "GrShaderCache",
+    "GraphiteDawnCache",
+    "ShaderCache",
+    "BrowserMetrics",
+    "Component CRX Cache"
+  )
+
+  foreach ($name in $topLevelCandidates) {
+    $candidatePath = Join-Path $Source $name
+    if (Test-Path -LiteralPath $candidatePath) {
+      $excluded.Add($candidatePath)
+    }
+  }
+
+  $profileDirs = @(Get-ChildItem -Path $Source -Directory -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -eq "Default" -or
+    $_.Name -like "Profile *" -or
+    $_.Name -eq "Guest Profile" -or
+    $_.Name -eq "System Profile"
+  })
+
+  $profileCacheCandidates = @(
+    "Cache",
+    "Code Cache",
+    "GPUCache",
+    "DawnCache",
+    "Media Cache",
+    "Blob Storage",
+    "Service Worker\\CacheStorage",
+    "Service Worker\\ScriptCache"
+  )
+
+  foreach ($profileDir in $profileDirs) {
+    foreach ($relativePath in $profileCacheCandidates) {
+      $candidatePath = Join-Path $profileDir.FullName $relativePath
+      if (Test-Path -LiteralPath $candidatePath) {
+        $excluded.Add($candidatePath)
+      }
+    }
+  }
+
+  return @($excluded)
+}
+
 function Copy-BackupItem($Job, [string]$RootPath) {
   $source = Expand-WindowsPath $Job.path
   if (-not (Test-Path -LiteralPath $source)) {
@@ -71,7 +132,13 @@ function Copy-BackupItem($Job, [string]$RootPath) {
 
   if ($Job.type -eq "folder") {
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
-    $robocopyOutput = @(robocopy $source $destination /MIR /FFT /R:1 /W:1 /XJ /XD "System Volume Information" '$RECYCLE.BIN' 2>&1)
+    $robocopyArgs = @($source, $destination, "/MIR", "/FFT", "/R:1", "/W:1", "/XJ")
+    $excludedDirectories = Get-RobocopyExcludedDirectories $source
+    if ($excludedDirectories.Count -gt 0) {
+      $robocopyArgs += "/XD"
+      $robocopyArgs += $excludedDirectories
+    }
+    $robocopyOutput = @(robocopy @robocopyArgs 2>&1)
     if ($LASTEXITCODE -ge 8) {
       if ($robocopyOutput -match 'ERROR 112' -or $robocopyOutput -match 'not enough space on the disk') {
         throw "The backup drive ran out of space while copying files from $source. Free up space or use a larger drive, then try again."
