@@ -2,6 +2,10 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.12 - 2026-03-19
+
+- Fixed a retention-rotation PowerShell error when the destination had zero or one snapshot folder, which could surface as `The property 'Count' cannot be found`.
+
 ## 1.0.10-beta.11 - 2026-03-19
 
 - Fixed snapshot history refresh so the app re-reads the destination `snapshots` folder after a backup attempt instead of only trusting the status file.
