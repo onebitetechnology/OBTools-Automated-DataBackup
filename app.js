@@ -4,6 +4,8 @@ const state = {
   meta: null,
   storage: null,
   backupProgress: null,
+  notifiedUpdateVersion: null,
+  pendingUpdateVersion: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: []
@@ -569,6 +571,32 @@ function updateModalSecondaryAction() {
   return null;
 }
 
+function maybeShowAutoUpdatePrompt() {
+  const updateInfo = state.meta?.updateStatus || {};
+  const availableVersion = updateInfo.availableVersion || null;
+
+  if (!availableVersion || !updateInfo.updateAvailable || updateInfo.downloaded) {
+    return;
+  }
+
+  if (state.notifiedUpdateVersion === availableVersion) {
+    return;
+  }
+
+  if (state.actionInFlight) {
+    state.pendingUpdateVersion = availableVersion;
+    return;
+  }
+
+  state.notifiedUpdateVersion = availableVersion;
+  state.pendingUpdateVersion = null;
+  showResultModal({
+    title: "Update Available",
+    message: updateInfo.message || `Update ${availableVersion} is available to download.`,
+    secondaryAction: updateModalSecondaryAction()
+  });
+}
+
 function setActionButtonsDisabled(disabled) {
   state.actionInFlight = disabled;
   el.runBackup.disabled = disabled;
@@ -847,6 +875,7 @@ async function load() {
         updateStatus
       };
       renderMeta();
+      maybeShowAutoUpdatePrompt();
     });
   }
   if (window.onebiteDesktop?.onBackupProgress) {
@@ -874,6 +903,18 @@ async function load() {
     state.storage = null;
     renderStorageAnalysis();
   });
+
+  if (window.onebiteDesktop?.checkForUpdates) {
+    setTimeout(() => {
+      if (state.actionInFlight) {
+        return;
+      }
+
+      window.onebiteDesktop.checkForUpdates().catch(() => {
+        // Silent background check; the Settings UI still exposes manual retry.
+      });
+    }, 4000);
+  }
 }
 
 async function saveConfig() {
@@ -1007,6 +1048,10 @@ async function invokeAction(path) {
     if (el.protectionState.textContent === "Working") {
       el.protectionState.textContent = originalTitle;
       el.protectionMessage.textContent = originalMessage;
+    }
+
+    if (state.pendingUpdateVersion) {
+      maybeShowAutoUpdatePrompt();
     }
   }
 }

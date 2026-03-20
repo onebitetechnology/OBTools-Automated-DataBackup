@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.16 - 2026-03-19
+
+- Added a background update check shortly after app startup in installed Windows builds.
+- The app now shows an update-available popup automatically when a newer internal build is found, instead of requiring a manual trip into Settings first.
+
 ## 1.0.10-beta.15 - 2026-03-19
 
 - Added a user-facing runtime log and a Settings button to open the local logs folder.
