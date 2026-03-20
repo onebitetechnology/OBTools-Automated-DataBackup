@@ -255,6 +255,14 @@ function protectionSummary(status) {
     };
   }
 
+  if (status.lastBackupResult === "warning") {
+    return {
+      tone: "warning",
+      title: "Completed With Warnings",
+      message: backupMessage
+    };
+  }
+
   if (status.lastBackupResult && status.lastBackupResult !== "success") {
     return {
       tone: "error",

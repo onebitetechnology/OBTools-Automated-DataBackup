@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.18 - 2026-03-20
+
+- Changed backup status handling so a run that created snapshots but finished with copy warnings is treated as `Completed With Warnings` instead of falling back to `Backup Needed`.
+- Preserved the latest snapshot time on partial-success runs so the dashboard reflects that a backup did technically complete.
+
 ## 1.0.10-beta.17 - 2026-03-20
 
 - Optimized Chromium browser backups by excluding disposable cache directories from Chrome, Edge, and Brave user-data copies.

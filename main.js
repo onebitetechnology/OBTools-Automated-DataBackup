@@ -1061,6 +1061,10 @@ ipcMain.handle("backup:run", async () => {
   const { configPath } = dataPaths();
   const config = readJson(configPath);
   const result = await runPowerShell("backup-engine.ps1");
+  const snapshotInfo = inspectSnapshots(config);
+  const recentSnapshots = snapshotInfo.snapshots.map((entry) => entry.name);
+  const newestSnapshot = snapshotInfo.snapshots[0] || null;
+  const partialSuccess = !result.ok && recentSnapshots.length > 0;
   writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Backup run completed. ok=${result.ok} message=${result.message}`);
   publishBackupProgress({
@@ -1071,13 +1075,19 @@ ipcMain.handle("backup:run", async () => {
     percent: result.ok ? 100 : 100,
     detail: result.ok ? "Backup completed." : "Backup finished with an issue."
   });
+  const statusPatch = {
+    destinationStatus: deriveDestinationStatus(result.message, result.ok),
+    lastBackupResult: result.ok ? "success" : partialSuccess ? "warning" : "error",
+    lastBackupMessage: result.message,
+    recentSnapshots
+  };
+
+  if (result.ok || partialSuccess) {
+    statusPatch.lastBackupAt = new Date(newestSnapshot?.createdAt || Date.now()).toISOString();
+  }
+
   return {
-    status: mergeStatus({
-      destinationStatus: deriveDestinationStatus(result.message, result.ok),
-      lastBackupResult: result.ok ? "success" : "error",
-      lastBackupMessage: result.message,
-      recentSnapshots: listRecentSnapshots(config)
-    }),
+    status: mergeStatus(statusPatch),
     meta: appMeta()
   };
 });
