@@ -335,6 +335,18 @@ function summarizeActionMessage(message) {
     return "The backup drive ran out of space while copying files. Free up space or use a larger drive, then run the backup again.";
   }
 
+  if ((/ERROR 32|used by another process|cannot access the file/i.test(raw)) && /Google\\Chrome\\User Data/i.test(raw)) {
+    return "Chrome was open while its profile data was being backed up. Close Chrome completely, wait a moment, and run the backup again.";
+  }
+
+  if ((/ERROR 32|used by another process|cannot access the file/i.test(raw)) && /Microsoft\\Edge\\User Data/i.test(raw)) {
+    return "Edge was open while its profile data was being backed up. Close Edge completely, wait a moment, and run the backup again.";
+  }
+
+  if ((/ERROR 32|used by another process|cannot access the file/i.test(raw)) && /BraveSoftware\\Brave-Browser\\User Data/i.test(raw)) {
+    return "Brave was open while its profile data was being backed up. Close Brave completely, wait a moment, and run the backup again.";
+  }
+
   if (/Some files in .* could not be copied/i.test(raw)) {
     const firstSentence = raw.match(/Some files in .*? could not be copied\.[^\n]*/i);
     return firstSentence ? firstSentence[0].trim() : "Some files could not be copied. Close open files or sync apps, then try the backup again.";

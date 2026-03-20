@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.14 - 2026-03-19
+
+- Reconciled existing snapshot folders on startup so the dashboard no longer shows `Never` and `0` when backups already exist on the selected drive.
+- Improved browser-profile lock messaging so Chrome, Edge, and Brave backup failures caused by open browser processes tell the user to close the browser and retry.
+
 ## 1.0.10-beta.13 - 2026-03-19
 
 - Added live backup progress updates in the result modal so long-running copies show an active progress bar, current phase, and current item.

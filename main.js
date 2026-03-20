@@ -190,19 +190,25 @@ function resolveDestinationBasePath(destination) {
   return baseFolder ? path.join(destinationRoot, baseFolder) : destinationRoot;
 }
 
-function listRecentSnapshots(config) {
+function inspectSnapshots(config) {
   const baseRoot = resolveDestinationBasePath(config?.destination);
   if (!baseRoot) {
-    return [];
+    return {
+      baseRoot: null,
+      snapshots: []
+    };
   }
 
   const snapshotsRoot = path.join(baseRoot, "snapshots");
   if (!fs.existsSync(snapshotsRoot)) {
-    return [];
+    return {
+      baseRoot,
+      snapshots: []
+    };
   }
 
   try {
-    return fs.readdirSync(snapshotsRoot, { withFileTypes: true })
+    const snapshots = fs.readdirSync(snapshotsRoot, { withFileTypes: true })
       .filter((entry) => entry.isDirectory())
       .map((entry) => {
         const fullPath = path.join(snapshotsRoot, entry.name);
@@ -218,11 +224,56 @@ function listRecentSnapshots(config) {
           createdAt
         };
       })
-      .sort((left, right) => right.createdAt - left.createdAt)
-      .map((entry) => entry.name);
+      .sort((left, right) => right.createdAt - left.createdAt);
+
+    return {
+      baseRoot,
+      snapshots
+    };
   } catch (_error) {
-    return [];
+    return {
+      baseRoot,
+      snapshots: []
+    };
   }
+}
+
+function listRecentSnapshots(config) {
+  return inspectSnapshots(config).snapshots.map((entry) => entry.name);
+}
+
+function reconcileStatusWithDisk(config, status) {
+  const snapshotInfo = inspectSnapshots(config);
+  const snapshotNames = snapshotInfo.snapshots.map((entry) => entry.name);
+  const nextStatus = {
+    ...status
+  };
+
+  if (snapshotNames.length) {
+    nextStatus.recentSnapshots = snapshotNames;
+
+    if (!nextStatus.lastBackupAt) {
+      const newestSnapshot = snapshotInfo.snapshots[0];
+      if (newestSnapshot?.createdAt) {
+        nextStatus.lastBackupAt = new Date(newestSnapshot.createdAt).toISOString();
+      }
+    }
+
+    if (!nextStatus.lastBackupResult) {
+      nextStatus.lastBackupResult = "success";
+    }
+
+    if (
+      !nextStatus.lastBackupMessage ||
+      nextStatus.lastBackupMessage === "No backups have been run yet."
+    ) {
+      nextStatus.lastBackupMessage = snapshotInfo.baseRoot
+        ? `Backup snapshots were found on ${snapshotInfo.baseRoot}`
+        : "Backup snapshots were found on the selected drive.";
+    }
+  }
+
+  return nextStatus;
 }
 
 function calculatePathSize(targetPath) {
@@ -912,9 +963,12 @@ app.on("window-all-closed", () => {
 ipcMain.handle("state:get", () => {
   configureAutoUpdates();
   const { configPath, statusPath } = dataPaths();
+  const config = readJson(configPath);
+  const status = reconcileStatusWithDisk(config, readJson(statusPath));
+  writeJson(statusPath, status);
   return {
-    config: readJson(configPath),
-    status: readJson(statusPath),
+    config,
+    status,
     meta: appMeta()
   };
 });
