@@ -50,10 +50,11 @@ const el = {
   browseDestination: document.getElementById("browse-destination"),
   useManagedFolder: document.getElementById("use-managed-folder"),
   useExistingFolder: document.getElementById("use-existing-folder"),
+  saveMainSetup: document.getElementById("save-main-setup"),
   openSettings: document.getElementById("open-settings"),
+  openAdvancedSettings: document.getElementById("open-advanced-settings"),
   closeSettings: document.getElementById("close-settings"),
   settingsDrawer: document.getElementById("settings-drawer"),
-  settingsDestinationSummary: document.getElementById("settings-destination-summary"),
   settingsRetentionSummary: document.getElementById("settings-retention-summary"),
   settingsScheduleSummary: document.getElementById("settings-schedule-summary"),
   appVersion: document.getElementById("app-version"),
@@ -773,15 +774,7 @@ function closeSettingsDrawer() {
 }
 
 function renderSettingsSummary() {
-  const { destination, retentionCount, schedule } = state.config;
-  if (destination.selectedPath) {
-    el.settingsDestinationSummary.textContent = destination.selectedPath;
-  } else if (destination.driveLetter) {
-    el.settingsDestinationSummary.textContent = `Drive ${destination.driveLetter.replace(":", "")}:`;
-  } else {
-    el.settingsDestinationSummary.textContent = "Not configured";
-  }
-
+  const { retentionCount, schedule } = state.config;
   el.settingsRetentionSummary.textContent = `${retentionCount} ${retentionCount === 1 ? "copy" : "copies"}`;
 
   if (!schedule.enabled) {
@@ -1283,7 +1276,16 @@ el.useManagedFolder.addEventListener("click", () => {
 el.useExistingFolder.addEventListener("click", () => {
   setDestinationFolderMode("existing");
 });
+el.saveMainSetup.addEventListener("click", () => {
+  saveConfig().catch((error) => {
+    showResultModal({
+      title: "Save Setup",
+      message: error.message
+    });
+  });
+});
 el.openSettings.addEventListener("click", openSettingsDrawer);
+el.openAdvancedSettings.addEventListener("click", openSettingsDrawer);
 el.closeSettings.addEventListener("click", closeSettingsDrawer);
 el.addJob.addEventListener("click", () => {
   state.config.jobs.push({

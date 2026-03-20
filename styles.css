@@ -298,6 +298,10 @@ label span {
   gap: 12px;
 }
 
+.settings-summary-grid.two-up {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .destination-choice-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -614,6 +618,10 @@ button:disabled {
   color: var(--muted);
   line-height: 1.45;
   font-size: 0.94rem;
+}
+
+.top-gap {
+  margin-top: 14px;
 }
 
 .setup-panel {

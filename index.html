@@ -99,16 +99,51 @@
         <section class="card panel">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Settings</p>
-              <h3>Backup configuration</h3>
-              <p class="section-note">Review where backups go, how many copies are kept, and whether automation is enabled.</p>
+              <p class="eyebrow">Step 2</p>
+              <h3>Choose a backup destination</h3>
+              <p class="section-note">Pick the external drive or folder customers will use, then decide whether the app should use that exact folder or create a managed One Bite Backups folder on the drive.</p>
             </div>
           </div>
-          <div class="settings-summary-grid">
-            <article class="summary-card">
-              <p class="metric-label">Destination</p>
-              <p id="settings-destination-summary" class="summary-value">Not configured</p>
+          <div class="panel-head-actions">
+            <button id="browse-destination" class="secondary" type="button">Browse To Drive Or Folder</button>
+          </div>
+          <div class="destination-choice-grid">
+            <button id="use-managed-folder" class="ghost choice-button" type="button">Recommended: Use "One Bite Backups"</button>
+            <button id="use-existing-folder" class="ghost choice-button" type="button">Use This Exact Folder</button>
+          </div>
+          <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
+          <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
+          <div class="storage-analysis-grid">
+            <article class="summary-card compact-summary">
+              <p class="metric-label">Estimated Backup Size</p>
+              <p id="backup-size-estimate" class="summary-value">Waiting for analysis</p>
             </article>
+            <article class="summary-card compact-summary">
+              <p class="metric-label">Destination Free Space</p>
+              <p id="destination-free-space" class="summary-value">Waiting for analysis</p>
+            </article>
+          </div>
+          <p id="retention-behavior-summary" class="hint">When the copy limit is reached, the oldest snapshot is removed before creating the next one.</p>
+          <p id="destination-mode-summary" class="hint">The app will create and maintain a One Bite Backups folder on the selected drive.</p>
+          <input id="destination-mode" type="hidden" value="driveLetter">
+          <input id="destination-base-folder" type="hidden">
+          <input id="destination-drive-letter" type="hidden">
+          <input id="destination-label" type="hidden">
+        </section>
+
+        <section class="card panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Step 3</p>
+              <h3>Review your backup plan</h3>
+              <p class="section-note">Confirm how many copies are kept, whether automation is on, and save the setup before handing the app to a customer.</p>
+            </div>
+            <div class="panel-head-actions">
+              <button id="save-main-setup" class="primary" type="button">Save Setup</button>
+              <button id="open-advanced-settings" class="ghost" type="button">Advanced Settings</button>
+            </div>
+          </div>
+          <div class="settings-summary-grid two-up">
             <article class="summary-card">
               <p class="metric-label">Copies To Keep</p>
               <p id="settings-retention-summary" class="summary-value">3 copies</p>
@@ -118,6 +153,7 @@
               <p id="settings-schedule-summary" class="summary-value">Manual only</p>
             </article>
           </div>
+          <p class="section-note top-gap">Advanced settings still includes reminders, scheduling, updates, and support logs, but customers can complete normal setup from the main screen.</p>
         </section>
 
         <section class="card panel wide">
@@ -188,41 +224,11 @@
         <div class="settings-modal-header">
           <div class="settings-modal-title-wrap">
             <div class="settings-modal-title">Settings</div>
-            <div class="settings-modal-subtitle">Version <strong id="settings-version-copy">Loading...</strong>. Configure destination, retention, automation, and internal updates from one place.</div>
+            <div class="settings-modal-subtitle">Version <strong id="settings-version-copy">Loading...</strong>. Configure retention, automation, updates, and support tools from one place.</div>
           </div>
           <button id="close-settings" class="ghost" type="button">Close</button>
         </div>
         <div class="settings-modal-body">
-
-        <section class="settings-section">
-          <div class="settings-section-title">Destination</div>
-          <div class="settings-section-copy">Pick the external drive or an existing folder on that drive.</div>
-          <div class="settings-section-head compact">
-            <button id="browse-destination" class="secondary" type="button">Browse To Drive Or Folder</button>
-          </div>
-          <div class="destination-choice-grid">
-            <button id="use-managed-folder" class="ghost choice-button" type="button">Recommended: Use "One Bite Backups"</button>
-            <button id="use-existing-folder" class="ghost choice-button" type="button">Use This Exact Folder</button>
-          </div>
-          <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
-          <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
-          <div class="storage-analysis-grid">
-            <article class="summary-card compact-summary">
-              <p class="metric-label">Estimated Backup Size</p>
-              <p id="backup-size-estimate" class="summary-value">Waiting for analysis</p>
-            </article>
-            <article class="summary-card compact-summary">
-              <p class="metric-label">Destination Free Space</p>
-              <p id="destination-free-space" class="summary-value">Waiting for analysis</p>
-            </article>
-          </div>
-          <p id="retention-behavior-summary" class="hint">When the copy limit is reached, the oldest snapshot is removed before creating the next one.</p>
-          <p id="destination-mode-summary" class="hint">The app will create and maintain a One Bite Backups folder on the selected drive.</p>
-          <input id="destination-mode" type="hidden" value="driveLetter">
-          <input id="destination-base-folder" type="hidden">
-          <input id="destination-drive-letter" type="hidden">
-          <input id="destination-label" type="hidden">
-        </section>
 
         <section class="settings-section">
           <div class="settings-section-title">Retention</div>
@@ -315,7 +321,7 @@
         </div>
 
         <div class="settings-modal-footer">
-          <div class="settings-footer-copy">Settings save to this machine. Destination and job changes apply the next time a backup or cloud check runs.</div>
+          <div class="settings-footer-copy">Settings save to this machine. Retention, automation, and update preferences apply the next time a backup or cloud check runs.</div>
           <div class="settings-actions">
             <button id="save-config" class="primary" type="button">Save Settings</button>
           </div>

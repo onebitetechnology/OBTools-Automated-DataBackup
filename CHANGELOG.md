@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.20 - 2026-03-20
+
+- Reorganized the main dashboard so the visible setup steps now match the actual workflow.
+- Moved backup destination selection into the main UI as Step 2 and turned the next panel into a Step 3 backup-plan review with a main-screen save action.
+- Narrowed the Settings drawer to more advanced/admin options like retention, automation, updates, and logs.
+
 ## 1.0.10-beta.19 - 2026-03-20
 
 - Made backup dates and snapshot timestamps more user-friendly with a 12-hour clock format.
