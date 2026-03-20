@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.19 - 2026-03-20
+
+- Made backup dates and snapshot timestamps more user-friendly with a 12-hour clock format.
+- Improved Chrome, Edge, and Brave `ERROR 2` backup messaging so it explains that browser profile files changed during backup and the browser should be closed before retrying.
+
 ## 1.0.10-beta.18 - 2026-03-20
 
 - Changed backup status handling so a run that created snapshots but finished with copy warnings is treated as `Completed With Warnings` instead of falling back to `Backup Needed`.

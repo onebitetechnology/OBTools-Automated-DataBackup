@@ -213,7 +213,41 @@ function formatDate(value) {
     return "Never";
   }
 
-  return new Date(value).toLocaleString();
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).format(parsed);
+}
+
+function formatSnapshotLabel(snapshotName) {
+  const match = String(snapshotName || "").match(/^(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return String(snapshotName || "");
+  }
+
+  const [, year, month, day, hour, minute, second] = match;
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
+  if (Number.isNaN(parsed.getTime())) {
+    return String(snapshotName || "");
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).format(parsed);
 }
 
 function formatBytes(bytes) {
@@ -356,6 +390,18 @@ function summarizeActionMessage(message) {
 
   if ((/ERROR 32|used by another process|cannot access the file/i.test(raw)) && /BraveSoftware\\Brave-Browser\\User Data/i.test(raw)) {
     return "Brave was open while its profile data was being backed up. Close Brave completely, wait a moment, and run the backup again.";
+  }
+
+  if ((/ERROR 2|The system cannot find the file specified/i.test(raw)) && /Google\\Chrome\\User Data/i.test(raw)) {
+    return "Chrome changed some profile files while the backup was running. Close Chrome fully, wait a moment, and run the backup again.";
+  }
+
+  if ((/ERROR 2|The system cannot find the file specified/i.test(raw)) && /Microsoft\\Edge\\User Data/i.test(raw)) {
+    return "Edge changed some profile files while the backup was running. Close Edge fully, wait a moment, and run the backup again.";
+  }
+
+  if ((/ERROR 2|The system cannot find the file specified/i.test(raw)) && /BraveSoftware\\Brave-Browser\\User Data/i.test(raw)) {
+    return "Brave changed some profile files while the backup was running. Close Brave fully, wait a moment, and run the backup again.";
   }
 
   if (/Some files in .* could not be copied/i.test(raw)) {
@@ -696,7 +742,7 @@ function renderStatus() {
   } else {
     snapshots.forEach((snapshot) => {
       const item = document.createElement("li");
-      item.textContent = snapshot;
+      item.textContent = formatSnapshotLabel(snapshot);
       el.snapshotList.appendChild(item);
     });
   }
