@@ -68,6 +68,7 @@ const el = {
   checkUpdates: document.getElementById("check-updates"),
   downloadUpdate: document.getElementById("download-update"),
   installUpdate: document.getElementById("install-update"),
+  reportIssue: document.getElementById("report-issue"),
   openLogsFolder: document.getElementById("open-logs-folder"),
   updateProgressShell: document.getElementById("update-progress-shell"),
   updateProgressBar: document.getElementById("update-progress-bar"),
@@ -1288,6 +1289,22 @@ async function openLogsFolder() {
   });
 }
 
+async function openSupportEmail() {
+  if (!window.onebiteDesktop?.openSupportEmail) {
+    showResultModal({
+      title: "Support Request",
+      message: "Support email is available in the installed desktop app. Include your app version, a description of the problem or request, and attach any relevant logs."
+    });
+    return;
+  }
+
+  const payload = await window.onebiteDesktop.openSupportEmail();
+  showResultModal({
+    title: payload.ok ? "Support Email Ready" : "Support Request",
+    message: payload.message || "The support email could not be prepared."
+  });
+}
+
 async function browseDestinationFolder() {
   if (!window.onebiteDesktop?.pickDestinationFolder) {
     el.destinationPickedSummary.textContent = "Destination browsing is available in the installed desktop app.";
@@ -1381,6 +1398,14 @@ el.downloadUpdate.addEventListener("click", () => {
 el.installUpdate.addEventListener("click", () => {
   installUpdate().catch((error) => {
     el.updateStatus.textContent = error.message;
+  });
+});
+el.reportIssue.addEventListener("click", () => {
+  openSupportEmail().catch((error) => {
+    showResultModal({
+      title: "Support Request",
+      message: error.message
+    });
   });
 });
 el.resultModalClose.addEventListener("click", closeResultModal);

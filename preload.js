@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   downloadUpdate: () => ipcRenderer.invoke("updates:download"),
   installUpdate: () => ipcRenderer.invoke("updates:install"),
   openReleasesPage: () => ipcRenderer.invoke("updates:open-releases"),
+  openSupportEmail: () => ipcRenderer.invoke("support:open-email"),
   openLogsFolder: () => ipcRenderer.invoke("logs:open-folder"),
   onUpdateStatus: (callback) => {
     const listener = (_event, status) => callback(status);

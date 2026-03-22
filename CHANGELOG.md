@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.23 - 2026-03-22
+
+- Added a `Feature Request / Report Bug` action in Settings.
+- The app now prepares a support summary file with version, update channel, backup status, and recent log tails, then opens the default mail app with a prefilled support email and instructions on which files to attach.
+
 ## 1.0.10-beta.22 - 2026-03-22
 
 - Added elapsed time and estimated remaining time to the Backup In Progress window so long-running copies feel less ambiguous.

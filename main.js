@@ -59,6 +59,11 @@ function runtimeLogPath() {
   return path.join(logRoot, "obtools-runtime.log");
 }
 
+function launcherLogPath() {
+  const logRoot = app.isReady() ? app.getPath("userData") : os.tmpdir();
+  return path.join(logRoot, "obtools-launcher.log");
+}
+
 function writeRuntimeLog(message) {
   try {
     const logPath = runtimeLogPath();
@@ -66,6 +71,19 @@ function writeRuntimeLog(message) {
     fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${message}\n`, "utf8");
   } catch (_error) {
     // Logging should never crash the app.
+  }
+}
+
+function readLogTail(filePath, maxLines = 80) {
+  if (!fs.existsSync(filePath)) {
+    return "File not found.";
+  }
+
+  try {
+    const lines = fs.readFileSync(filePath, "utf8").replace(/\r/g, "").split("\n").filter(Boolean);
+    return lines.slice(-maxLines).join("\n") || "File is empty.";
+  } catch (error) {
+    return `Could not read log: ${error.message}`;
   }
 }
 
@@ -174,6 +192,76 @@ function appMeta() {
   return {
     version: app.getVersion(),
     updateStatus
+  };
+}
+
+function supportEmailAddress() {
+  return "jeff@onebitetechnology.ca";
+}
+
+function buildSupportBundle(config, status) {
+  const { userDataDir } = dataPaths();
+  const bundlePath = path.join(userDataDir, "obtools-support-request.txt");
+  const runtimePath = runtimeLogPath();
+  const launcherPath = launcherLogPath();
+  const osLabel = `${os.type()} ${os.release()} (${os.arch()})`;
+  const channel = sanitizeUpdateChannel(config?.updates?.channel, app.getVersion());
+  const destinationRoot = resolveDestinationBasePath(config?.destination) || "Not configured";
+  const enabledJobs = (config?.jobs || []).filter((job) => job.enabled).map((job) => `${job.name || "Unnamed"} :: ${job.path || "(empty path)"}`);
+  const recentSnapshots = (status?.recentSnapshots || []).slice(0, 5);
+
+  const bundle = [
+    "OBTools Automated Backups Support Request",
+    "=======================================",
+    "",
+    `Generated: ${new Date().toISOString()}`,
+    `App version: ${app.getVersion()}`,
+    `Update channel: ${channel}`,
+    `Platform: ${process.platform}`,
+    `OS: ${osLabel}`,
+    "",
+    "Current backup status",
+    "---------------------",
+    `Last backup at: ${status?.lastBackupAt || "Never"}`,
+    `Last backup result: ${status?.lastBackupResult || "unknown"}`,
+    `Last backup message: ${status?.lastBackupMessage || "None"}`,
+    `Destination status: ${status?.destinationStatus || "Unknown"}`,
+    `Cloud summary: ${status?.cloud?.summary || "Not checked"}`,
+    "",
+    "Configured backup destination",
+    "-----------------------------",
+    `Resolved destination: ${destinationRoot}`,
+    `Folder mode: ${config?.destination?.folderMode || "managed"}`,
+    `Copies to keep: ${config?.retentionCount || 3}`,
+    "",
+    "Enabled backup items",
+    "--------------------",
+    ...(enabledJobs.length ? enabledJobs : ["None"]),
+    "",
+    "Recent snapshots",
+    "----------------",
+    ...(recentSnapshots.length ? recentSnapshots : ["None"]),
+    "",
+    `Logs folder: ${userDataDir}`,
+    `Runtime log: ${runtimePath}`,
+    `Launcher log: ${launcherPath}`,
+    "",
+    "Recent runtime log lines",
+    "------------------------",
+    readLogTail(runtimePath, 80),
+    "",
+    "Recent launcher log lines",
+    "-------------------------",
+    readLogTail(launcherPath, 80),
+    ""
+  ].join("\n");
+
+  fs.writeFileSync(bundlePath, bundle, "utf8");
+  return {
+    bundlePath,
+    userDataDir,
+    runtimePath,
+    launcherPath
   };
 }
 
@@ -1303,6 +1391,53 @@ ipcMain.handle("updates:open-releases", async () => {
     return {
       ok: false,
       message: error.message
+    };
+  }
+});
+
+ipcMain.handle("support:open-email", async () => {
+  try {
+    const { configPath, statusPath, userDataDir } = dataPaths();
+    const config = normalizeConfigForMain(readJson(configPath));
+    const status = reconcileStatusWithDisk(config, readJson(statusPath));
+    const supportBundle = buildSupportBundle(config, status);
+
+    const subject = encodeURIComponent(`OBTools Automated Backups Feature Request / Bug Report (${app.getVersion()})`);
+    const body = encodeURIComponent([
+      "Hi One Bite Technology,",
+      "",
+      "Please describe the feature request or bug below:",
+      "",
+      "What happened:",
+      "",
+      "What you expected:",
+      "",
+      "Steps to reproduce (if applicable):",
+      "",
+      "Please attach these files from the logs folder if possible:",
+      `- ${path.basename(supportBundle.bundlePath)}`,
+      `- ${path.basename(supportBundle.runtimePath)}`,
+      `- ${path.basename(supportBundle.launcherPath)}`,
+      "",
+      `App version: ${app.getVersion()}`,
+      `Update channel: ${sanitizeUpdateChannel(config?.updates?.channel, app.getVersion())}`,
+      `Logs folder: ${userDataDir}`,
+      "",
+      "The app has already created a support summary file in that folder to make this easier.",
+      ""
+    ].join("\n"));
+
+    await shell.openExternal(`mailto:${supportEmailAddress()}?subject=${subject}&body=${body}`);
+    await shell.openPath(userDataDir);
+
+    return {
+      ok: true,
+      message: `Opened your email app and the logs folder. Please attach ${path.basename(supportBundle.bundlePath)} plus any relevant log files from ${userDataDir}.`
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Could not prepare the support email automatically. Please email ${supportEmailAddress()} and include your app version plus the files from the logs folder. ${error.message}`
     };
   }
 });
