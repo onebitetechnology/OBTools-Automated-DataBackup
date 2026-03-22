@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.26 - 2026-03-22
+
+- Moved the global `Settings` button into the top-right of the header and styled it as a gear-plus-label app control.
+- Removed the redundant Settings trigger from the backup action cluster so the header behaves more like the other One Bite apps.
+
 ## 1.0.10-beta.25 - 2026-03-22
 
 - Converted Settings from a right-side drawer into a centered modal-style window.
