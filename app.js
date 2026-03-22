@@ -4,12 +4,15 @@ const state = {
   meta: null,
   storage: null,
   backupProgress: null,
+  backupTiming: null,
   notifiedUpdateVersion: null,
   pendingUpdateVersion: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: []
 };
+
+let backupProgressTimer = null;
 
 const el = {
   backupStatusCard: document.getElementById("backup-status-card"),
@@ -76,6 +79,8 @@ const el = {
   resultProgressBar: document.getElementById("result-progress-bar"),
   resultProgressLabel: document.getElementById("result-progress-label"),
   resultProgressDetail: document.getElementById("result-progress-detail"),
+  resultProgressElapsed: document.getElementById("result-progress-elapsed"),
+  resultProgressEta: document.getElementById("result-progress-eta"),
   resultModalList: document.getElementById("result-modal-list"),
   resultModalSecondary: document.getElementById("result-modal-secondary"),
   resultModalClose: document.getElementById("result-modal-close"),
@@ -254,6 +259,95 @@ function formatSnapshotLabel(snapshotName) {
     minute: "2-digit",
     hour12: true
   }).format(parsed);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+
+  return `${seconds}s`;
+}
+
+function buildBackupTiming(progress = null) {
+  if (!state.backupTiming?.startedAt) {
+    return null;
+  }
+
+  const elapsedMs = Math.max(0, Date.now() - state.backupTiming.startedAt);
+  const percent = Math.max(0, Math.min(100, Number(progress?.percent ?? state.backupProgress?.percent ?? 0)));
+  const phase = progress?.phase || state.backupProgress?.phase || "starting";
+  let etaText = "Estimated remaining: Calculating...";
+
+  if (phase === "complete" || percent >= 100) {
+    etaText = "Estimated remaining: Finishing up...";
+  } else if (elapsedMs >= 10000 && percent >= 10) {
+    const estimatedTotalMs = elapsedMs / (percent / 100);
+    const remainingMs = Math.max(0, estimatedTotalMs - elapsedMs);
+    etaText = `Estimated remaining: About ${formatDuration(remainingMs)}`;
+  }
+
+  return {
+    elapsedText: `Elapsed: ${formatDuration(elapsedMs)}`,
+    etaText
+  };
+}
+
+function getBackupProgressView(progress = state.backupProgress) {
+  if (!progress) {
+    return null;
+  }
+
+  const detail = progress?.jobName
+    ? `${progress.detail || "Copying files"} ${progress.jobName}`
+    : (progress?.detail || "Processing backup files...");
+
+  return {
+    percent: progress?.percent || 0,
+    detail,
+    indeterminate: progress?.phase === "starting",
+    timing: buildBackupTiming(progress)
+  };
+}
+
+function stopBackupProgressTimer() {
+  if (backupProgressTimer) {
+    clearInterval(backupProgressTimer);
+    backupProgressTimer = null;
+  }
+}
+
+function refreshBackupProgressModal() {
+  if (el.resultModal.hidden || el.resultModalTitle.textContent !== "Backup In Progress") {
+    return;
+  }
+
+  const progressView = getBackupProgressView();
+  if (!progressView) {
+    return;
+  }
+
+  renderResultProgress(progressView);
+  el.resultModalMessage.textContent = progressView.detail;
+}
+
+function ensureBackupProgressTimer() {
+  if (backupProgressTimer || !state.backupTiming?.startedAt) {
+    return;
+  }
+
+  backupProgressTimer = setInterval(() => {
+    refreshBackupProgressModal();
+  }, 1000);
 }
 
 function formatBytes(bytes) {
@@ -477,6 +571,8 @@ function renderResultProgress(progress = null) {
     el.resultProgressBar.style.width = "0%";
     el.resultProgressLabel.textContent = "0%";
     el.resultProgressDetail.textContent = "";
+    el.resultProgressElapsed.textContent = "Elapsed: 0s";
+    el.resultProgressEta.textContent = "Estimated remaining: Calculating...";
     return;
   }
 
@@ -487,6 +583,8 @@ function renderResultProgress(progress = null) {
   el.resultProgressBar.style.width = indeterminate ? "45%" : `${percent}%`;
   el.resultProgressLabel.textContent = indeterminate ? "Working..." : `${percent}%`;
   el.resultProgressDetail.textContent = progress.detail || "Processing backup files...";
+  el.resultProgressElapsed.textContent = progress.timing?.elapsedText || "Elapsed: Calculating...";
+  el.resultProgressEta.textContent = progress.timing?.etaText || "Estimated remaining: Calculating...";
 }
 
 function renderBrowserModal() {
@@ -942,20 +1040,20 @@ async function load() {
   if (window.onebiteDesktop?.onBackupProgress) {
     window.onebiteDesktop.onBackupProgress((progress) => {
       state.backupProgress = progress || null;
-      if (el.resultModal.hidden || el.resultModalTitle.textContent !== "Backup In Progress") {
-        return;
+
+      if (progress && !state.backupTiming?.startedAt) {
+        state.backupTiming = {
+          startedAt: Date.now()
+        };
       }
 
-      const detail = progress?.jobName
-        ? `${progress.detail || "Copying files"} ${progress.jobName}`
-        : (progress?.detail || "Processing backup files...");
+      if (progress?.phase === "complete") {
+        stopBackupProgressTimer();
+      } else if (progress) {
+        ensureBackupProgressTimer();
+      }
 
-      renderResultProgress({
-        percent: progress?.percent || 0,
-        detail,
-        indeterminate: progress?.phase === "starting"
-      });
-      el.resultModalMessage.textContent = detail;
+      refreshBackupProgressModal();
     });
   }
   renderConfig();
@@ -1031,20 +1129,20 @@ async function invokeAction(path) {
   el.protectionMessage.textContent = pendingMessage;
 
   if (path === "/api/run-backup") {
+    state.backupTiming = {
+      startedAt: Date.now()
+    };
     state.backupProgress = {
       phase: "starting",
       percent: 2,
       detail: "Starting the backup process."
     };
+    ensureBackupProgressTimer();
     showResultModal({
       title: "Backup In Progress",
       message: "Copying files to the selected backup drive. This may take a while for large folders.",
       hideClose: true,
-      progress: {
-        percent: 2,
-        detail: "Starting the backup process.",
-        indeterminate: true
-      }
+      progress: getBackupProgressView()
     });
   }
 
@@ -1080,7 +1178,9 @@ async function invokeAction(path) {
     }
 
     if (path === "/api/run-backup") {
+      stopBackupProgressTimer();
       state.backupProgress = null;
+      state.backupTiming = null;
       const success = state.status.lastBackupResult === "success";
       showResultModal({
         title: success ? "Backup Complete" : "Backup Needs Attention",
@@ -1101,9 +1201,15 @@ async function invokeAction(path) {
     }
 
     if (path === "/api/run-backup") {
+      stopBackupProgressTimer();
       state.backupProgress = null;
+      state.backupTiming = null;
     }
   } finally {
+    if (path !== "/api/run-backup") {
+      stopBackupProgressTimer();
+    }
+
     setActionButtonsDisabled(false);
 
     if (el.protectionState.textContent === "Working") {

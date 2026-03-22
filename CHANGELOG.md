@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.22 - 2026-03-22
+
+- Added elapsed time and estimated remaining time to the Backup In Progress window so long-running copies feel less ambiguous.
+- The backup progress modal now refreshes its timer live while the existing copy phases continue.
+
 ## 1.0.10-beta.21 - 2026-03-22
 
 - Added an update-channel setting so installed apps can choose between stable-only releases and beta/test builds.

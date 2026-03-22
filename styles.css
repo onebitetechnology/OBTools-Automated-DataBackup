@@ -1083,8 +1083,15 @@ select:focus {
   gap: 12px;
 }
 
+.result-progress-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
 .result-progress-label,
-.result-progress-detail {
+.result-progress-detail,
+.result-progress-time {
   margin: 0;
 }
 
@@ -1097,6 +1104,15 @@ select:focus {
 .result-progress-detail {
   color: var(--muted);
   font-size: 0.84rem;
+  text-align: right;
+}
+
+.result-progress-time {
+  color: rgba(215, 234, 255, 0.84);
+  font-size: 0.8rem;
+}
+
+.result-progress-time:last-child {
   text-align: right;
 }
 
@@ -1161,5 +1177,14 @@ select:focus {
   .result-progress-meta {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .result-progress-times {
+    grid-template-columns: 1fr;
+  }
+
+  .result-progress-detail,
+  .result-progress-time:last-child {
+    text-align: left;
   }
 }
