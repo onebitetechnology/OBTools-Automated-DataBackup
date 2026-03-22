@@ -118,8 +118,18 @@ function sanitizeUpdateChannel(value, fallbackVersion = app.getVersion()) {
 }
 
 function normalizeConfigForMain(config) {
+  const existingDestination = config?.destination || {};
+  const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || !existingDestination.baseFolder
+    ? "OB Tools Backup"
+    : existingDestination.baseFolder;
+
   return {
     ...config,
+    destination: {
+      ...existingDestination,
+      folderMode: "managed",
+      baseFolder: normalizedBaseFolder
+    },
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
     }

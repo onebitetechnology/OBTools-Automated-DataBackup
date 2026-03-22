@@ -66,7 +66,7 @@
             <article class="step-card">
               <p class="step-number">02</p>
               <h4>Choose a backup drive</h4>
-              <p>Browse to the right USB or external HDD, then use its existing folder or let the app create one.</p>
+              <p>Choose the right USB or external HDD and let the app create its backup folder automatically.</p>
             </article>
             <article class="step-card">
               <p class="step-number">03</p>
@@ -88,10 +88,10 @@
               <h3>Choose what gets backed up</h3>
               <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
             </div>
-            <div class="panel-head-actions">
-              <button id="detect-browsers" class="secondary" type="button">Find Browsers</button>
-              <button id="add-job" class="ghost">Add Item</button>
-            </div>
+          </div>
+          <div class="panel-actions-underhead">
+            <button id="detect-browsers" class="secondary" type="button">Find Browsers</button>
+            <button id="add-job" class="ghost">Add Item</button>
           </div>
           <div id="jobs-list" class="jobs-list"></div>
         </section>
@@ -101,16 +101,13 @@
             <div>
               <p class="eyebrow">Step 2</p>
               <h3>Choose a backup destination</h3>
-              <p class="section-note">Pick the external drive or folder customers will use, then decide whether the app should use that exact folder or create a managed One Bite Backups folder on the drive.</p>
+              <p class="section-note">Choose the external drive where backups should live. The app will automatically create and use an <strong>OB Tools Backup</strong> folder on that drive.</p>
             </div>
           </div>
-          <div class="panel-head-actions">
-            <button id="browse-destination" class="secondary" type="button">Browse To Drive Or Folder</button>
+          <div class="panel-actions-underhead">
+            <button id="browse-destination" class="secondary" type="button">Choose Backup Location</button>
           </div>
-          <div class="destination-choice-grid">
-            <button id="use-managed-folder" class="ghost choice-button" type="button">Recommended: Use "One Bite Backups"</button>
-            <button id="use-existing-folder" class="ghost choice-button" type="button">Use This Exact Folder</button>
-          </div>
+          <p class="section-note compact-note">Browse to the external USB or hard drive you want to use. Once selected, the app will create the backup folder for you automatically.</p>
           <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
           <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
           <div class="storage-analysis-grid">
@@ -124,7 +121,7 @@
             </article>
           </div>
           <p id="retention-behavior-summary" class="hint">When the copy limit is reached, the oldest snapshot is removed before creating the next one.</p>
-          <p id="destination-mode-summary" class="hint">The app will create and maintain a One Bite Backups folder on the selected drive.</p>
+          <p id="destination-mode-summary" class="hint">The app will create and maintain an OB Tools Backup folder on the selected drive.</p>
           <input id="destination-mode" type="hidden" value="driveLetter">
           <input id="destination-base-folder" type="hidden">
           <input id="destination-drive-letter" type="hidden">

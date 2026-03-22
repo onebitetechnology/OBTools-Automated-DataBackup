@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.24 - 2026-03-22
+
+- Reworked Step 1 so the setup copy spans the full width of the panel and the `Find Browsers` / `Add Item` actions now sit directly above the backup-item list.
+- Simplified Step 2 so users choose a backup location once and the app always creates and maintains an `OB Tools Backup` folder on the selected drive.
+- Browser backup entries now display `Browser Data` in the type field so they read more clearly in the main setup list.
+
 ## 1.0.10-beta.23 - 2026-03-22
 
 - Added a `Feature Request / Report Bug` action in Settings.

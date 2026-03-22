@@ -158,16 +158,23 @@ async function desktopRequest(url, options = {}) {
 }
 
 function normalizeConfig(config) {
+  const existingDestination = config.destination || {};
+  const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || !existingDestination.baseFolder
+    ? "OB Tools Backup"
+    : existingDestination.baseFolder;
+
   return {
     ...config,
     destination: {
       mode: "driveLetter",
       driveLetter: "",
       label: "",
-      baseFolder: "One Bite Backups",
+      baseFolder: normalizedBaseFolder,
       folderMode: "managed",
       selectedPath: "",
-      ...(config.destination || {})
+      ...existingDestination,
+      folderMode: "managed",
+      baseFolder: normalizedBaseFolder
     },
     cloudCheck: {
       enabled: true,
@@ -657,6 +664,7 @@ function addDetectedBrowserJobs() {
       name: `${browser.name} User Data`,
       path: browser.path,
       type: "folder",
+      sourceKind: "browser",
       enabled: true
     });
   });
@@ -773,6 +781,7 @@ function renderJobs() {
   state.config.jobs.forEach((job) => {
     const fragment = el.jobTemplate.content.cloneNode(true);
     const card = fragment.querySelector(".job-card");
+    const typeInput = card.querySelector("[data-field='type']");
 
     for (const input of card.querySelectorAll("[data-field]")) {
       const field = input.dataset.field;
@@ -787,7 +796,29 @@ function renderJobs() {
       });
     }
 
-    card.querySelector("[data-action='browse']").addEventListener("click", async () => {
+    if (job.sourceKind === "browser" && typeInput) {
+      typeInput.innerHTML = '<option value="folder">Browser Data</option>';
+      typeInput.value = "folder";
+      typeInput.disabled = true;
+    } else if (typeInput) {
+      typeInput.disabled = false;
+      typeInput.value = job.type || "folder";
+    }
+
+    const browseButton = card.querySelector("[data-action='browse']");
+    if (job.sourceKind === "browser") {
+      browseButton.textContent = "View Path";
+    }
+
+    browseButton.addEventListener("click", async () => {
+      if (job.sourceKind === "browser") {
+        showResultModal({
+          title: `${job.name || "Browser Data"} Path`,
+          message: job.path || "No browser path is configured yet."
+        });
+        return;
+      }
+
       if (!window.onebiteDesktop) {
         return;
       }
@@ -950,22 +981,20 @@ function renderConfig() {
     el.destinationPickedSummary.textContent = "No backup drive or folder selected yet.";
   }
 
-  if (destination.folderMode === "existing") {
-    el.destinationModeSummary.textContent = "The app will store backups inside the folder you selected.";
-    el.useExistingFolder.classList.add("choice-active");
-    el.useManagedFolder.classList.remove("choice-active");
-    el.destinationFinalSummary.textContent = destination.selectedPath
-      ? `Backups will be saved inside: ${destination.selectedPath}`
-      : "Backups will use the exact folder you browse to.";
-  } else {
-    el.destinationModeSummary.textContent = 'The app will create and maintain a "One Bite Backups" folder on the selected drive.';
+  const managedFolderName = destination.baseFolder || "OB Tools Backup";
+  el.destinationModeSummary.textContent = `The app will create and maintain an ${managedFolderName} folder on the selected drive.`;
+
+  if (el.useManagedFolder) {
     el.useManagedFolder.classList.add("choice-active");
+  }
+  if (el.useExistingFolder) {
     el.useExistingFolder.classList.remove("choice-active");
-    if (destination.driveLetter) {
-      el.destinationFinalSummary.textContent = `Backups will be saved to: ${destination.driveLetter.replace(":", "")}:\\One Bite Backups`;
-    } else {
-      el.destinationFinalSummary.textContent = "Backups will appear here once a destination is selected.";
-    }
+  }
+
+  if (destination.driveLetter) {
+    el.destinationFinalSummary.textContent = `Backups will be saved to: ${destination.driveLetter.replace(":", "")}:\\${managedFolderName}`;
+  } else {
+    el.destinationFinalSummary.textContent = "Backups will appear here once a destination is selected.";
   }
   el.retentionCount.value = retentionCount;
   el.scheduleEnabled.checked = Boolean(schedule.enabled);
@@ -993,7 +1022,7 @@ function collectConfig() {
       driveLetter: el.destinationDriveLetter.value.trim(),
       label: el.destinationLabel.value.trim(),
       baseFolder: el.destinationBaseFolder.value.trim(),
-      folderMode: state.config.destination.folderMode || "managed",
+      folderMode: "managed",
       selectedPath: state.config.destination.selectedPath || ""
     },
     retentionCount: Number(el.retentionCount.value || 3),
@@ -1320,40 +1349,12 @@ async function browseDestinationFolder() {
   state.config.destination.mode = "driveLetter";
   state.config.destination.driveLetter = selected.driveLetter;
   state.config.destination.label = "";
+  state.config.destination.folderMode = "managed";
   el.destinationMode.value = "driveLetter";
   el.destinationDriveLetter.value = selected.driveLetter;
   el.destinationLabel.value = "";
-  if ((state.config.destination.folderMode || "managed") === "existing") {
-    state.config.destination.baseFolder = selected.baseFolder;
-    el.destinationBaseFolder.value = selected.baseFolder;
-  } else {
-    state.config.destination.baseFolder = "One Bite Backups";
-    el.destinationBaseFolder.value = "One Bite Backups";
-  }
-  renderConfig();
-}
-
-function setDestinationFolderMode(folderMode) {
-  state.config.destination.folderMode = folderMode;
-
-  if (folderMode === "existing") {
-    const selectedPath = state.config.destination.selectedPath || "";
-    if (!selectedPath) {
-      el.destinationModeSummary.textContent = "Choose a folder first, then use it as the existing backup folder.";
-      return;
-    }
-
-    const rootPath = `${state.config.destination.driveLetter}:\\`;
-    const relativeFolder = selectedPath.startsWith(rootPath)
-      ? selectedPath.slice(rootPath.length).replaceAll("/", "\\")
-      : el.destinationBaseFolder.value.trim();
-    state.config.destination.baseFolder = relativeFolder;
-    el.destinationBaseFolder.value = relativeFolder;
-  } else {
-    state.config.destination.baseFolder = "One Bite Backups";
-    el.destinationBaseFolder.value = "One Bite Backups";
-  }
-
+  state.config.destination.baseFolder = "OB Tools Backup";
+  el.destinationBaseFolder.value = "OB Tools Backup";
   renderConfig();
 }
 
@@ -1414,12 +1415,6 @@ el.browseDestination.addEventListener("click", () => {
     el.protectionState.textContent = "Unavailable";
     el.protectionMessage.textContent = error.message;
   });
-});
-el.useManagedFolder.addEventListener("click", () => {
-  setDestinationFolderMode("managed");
-});
-el.useExistingFolder.addEventListener("click", () => {
-  setDestinationFolderMode("existing");
 });
 el.saveMainSetup.addEventListener("click", () => {
   saveConfig().catch((error) => {

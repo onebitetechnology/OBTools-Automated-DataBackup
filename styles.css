@@ -272,6 +272,13 @@ label span {
   flex-wrap: wrap;
 }
 
+.panel-actions-underhead {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+}
+
 .hero-actions {
   margin-top: 14px;
   flex-wrap: wrap;
@@ -618,6 +625,11 @@ button:disabled {
   color: var(--muted);
   line-height: 1.45;
   font-size: 0.94rem;
+}
+
+.compact-note {
+  margin: 0 0 14px;
+  max-width: 64ch;
 }
 
 .top-gap {
