@@ -43,6 +43,7 @@ const el = {
   remindersEnabled: document.getElementById("reminders-enabled"),
   reminderDays: document.getElementById("reminder-days"),
   cloudCheckEnabled: document.getElementById("cloud-check-enabled"),
+  receiveBetaUpdates: document.getElementById("receive-beta-updates"),
   saveConfig: document.getElementById("save-config"),
   runBackup: document.getElementById("run-backup"),
   runCloudCheck: document.getElementById("run-cloud-check"),
@@ -165,6 +166,10 @@ function normalizeConfig(config) {
     cloudCheck: {
       enabled: true,
       ...(config.cloudCheck || {})
+    },
+    updates: {
+      channel: "beta",
+      ...(config.updates || {})
     },
     terms: {
       version: "2026-03-16",
@@ -346,6 +351,9 @@ function renderMeta() {
   el.settingsVersionCopy.textContent = version;
   el.updateLatestVersion.textContent = latestVersion;
   el.updateStatus.textContent = updateMessage;
+  if (el.receiveBetaUpdates) {
+    el.receiveBetaUpdates.checked = (state.config?.updates?.channel || "beta") === "beta";
+  }
   el.updateStatus.classList.toggle("warning-copy", Boolean(updateInfo.updateAvailable && !updateInfo.downloaded) && !/failed/i.test(updateMessage));
   el.updateStatus.classList.toggle("error-copy", /failed/i.test(updateMessage));
 
@@ -830,7 +838,7 @@ function renderTermsGate() {
 }
 
 function renderConfig() {
-  const { destination, retentionCount, schedule, reminders, cloudCheck } = state.config;
+  const { destination, retentionCount, schedule, reminders, cloudCheck, updates } = state.config;
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
@@ -867,6 +875,9 @@ function renderConfig() {
   el.remindersEnabled.checked = Boolean(reminders.enabled);
   el.reminderDays.value = reminders.staleDays;
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
+  if (el.receiveBetaUpdates) {
+    el.receiveBetaUpdates.checked = (updates?.channel || "beta") === "beta";
+  }
   renderJobs();
   renderSettingsSummary();
   renderStorageAnalysis();
@@ -898,6 +909,9 @@ function collectConfig() {
     },
     cloudCheck: {
       enabled: el.cloudCheckEnabled.checked
+    },
+    updates: {
+      channel: el.receiveBetaUpdates?.checked ? "beta" : "latest"
     },
     terms: {
       ...state.config.terms

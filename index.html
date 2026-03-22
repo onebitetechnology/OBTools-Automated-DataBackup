@@ -283,8 +283,12 @@
 
         <section class="settings-section">
           <div class="settings-section-title">App Updates</div>
-          <div class="settings-section-copy">Use the beta release channel to test new internal builds before general rollout.</div>
+          <div class="settings-section-copy">Choose whether this PC should receive stable releases only or internal beta builds too.</div>
           <div class="updates-card">
+            <label class="checkbox">
+              <input id="receive-beta-updates" type="checkbox">
+              <span>Receive beta and test builds</span>
+            </label>
             <div class="updates-meta-row">
               <span class="updates-meta-label">Current Version:</span>
               <span id="app-version" class="updates-meta-value">Loading...</span>
@@ -300,6 +304,7 @@
               </div>
               <div id="update-progress-label" class="update-progress-label">0%</div>
             </div>
+            <p class="hint">Turn beta updates off to stay on final releases only. Turn it on to receive internal test builds as they are published.</p>
             <div class="updates-actions">
               <button id="check-updates" class="primary" type="button">Check for Updates</button>
               <button id="download-update" class="secondary" type="button" disabled>Download Update</button>

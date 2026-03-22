@@ -9,8 +9,10 @@ const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : APP_ROOT;
 const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
 const WINDOWS_DIR = path.join(RESOURCE_ROOT, "windows");
 const SHELL_WORK_DIR = RESOURCE_ROOT;
+let currentUpdateChannel = null;
 let updateStatus = {
   supported: app.isPackaged && process.platform === "win32",
+  channel: "beta",
   checkedAt: null,
   message: app.isPackaged && process.platform === "win32"
     ? "Check for updates to look for new internal beta releases."
@@ -79,6 +81,31 @@ function readJson(filePath) {
 
 function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function defaultUpdateChannelForVersion(version = app.getVersion()) {
+  return /-beta/i.test(String(version || "")) ? "beta" : "latest";
+}
+
+function sanitizeUpdateChannel(value, fallbackVersion = app.getVersion()) {
+  if (value === "latest") {
+    return "latest";
+  }
+
+  if (value === "beta") {
+    return "beta";
+  }
+
+  return defaultUpdateChannelForVersion(fallbackVersion);
+}
+
+function normalizeConfigForMain(config) {
+  return {
+    ...config,
+    updates: {
+      channel: sanitizeUpdateChannel(config?.updates?.channel)
+    }
+  };
 }
 
 function defaultStatus() {
@@ -783,10 +810,11 @@ function createWindow() {
   });
 }
 
-function configureAutoUpdates() {
+function configureAutoUpdates(configOverride = null) {
   if (!app.isPackaged || process.platform !== "win32") {
     updateStatus = {
       supported: false,
+      channel: "latest",
       checkedAt: null,
       message: "Update checks are only available in the installed Windows app.",
       updateAvailable: false,
@@ -799,28 +827,27 @@ function configureAutoUpdates() {
     return;
   }
 
-  if (autoUpdaterConfigured) {
-    return;
-  }
-
-  updateStatus = {
-    supported: true,
-    checkedAt: null,
-    message: "Check for updates to look for new internal beta releases.",
-    updateAvailable: false,
-    availableVersion: null,
-    downloading: false,
-    downloaded: false,
-    downloadProgress: null
-  };
-  publishUpdateStatus();
+  const desiredChannel = sanitizeUpdateChannel(
+    configOverride?.updates?.channel || (() => {
+      try {
+        const { configPath } = dataPaths();
+        const config = readJson(configPath);
+        return config?.updates?.channel;
+      } catch (_error) {
+        return null;
+      }
+    })()
+  );
 
   try {
-    ({ autoUpdater } = require("electron-updater"));
+    if (!autoUpdaterConfigured) {
+      ({ autoUpdater } = require("electron-updater"));
+    }
   } catch (error) {
     writeLauncherLog(`electron-updater could not be loaded: ${error.message}`);
     updateStatus = {
       supported: false,
+      channel: desiredChannel,
       checkedAt: null,
       message: `Update checks are unavailable: ${error.message}`,
       updateAvailable: false,
@@ -833,16 +860,46 @@ function configureAutoUpdates() {
     return;
   }
 
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.channel = "beta";
-  autoUpdater.allowPrerelease = true;
-  autoUpdaterConfigured = true;
-  writeLauncherLog("Auto updater configured for internal beta channel.");
+  if (!autoUpdaterConfigured) {
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdaterConfigured = true;
+  }
+
+  const channelChanged = currentUpdateChannel !== desiredChannel;
+  currentUpdateChannel = desiredChannel;
+  autoUpdater.channel = desiredChannel;
+  autoUpdater.allowPrerelease = desiredChannel === "beta";
+
+  if (channelChanged || !updateStatus.supported) {
+    updateStatus = {
+      supported: true,
+      channel: desiredChannel,
+      checkedAt: null,
+      message: desiredChannel === "beta"
+        ? "Check for updates to look for new beta and test releases."
+        : "Check for updates to look for new stable releases.",
+      updateAvailable: false,
+      availableVersion: null,
+      downloading: false,
+      downloaded: false,
+      downloadProgress: null
+    };
+    publishUpdateStatus();
+  }
+
+  writeLauncherLog(`Auto updater configured for ${desiredChannel} channel.`);
+
+  if (autoUpdater.__obtoolsListenersBound) {
+    return;
+  }
+
+  autoUpdater.__obtoolsListenersBound = true;
 
   autoUpdater.on("checking-for-update", () => {
     updateStatus = {
       ...updateStatus,
+      channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
       message: "Checking for updates...",
       updateAvailable: false,
@@ -857,6 +914,7 @@ function configureAutoUpdates() {
   autoUpdater.on("update-available", (info) => {
     updateStatus = {
       ...updateStatus,
+      channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
       message: `Update ${info?.version || "available"} is available to download.`,
       updateAvailable: true,
@@ -871,8 +929,11 @@ function configureAutoUpdates() {
   autoUpdater.on("update-not-available", () => {
     updateStatus = {
       ...updateStatus,
+      channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
-      message: "This machine is already on the latest published build.",
+      message: currentUpdateChannel === "beta"
+        ? "This machine is already on the latest published beta build."
+        : "This machine is already on the latest published stable build.",
       updateAvailable: false,
       availableVersion: app.getVersion(),
       downloading: false,
@@ -886,6 +947,7 @@ function configureAutoUpdates() {
     const percent = Math.round(progress?.percent || 0);
     updateStatus = {
       ...updateStatus,
+      channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
       message: `Downloading update${updateStatus.availableVersion ? ` ${updateStatus.availableVersion}` : ""}... ${percent}%`,
       downloading: true,
@@ -898,6 +960,7 @@ function configureAutoUpdates() {
   autoUpdater.on("update-downloaded", (info) => {
     updateStatus = {
       ...updateStatus,
+      channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
       message: `Update ${info?.version || updateStatus.availableVersion || ""} downloaded and ready to install.`.trim(),
       updateAvailable: true,
@@ -912,6 +975,7 @@ function configureAutoUpdates() {
   autoUpdater.on("error", (error) => {
     updateStatus = {
       ...updateStatus,
+      channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
       message: `Update check failed: ${error.message}`,
       downloading: false
@@ -977,9 +1041,13 @@ app.on("window-all-closed", () => {
 });
 
 ipcMain.handle("state:get", () => {
-  configureAutoUpdates();
   const { configPath, statusPath } = dataPaths();
-  const config = readJson(configPath);
+  const rawConfig = readJson(configPath);
+  const config = normalizeConfigForMain(rawConfig);
+  if (JSON.stringify(rawConfig) !== JSON.stringify(config)) {
+    writeJson(configPath, config);
+  }
+  configureAutoUpdates(config);
   const status = reconcileStatusWithDisk(config, readJson(statusPath));
   writeJson(statusPath, status);
   return {
@@ -991,9 +1059,11 @@ ipcMain.handle("state:get", () => {
 
 ipcMain.handle("config:save", (_event, config) => {
   const { configPath, statusPath } = dataPaths();
-  writeJson(configPath, config);
+  const normalizedConfig = normalizeConfigForMain(config);
+  writeJson(configPath, normalizedConfig);
+  configureAutoUpdates(normalizedConfig);
   return {
-    config,
+    config: normalizedConfig,
     status: readJson(statusPath),
     meta: appMeta()
   };

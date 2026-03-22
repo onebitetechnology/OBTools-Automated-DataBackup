@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.21 - 2026-03-22
+
+- Added an update-channel setting so installed apps can choose between stable-only releases and beta/test builds.
+- Switched packaging to a dynamic Electron Builder config so `-beta` versions publish to the GitHub beta prerelease channel, while plain versions publish as stable releases.
+
 ## 1.0.10-beta.20 - 2026-03-20
 
 - Reorganized the main dashboard so the visible setup steps now match the actual workflow.

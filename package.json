@@ -1,6 +1,6 @@
 {
   "name": "onebite-backup-companion",
-  "version": "1.0.10-beta.20",
+  "version": "1.0.10-beta.21",
   "description": "Windows backup and sync desktop app for One Bite Technology customers.",
   "main": "main.js",
   "author": "One Bite Technology",
@@ -12,9 +12,9 @@
   "scripts": {
     "start": "electron .",
     "start:web": "node server.js",
-    "dist:win": "electron-builder --win nsis --publish never",
-    "pack": "electron-builder --dir",
-    "release:win": "electron-builder --win nsis --publish always"
+    "dist:win": "electron-builder --config electron-builder.config.js --win nsis --publish never",
+    "pack": "electron-builder --config electron-builder.config.js --dir",
+    "release:win": "electron-builder --config electron-builder.config.js --win nsis --publish always"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"
@@ -22,58 +22,5 @@
   "devDependencies": {
     "electron": "^35.0.1",
     "electron-builder": "^26.0.12"
-  },
-  "build": {
-    "appId": "ca.onebitetechnology.backupcompanion",
-    "productName": "OBTools Automated Backups",
-    "generateUpdatesFilesForAllChannels": true,
-    "files": [
-      "app.js",
-      "assets/**/*",
-      "index.html",
-      "main.js",
-      "preload.js",
-      "server.js",
-      "styles.css"
-    ],
-    "extraResources": [
-      {
-        "from": "data",
-        "to": "data"
-      },
-      {
-        "from": "windows",
-        "to": "windows"
-      }
-    ],
-    "asar": true,
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "artifactName": "OBTools-Automated-Backups-Setup-${version}.${ext}",
-      "publish": [
-        {
-          "provider": "github",
-          "owner": "onebitetechnology",
-          "repo": "OBTools-Automated-DataBackup",
-          "channel": "beta",
-          "releaseType": "prerelease"
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": true,
-      "shortcutName": "OBTools Automated Backups"
-    }
   }
 }

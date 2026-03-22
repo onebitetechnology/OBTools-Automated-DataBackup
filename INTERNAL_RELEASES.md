@@ -7,7 +7,7 @@ The app is prepared for local Electron development and Windows installer builds.
 Current app version:
 
 ```text
-1.0.10-beta.20
+1.0.10-beta.21
 ```
 
 Desktop shortcut name:
@@ -42,7 +42,13 @@ npm install
 npm run dist:win
 ```
 
-3. GitHub Actions now builds the Windows installer and publishes the internal beta prerelease automatically on pushes to `main`.
+3. GitHub Actions now builds the Windows installer and publishes automatically on pushes to `main`.
+
+Release channel behavior:
+
+- Versions with `-beta` in the version string publish as GitHub prereleases on the `beta` channel.
+- Plain versions like `1.1.0` publish as stable GitHub releases on the default `latest` channel.
+- Installed apps can choose between stable-only updates and beta/test builds from Settings.
 
 Workflow file:
 
