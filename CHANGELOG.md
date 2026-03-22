@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.25 - 2026-03-22
+
+- Converted Settings from a right-side drawer into a centered modal-style window.
+- Moved the bottom actions to a more conventional footer layout with `Cancel` on the left and `Save` on the right.
+
 ## 1.0.10-beta.24 - 2026-03-22
 
 - Reworked Step 1 so the setup copy spans the full width of the panel and the `Find Browsers` / `Add Item` actions now sit directly above the backup-item list.
