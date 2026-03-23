@@ -125,7 +125,7 @@
               <p id="destination-free-space" class="summary-value">Waiting for analysis</p>
             </article>
           </div>
-          <p id="retention-behavior-summary" class="hint">When the copy limit is reached, the oldest snapshot is removed before creating the next one.</p>
+          <p id="retention-behavior-summary" class="hint">The app keeps recent daily, monthly, and yearly snapshots according to your retention plan and removes older history outside that plan.</p>
           <p id="destination-mode-summary" class="hint">The app will create and maintain an OB Tools Backup folder on the selected drive.</p>
           <input id="destination-mode" type="hidden" value="driveLetter">
           <input id="destination-base-folder" type="hidden">
@@ -138,13 +138,13 @@
             <div>
               <p class="eyebrow">Step 3</p>
               <h3>Review your backup plan</h3>
-              <p class="section-note">Confirm how many copies are kept and whether automation is on before handing the app to a customer.</p>
+              <p class="section-note">Confirm the retention plan and whether automation is on before handing the app to a customer.</p>
             </div>
           </div>
           <div class="settings-summary-grid two-up">
             <article class="summary-card">
-              <p class="metric-label">Copies To Keep</p>
-              <p id="settings-retention-summary" class="summary-value">3 copies</p>
+              <p class="metric-label">Retention Plan</p>
+              <p id="settings-retention-summary" class="summary-value">3 days</p>
             </article>
             <article class="summary-card">
               <p class="metric-label">Automation</p>
@@ -229,14 +229,22 @@
 
         <section class="settings-section">
           <div class="settings-section-title">Retention</div>
-          <div class="settings-section-copy">Choose how many backup copies to keep before the oldest snapshots are replaced.</div>
-          <div class="grid two">
+          <div class="settings-section-copy">Choose how many recent daily, monthly, and yearly snapshots to keep. Older snapshots outside that plan are removed automatically.</div>
+          <div class="grid three">
             <label>
-              <span>Copies To Keep</span>
-              <input id="retention-count" type="number" min="1" max="20">
+              <span>Recent Days</span>
+              <input id="retention-days" type="number" min="0" max="365">
+            </label>
+            <label>
+              <span>Recent Months</span>
+              <input id="retention-months" type="number" min="0" max="120">
+            </label>
+            <label>
+              <span>Recent Years</span>
+              <input id="retention-years" type="number" min="0" max="50">
             </label>
           </div>
-          <p class="hint">When the backup drive fills with more than this number of snapshots, the oldest copies are replaced first.</p>
+          <p class="hint">Example: 3 recent days keeps today, yesterday, and the day before. Monthly retention keeps one snapshot per month. Yearly retention keeps one snapshot per year.</p>
         </section>
 
         <section class="settings-section">

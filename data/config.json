@@ -8,7 +8,11 @@
     "folderMode": "managed",
     "selectedPath": ""
   },
-  "retentionCount": 3,
+  "retention": {
+    "days": 3,
+    "months": 0,
+    "years": 0
+  },
   "schedule": {
     "enabled": true,
     "frequency": "daily",

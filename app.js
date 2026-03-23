@@ -39,7 +39,9 @@ const el = {
   destinationFreeSpace: document.getElementById("destination-free-space"),
   retentionBehaviorSummary: document.getElementById("retention-behavior-summary"),
   destinationModeSummary: document.getElementById("destination-mode-summary"),
-  retentionCount: document.getElementById("retention-count"),
+  retentionDays: document.getElementById("retention-days"),
+  retentionMonths: document.getElementById("retention-months"),
+  retentionYears: document.getElementById("retention-years"),
   scheduleEnabled: document.getElementById("schedule-enabled"),
   scheduleFrequency: document.getElementById("schedule-frequency"),
   scheduleTime: document.getElementById("schedule-time"),
@@ -161,6 +163,17 @@ function normalizeConfig(config) {
   const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || !existingDestination.baseFolder
     ? "OB Tools Backup"
     : existingDestination.baseFolder;
+  const retentionSource = config.retention || {};
+  const legacyCount = Number(config.retentionCount || 0);
+  const normalizedRetention = {
+    days: Math.max(Number(retentionSource.days ?? legacyCount ?? 3) || 0, 0),
+    months: Math.max(Number(retentionSource.months ?? 0) || 0, 0),
+    years: Math.max(Number(retentionSource.years ?? 0) || 0, 0)
+  };
+
+  if ((normalizedRetention.days + normalizedRetention.months + normalizedRetention.years) <= 0) {
+    normalizedRetention.days = 1;
+  }
 
   return {
     ...config,
@@ -179,6 +192,7 @@ function normalizeConfig(config) {
       enabled: true,
       ...(config.cloudCheck || {})
     },
+    retention: normalizedRetention,
     preferences: {
       timeFormat: "12h",
       ...(config.preferences || {})
@@ -399,6 +413,24 @@ function formatBytes(bytes) {
 
   const rounded = value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1);
   return `${rounded} ${units[index]}`;
+}
+
+function retentionSummary(retention = state.config?.retention || { days: 1, months: 0, years: 0 }) {
+  const parts = [];
+
+  if (retention.days > 0) {
+    parts.push(`${retention.days} ${retention.days === 1 ? "day" : "days"}`);
+  }
+
+  if (retention.months > 0) {
+    parts.push(`${retention.months} ${retention.months === 1 ? "month" : "months"}`);
+  }
+
+  if (retention.years > 0) {
+    parts.push(`${retention.years} ${retention.years === 1 ? "year" : "years"}`);
+  }
+
+  return parts.length ? parts.join(" / ") : "1 day";
 }
 
 function protectionSummary(status) {
@@ -921,8 +953,8 @@ function closeSettingsDrawer() {
 }
 
 function renderSettingsSummary() {
-  const { retentionCount, schedule, preferences } = state.config;
-  el.settingsRetentionSummary.textContent = `${retentionCount} ${retentionCount === 1 ? "copy" : "copies"}`;
+  const { retention, schedule, preferences } = state.config;
+  el.settingsRetentionSummary.textContent = retentionSummary(retention);
 
   if (!schedule.enabled) {
     el.settingsScheduleSummary.textContent = "Manual only";
@@ -936,13 +968,13 @@ function renderStorageAnalysis() {
   if (!state.storage) {
     el.backupSizeEstimate.textContent = "Waiting for analysis";
     el.destinationFreeSpace.textContent = "Waiting for analysis";
-    el.retentionBehaviorSummary.textContent = "When the copy limit is reached, the oldest snapshot is removed before creating the next one.";
+    el.retentionBehaviorSummary.textContent = "Daily, monthly, and yearly snapshots are kept according to your retention plan. Older snapshots outside that plan are removed automatically.";
     return;
   }
 
   el.backupSizeEstimate.textContent = formatBytes(state.storage.estimatedBytes);
   el.destinationFreeSpace.textContent = state.storage.freeBytes == null ? "Unavailable" : formatBytes(state.storage.freeBytes);
-  el.retentionBehaviorSummary.textContent = `The app keeps ${state.storage.retentionCount} snapshot${state.storage.retentionCount === 1 ? "" : "s"}. When that limit is reached, the oldest snapshot is removed before creating the next one.`;
+  el.retentionBehaviorSummary.textContent = `The app keeps ${retentionSummary(state.storage.retention)} of history. Daily, monthly, and yearly snapshots outside that plan are removed automatically.`;
 }
 
 async function refreshStorageAnalysis() {
@@ -977,7 +1009,7 @@ function renderTermsGate() {
 }
 
 function renderConfig() {
-  const { destination, retentionCount, schedule, reminders, cloudCheck, updates, preferences } = state.config;
+  const { destination, retention, schedule, reminders, cloudCheck, updates, preferences } = state.config;
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
@@ -1005,7 +1037,9 @@ function renderConfig() {
   } else {
     el.destinationFinalSummary.textContent = "Backups will appear here once a destination is selected.";
   }
-  el.retentionCount.value = retentionCount;
+  el.retentionDays.value = retention?.days ?? 1;
+  el.retentionMonths.value = retention?.months ?? 0;
+  el.retentionYears.value = retention?.years ?? 0;
   el.scheduleEnabled.checked = Boolean(schedule.enabled);
   el.scheduleFrequency.value = schedule.frequency;
   el.scheduleTime.value = schedule.time;
@@ -1037,7 +1071,15 @@ function collectConfig() {
       folderMode: "managed",
       selectedPath: state.config.destination.selectedPath || ""
     },
-    retentionCount: Number(el.retentionCount.value || 3),
+    retention: (() => {
+      const days = Math.max(Number(el.retentionDays.value || 0), 0);
+      const months = Math.max(Number(el.retentionMonths.value || 0), 0);
+      const years = Math.max(Number(el.retentionYears.value || 0), 0);
+      return (days + months + years) > 0
+        ? { days, months, years }
+        : { days: 1, months: 0, years: 0 };
+    })(),
+    retentionCount: undefined,
     schedule: {
       enabled: el.scheduleEnabled.checked,
       frequency: el.scheduleFrequency.value,

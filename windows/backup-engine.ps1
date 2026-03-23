@@ -18,6 +18,33 @@ function Write-Json([string]$Path, $Value) {
   [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
+function Get-RetentionPolicy($Config) {
+  $legacyCount = 0
+  if ($null -ne $Config.PSObject.Properties["retentionCount"]) {
+    $legacyCount = [int]$Config.retentionCount
+  }
+
+  $retention = $null
+  if ($null -ne $Config.PSObject.Properties["retention"]) {
+    $retention = $Config.retention
+  }
+  $days = if ($retention -and $null -ne $retention.PSObject.Properties["days"]) { [int]$retention.days } elseif ($legacyCount -gt 0) { $legacyCount } else { 3 }
+  $months = if ($retention -and $null -ne $retention.PSObject.Properties["months"]) { [int]$retention.months } else { 0 }
+  $years = if ($retention -and $null -ne $retention.PSObject.Properties["years"]) { [int]$retention.years } else { 0 }
+
+  $policy = [ordered]@{
+    days = [Math]::Max($days, 0)
+    months = [Math]::Max($months, 0)
+    years = [Math]::Max($years, 0)
+  }
+
+  if (($policy.days + $policy.months + $policy.years) -le 0) {
+    $policy.days = 1
+  }
+
+  return [PSCustomObject]$policy
+}
+
 function Resolve-Destination($Destination) {
   if ($Destination.mode -eq "label" -and $Destination.label) {
     $volume = Get-Volume | Where-Object { $_.FileSystemLabel -eq $Destination.label } | Select-Object -First 1
@@ -121,6 +148,88 @@ function Get-RobocopyExcludedDirectories([string]$Source) {
   return @($excluded)
 }
 
+function Parse-SnapshotTimestamp([string]$SnapshotName) {
+  try {
+    return [datetime]::ParseExact($SnapshotName, "yyyy-MM-dd_HH-mm-ss", [System.Globalization.CultureInfo]::InvariantCulture)
+  } catch {
+    return $null
+  }
+}
+
+function Get-SnapshotEntries([string]$SnapshotsRoot) {
+  if (-not (Test-Path -LiteralPath $SnapshotsRoot)) {
+    return @()
+  }
+
+  $entries = @(Get-ChildItem -Path $SnapshotsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $timestamp = Parse-SnapshotTimestamp $_.Name
+    if ($null -eq $timestamp) {
+      return
+    }
+
+    [PSCustomObject]@{
+      Name = $_.Name
+      FullName = $_.FullName
+      Timestamp = $timestamp
+    }
+  })
+
+  return @($entries | Sort-Object Timestamp -Descending)
+}
+
+function Select-RetainedSnapshots($Snapshots, $RetentionPolicy) {
+  $selected = New-Object "System.Collections.Generic.HashSet[string]"
+
+  if ($RetentionPolicy.days -gt 0) {
+    $dailyGroups = @($Snapshots | Group-Object { $_.Timestamp.ToString("yyyy-MM-dd") } | Sort-Object Name -Descending)
+    foreach ($group in @($dailyGroups | Select-Object -First $RetentionPolicy.days)) {
+      $candidate = @($group.Group | Sort-Object Timestamp -Descending | Select-Object -First 1)
+      if ($candidate.Count -gt 0) {
+        [void]$selected.Add($candidate[0].Name)
+      }
+    }
+  }
+
+  if ($RetentionPolicy.months -gt 0) {
+    $monthlyGroups = @($Snapshots | Group-Object { $_.Timestamp.ToString("yyyy-MM") } | Sort-Object Name -Descending)
+    foreach ($group in @($monthlyGroups | Select-Object -First $RetentionPolicy.months)) {
+      $candidate = @($group.Group | Sort-Object Timestamp -Descending | Select-Object -First 1)
+      if ($candidate.Count -gt 0) {
+        [void]$selected.Add($candidate[0].Name)
+      }
+    }
+  }
+
+  if ($RetentionPolicy.years -gt 0) {
+    $yearlyGroups = @($Snapshots | Group-Object { $_.Timestamp.ToString("yyyy") } | Sort-Object Name -Descending)
+    foreach ($group in @($yearlyGroups | Select-Object -First $RetentionPolicy.years)) {
+      $candidate = @($group.Group | Sort-Object Timestamp | Select-Object -First 1)
+      if ($candidate.Count -gt 0) {
+        [void]$selected.Add($candidate[0].Name)
+      }
+    }
+  }
+
+  return @($Snapshots | Where-Object { $selected.Contains($_.Name) })
+}
+
+function Prune-Snapshots([string]$SnapshotsRoot, $RetentionPolicy) {
+  $allSnapshots = @(Get-SnapshotEntries $SnapshotsRoot)
+  $retainedSnapshots = @(Select-RetainedSnapshots $allSnapshots $RetentionPolicy)
+  $retainedNames = New-Object "System.Collections.Generic.HashSet[string]"
+
+  foreach ($snapshot in $retainedSnapshots) {
+    [void]$retainedNames.Add($snapshot.Name)
+  }
+
+  $snapshotsToRemove = @($allSnapshots | Where-Object { -not $retainedNames.Contains($_.Name) })
+  foreach ($snapshot in $snapshotsToRemove) {
+    Remove-Item -LiteralPath $snapshot.FullName -Recurse -Force
+  }
+
+  return @($retainedSnapshots | Sort-Object Timestamp -Descending)
+}
+
 function Copy-BackupItem($Job, [string]$RootPath) {
   $source = Expand-WindowsPath $Job.path
   if (-not (Test-Path -LiteralPath $source)) {
@@ -187,19 +296,15 @@ $currentRoot = Join-Path $baseRoot "current"
 $snapshotsRoot = Join-Path $baseRoot "snapshots"
 $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
 $snapshotPath = Join-Path $snapshotsRoot $timestamp
-$keep = [Math]::Max([int]$config.retentionCount, 1)
+$retentionPolicy = Get-RetentionPolicy $config
 $enabledJobs = @($config.jobs | Where-Object { $_.enabled })
 $totalSteps = [Math]::Max(($enabledJobs.Count * 2) + 1, 1)
 
 New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
 New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
 
-$existingSnapshots = @(Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime)
 Write-ProgressMarker -Phase "preparing" -JobName "" -Step 1 -TotalSteps $totalSteps -Detail "Preparing the backup destination."
-if ($existingSnapshots.Count -ge $keep) {
-  $removeCount = ($existingSnapshots.Count - $keep) + 1
-  $existingSnapshots | Select-Object -First $removeCount | Remove-Item -Recurse -Force
-}
+[void](Prune-Snapshots $snapshotsRoot $retentionPolicy)
 
 for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
   $job = $enabledJobs[$index]
@@ -212,12 +317,8 @@ for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
   Copy-BackupItem $job $snapshotPath
 }
 
-$allSnapshots = @(Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime -Descending)
-if ($allSnapshots.Count -gt $keep) {
-  $allSnapshots | Select-Object -Skip $keep | Remove-Item -Recurse -Force
-}
-
-$remaining = Get-ChildItem -Path $snapshotsRoot -Directory | Sort-Object CreationTime -Descending | Select-Object -ExpandProperty Name
+$remainingSnapshots = @(Prune-Snapshots $snapshotsRoot $retentionPolicy)
+$remaining = @($remainingSnapshots | Select-Object -ExpandProperty Name)
 $status.lastBackupAt = (Get-Date).ToString("o")
 $status.lastBackupResult = "success"
 $status.lastBackupMessage = "Backup completed to $baseRoot"

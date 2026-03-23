@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.30 - 2026-03-22
+
+- Replaced the single snapshot-count retention setting with daily, monthly, and yearly retention controls.
+- The app now keeps one snapshot per recent day, month, and year according to the configured plan, while pruning older snapshots outside that plan.
+
 ## 1.0.10-beta.29 - 2026-03-22
 
 - Added a `12-hour / 24-hour` time display preference in Automation settings.

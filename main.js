@@ -122,6 +122,17 @@ function normalizeConfigForMain(config) {
   const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || !existingDestination.baseFolder
     ? "OB Tools Backup"
     : existingDestination.baseFolder;
+  const retentionSource = config?.retention || {};
+  const legacyCount = Number(config?.retentionCount || 0);
+  const normalizedRetention = {
+    days: Math.max(Number(retentionSource.days ?? legacyCount ?? 3) || 0, 0),
+    months: Math.max(Number(retentionSource.months ?? 0) || 0, 0),
+    years: Math.max(Number(retentionSource.years ?? 0) || 0, 0)
+  };
+
+  if ((normalizedRetention.days + normalizedRetention.months + normalizedRetention.years) <= 0) {
+    normalizedRetention.days = 1;
+  }
 
   return {
     ...config,
@@ -130,10 +141,30 @@ function normalizeConfigForMain(config) {
       folderMode: "managed",
       baseFolder: normalizedBaseFolder
     },
+    retention: normalizedRetention,
+    retentionCount: undefined,
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
     }
   };
+}
+
+function retentionSummary(retention = { days: 1, months: 0, years: 0 }) {
+  const parts = [];
+
+  if (retention.days > 0) {
+    parts.push(`${retention.days} ${retention.days === 1 ? "day" : "days"}`);
+  }
+
+  if (retention.months > 0) {
+    parts.push(`${retention.months} ${retention.months === 1 ? "month" : "months"}`);
+  }
+
+  if (retention.years > 0) {
+    parts.push(`${retention.years} ${retention.years === 1 ? "year" : "years"}`);
+  }
+
+  return parts.length ? parts.join(" / ") : "1 day";
 }
 
 function defaultStatus() {
@@ -242,7 +273,7 @@ function buildSupportBundle(config, status) {
     "-----------------------------",
     `Resolved destination: ${destinationRoot}`,
     `Folder mode: ${config?.destination?.folderMode || "managed"}`,
-    `Copies to keep: ${config?.retentionCount || 3}`,
+    `Retention plan: ${retentionSummary(config?.retention)}`,
     "",
     "Enabled backup items",
     "--------------------",
@@ -493,7 +524,7 @@ function analyzeStorage(config) {
     freeBytes,
     destinationRoot,
     missingPaths,
-    retentionCount: Math.max(Number(config?.retentionCount || 1), 1)
+    retention: config?.retention || { days: 1, months: 0, years: 0 }
   };
 }
 
