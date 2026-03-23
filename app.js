@@ -54,9 +54,7 @@ const el = {
   browseDestination: document.getElementById("browse-destination"),
   useManagedFolder: document.getElementById("use-managed-folder"),
   useExistingFolder: document.getElementById("use-existing-folder"),
-  saveMainSetup: document.getElementById("save-main-setup"),
   openSettings: document.getElementById("open-settings"),
-  openAdvancedSettings: document.getElementById("open-advanced-settings"),
   closeSettings: document.getElementById("close-settings"),
   settingsDrawer: document.getElementById("settings-drawer"),
   settingsRetentionSummary: document.getElementById("settings-retention-summary"),
@@ -1383,16 +1381,7 @@ el.browseDestination.addEventListener("click", () => {
     el.protectionMessage.textContent = error.message;
   });
 });
-el.saveMainSetup.addEventListener("click", () => {
-  saveConfig().catch((error) => {
-    showResultModal({
-      title: "Save Setup",
-      message: error.message
-    });
-  });
-});
 el.openSettings.addEventListener("click", openSettingsDrawer);
-el.openAdvancedSettings.addEventListener("click", openSettingsDrawer);
 el.closeSettings.addEventListener("click", closeSettingsDrawer);
 el.addJob.addEventListener("click", () => {
   state.config.jobs.push({

@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.28 - 2026-03-22
+
+- Removed the unnecessary `Save Setup` and `Advanced Settings` buttons from Step 3 so that panel is now a cleaner review summary.
+- Kept Settings as the single place for advanced configuration and Save/Cancel actions.
+
 ## 1.0.10-beta.27 - 2026-03-22
 
 - Removed the full-screen result modal from the updater flow so checking, downloading, and installing updates now stays inside the Settings panel like the other One Bite apps.
