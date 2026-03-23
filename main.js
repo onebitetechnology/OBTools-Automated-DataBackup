@@ -1317,8 +1317,13 @@ ipcMain.handle("automation:install", async () => {
   writeLauncherLog(`IPC automation:install completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Automation install completed. ok=${result.ok} message=${result.message}`);
   return {
+    ok: result.ok,
+    message: result.message,
     status: mergeStatus({
-      lastBackupMessage: result.message
+      automation: {
+        installedAt: result.ok ? new Date().toISOString() : null,
+        message: result.message
+      }
     }),
     meta: appMeta()
   };

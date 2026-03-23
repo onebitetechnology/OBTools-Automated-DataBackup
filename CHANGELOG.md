@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.32 - 2026-03-23
+
+- Added a clear success/error popup when installing Windows tasks from Settings.
+- Added explainer text under `Install Windows Tasks` so users understand that the tasks enable scheduled backups and stale-backup reminders, but are not required for manual backups.
+- Fixed Windows task installation status handling so automation results are tracked in the automation section instead of being mixed into backup messaging.
+
 ## 1.0.10-beta.31 - 2026-03-23
 
 - Fixed the update-channel toggle so unchecking `Receive beta and test builds` immediately clears any beta-only update result and checks the stable channel instead of snapping back to beta.

@@ -1246,6 +1246,9 @@ async function invokeAction(path) {
     const payload = await request(path, {
       method: "POST"
     });
+    if (path === "/api/install-automation" && payload.ok === false) {
+      throw new Error(payload.message || "The Windows tasks could not be installed.");
+    }
     state.status = normalizeStatus(payload.status);
     state.meta = payload.meta || state.meta;
     renderStatus();
@@ -1272,6 +1275,18 @@ async function invokeAction(path) {
       return;
     }
 
+    if (path === "/api/install-automation") {
+      showResultModal({
+        title: "Windows Tasks Ready",
+        message: state.status.automation?.message || "Windows scheduled tasks were installed successfully.",
+        list: [
+          "Scheduled backups can now run automatically using the saved schedule.",
+          "Backup reminder checks can notify the user when backups have not run recently."
+        ]
+      });
+      return;
+    }
+
     if (path === "/api/run-backup") {
       stopBackupProgressTimer();
       state.backupProgress = null;
@@ -1293,6 +1308,13 @@ async function invokeAction(path) {
 
     if (path === "/api/check-cloud") {
       el.cloudSummary.textContent = error.message;
+    }
+
+    if (path === "/api/install-automation") {
+      showResultModal({
+        title: "Windows Tasks Need Attention",
+        message: summarizeActionMessage(error.message || "The Windows tasks could not be installed.")
+      });
     }
 
     if (path === "/api/run-backup") {
