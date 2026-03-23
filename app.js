@@ -43,6 +43,7 @@ const el = {
   scheduleEnabled: document.getElementById("schedule-enabled"),
   scheduleFrequency: document.getElementById("schedule-frequency"),
   scheduleTime: document.getElementById("schedule-time"),
+  timeFormat: document.getElementById("time-format"),
   remindersEnabled: document.getElementById("reminders-enabled"),
   reminderDays: document.getElementById("reminder-days"),
   cloudCheckEnabled: document.getElementById("cloud-check-enabled"),
@@ -178,6 +179,10 @@ function normalizeConfig(config) {
       enabled: true,
       ...(config.cloudCheck || {})
     },
+    preferences: {
+      timeFormat: "12h",
+      ...(config.preferences || {})
+    },
     updates: {
       channel: "beta",
       ...(config.updates || {})
@@ -265,6 +270,27 @@ function formatSnapshotLabel(snapshotName) {
     minute: "2-digit",
     hour12: true
   }).format(parsed);
+}
+
+function formatTimeOfDay(timeValue, timeFormat = state.config?.preferences?.timeFormat || "12h") {
+  const match = String(timeValue || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return String(timeValue || "");
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return String(timeValue || "");
+  }
+
+  if (timeFormat === "24h") {
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return `${hour12}:${String(minutes).padStart(2, "0")} ${suffix}`;
 }
 
 function formatDuration(ms) {
@@ -895,7 +921,7 @@ function closeSettingsDrawer() {
 }
 
 function renderSettingsSummary() {
-  const { retentionCount, schedule } = state.config;
+  const { retentionCount, schedule, preferences } = state.config;
   el.settingsRetentionSummary.textContent = `${retentionCount} ${retentionCount === 1 ? "copy" : "copies"}`;
 
   if (!schedule.enabled) {
@@ -903,7 +929,7 @@ function renderSettingsSummary() {
     return;
   }
 
-  el.settingsScheduleSummary.textContent = `${schedule.frequency} at ${schedule.time}`;
+  el.settingsScheduleSummary.textContent = `${schedule.frequency} at ${formatTimeOfDay(schedule.time, preferences?.timeFormat)}`;
 }
 
 function renderStorageAnalysis() {
@@ -951,7 +977,7 @@ function renderTermsGate() {
 }
 
 function renderConfig() {
-  const { destination, retentionCount, schedule, reminders, cloudCheck, updates } = state.config;
+  const { destination, retentionCount, schedule, reminders, cloudCheck, updates, preferences } = state.config;
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
@@ -983,6 +1009,9 @@ function renderConfig() {
   el.scheduleEnabled.checked = Boolean(schedule.enabled);
   el.scheduleFrequency.value = schedule.frequency;
   el.scheduleTime.value = schedule.time;
+  if (el.timeFormat) {
+    el.timeFormat.value = preferences?.timeFormat || "12h";
+  }
   el.remindersEnabled.checked = Boolean(reminders.enabled);
   el.reminderDays.value = reminders.staleDays;
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
@@ -1013,6 +1042,10 @@ function collectConfig() {
       enabled: el.scheduleEnabled.checked,
       frequency: el.scheduleFrequency.value,
       time: el.scheduleTime.value
+    },
+    preferences: {
+      ...(state.config.preferences || {}),
+      timeFormat: el.timeFormat?.value || "12h"
     },
     reminders: {
       enabled: el.remindersEnabled.checked,

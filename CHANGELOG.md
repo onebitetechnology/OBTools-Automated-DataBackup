@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.29 - 2026-03-22
+
+- Added a `12-hour / 24-hour` time display preference in Automation settings.
+- The Step 3 automation summary now formats its scheduled backup time using that preference instead of always showing 24-hour time.
+
 ## 1.0.10-beta.28 - 2026-03-22
 
 - Removed the unnecessary `Save Setup` and `Advanced Settings` buttons from Step 3 so that panel is now a cleaner review summary.
