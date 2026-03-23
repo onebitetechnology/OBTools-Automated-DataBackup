@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.31 - 2026-03-23
+
+- Fixed the update-channel toggle so unchecking `Receive beta and test builds` immediately clears any beta-only update result and checks the stable channel instead of snapping back to beta.
+- Manual update checks in Settings now use the currently selected channel right away, even before the full settings form is saved.
+
 ## 1.0.10-beta.30 - 2026-03-22
 
 - Replaced the single snapshot-count retention setting with daily, monthly, and yearly retention controls.

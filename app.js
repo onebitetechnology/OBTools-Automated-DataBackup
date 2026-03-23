@@ -7,6 +7,7 @@ const state = {
   backupTiming: null,
   notifiedUpdateVersion: null,
   pendingUpdateVersion: null,
+  updateChannelDraft: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: []
@@ -144,7 +145,7 @@ async function desktopRequest(url, options = {}) {
   }
 
   if (url === "/api/check-updates" && options.method === "POST") {
-    return window.onebiteDesktop.checkForUpdates();
+    return window.onebiteDesktop.checkForUpdates(body);
   }
 
   if (url === "/api/detect-browsers") {
@@ -510,7 +511,8 @@ function renderMeta() {
   el.updateLatestVersion.textContent = latestVersion;
   el.updateStatus.textContent = updateMessage;
   if (el.receiveBetaUpdates) {
-    el.receiveBetaUpdates.checked = (state.config?.updates?.channel || "beta") === "beta";
+    const selectedChannel = state.updateChannelDraft || updateInfo.channel || state.config?.updates?.channel || "beta";
+    el.receiveBetaUpdates.checked = selectedChannel === "beta";
   }
   el.updateStatus.classList.toggle("warning-copy", Boolean(updateInfo.updateAvailable && !updateInfo.downloaded) && !/failed/i.test(updateMessage));
   el.updateStatus.classList.toggle("error-copy", /failed/i.test(updateMessage));
@@ -948,6 +950,8 @@ function openSettingsDrawer() {
 }
 
 function closeSettingsDrawer() {
+  state.updateChannelDraft = state.config?.updates?.channel || "beta";
+  renderMeta();
   el.settingsDrawer.hidden = true;
   document.body.classList.remove("settings-open");
 }
@@ -1010,6 +1014,7 @@ function renderTermsGate() {
 
 function renderConfig() {
   const { destination, retention, schedule, reminders, cloudCheck, updates, preferences } = state.config;
+  state.updateChannelDraft = updates?.channel || "beta";
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
@@ -1050,7 +1055,7 @@ function renderConfig() {
   el.reminderDays.value = reminders.staleDays;
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
   if (el.receiveBetaUpdates) {
-    el.receiveBetaUpdates.checked = (updates?.channel || "beta") === "beta";
+    el.receiveBetaUpdates.checked = (state.updateChannelDraft || "beta") === "beta";
   }
   renderJobs();
   renderSettingsSummary();
@@ -1114,8 +1119,10 @@ async function load() {
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
   state.meta = payload.meta || null;
+  state.updateChannelDraft = state.config?.updates?.channel || state.meta?.updateStatus?.channel || "beta";
   if (window.onebiteDesktop?.onUpdateStatus) {
     window.onebiteDesktop.onUpdateStatus((updateStatus) => {
+      state.updateChannelDraft = updateStatus?.channel || state.updateChannelDraft;
       state.meta = {
         ...(state.meta || {}),
         version: state.meta?.version || "Unknown",
@@ -1312,9 +1319,16 @@ async function invokeAction(path) {
 }
 
 async function checkForUpdates() {
+  const desiredChannel = el.receiveBetaUpdates?.checked ? "beta" : "latest";
+  state.updateChannelDraft = desiredChannel;
   el.updateStatus.textContent = "Checking for updates...";
   const payload = await request("/api/check-updates", {
-    method: "POST"
+    method: "POST",
+    body: JSON.stringify({
+      updates: {
+        channel: desiredChannel
+      }
+    })
   });
   state.meta = payload.meta || state.meta;
   renderMeta();
@@ -1423,6 +1437,32 @@ el.checkUpdates.addEventListener("click", () => {
     el.updateStatus.textContent = error.message;
   });
 });
+if (el.receiveBetaUpdates) {
+  el.receiveBetaUpdates.addEventListener("change", () => {
+    const desiredChannel = el.receiveBetaUpdates.checked ? "beta" : "latest";
+    state.updateChannelDraft = desiredChannel;
+    state.notifiedUpdateVersion = null;
+    state.pendingUpdateVersion = null;
+    state.meta = {
+      ...(state.meta || {}),
+      updateStatus: {
+        ...(state.meta?.updateStatus || {}),
+        supported: Boolean(window.onebiteDesktop && state.meta?.updateStatus?.supported),
+        channel: desiredChannel,
+        checkedAt: null,
+        message: desiredChannel === "beta"
+          ? "Check for updates to look for new beta and test releases."
+          : "Check for updates to look for new stable releases.",
+        updateAvailable: false,
+        availableVersion: null,
+        downloading: false,
+        downloaded: false,
+        downloadProgress: null
+      }
+    };
+    renderMeta();
+  });
+}
 el.openLogsFolder.addEventListener("click", () => {
   openLogsFolder().catch((error) => {
     showResultModal({

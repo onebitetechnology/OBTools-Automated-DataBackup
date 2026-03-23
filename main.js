@@ -1324,8 +1324,8 @@ ipcMain.handle("automation:install", async () => {
   };
 });
 
-ipcMain.handle("updates:check", async () => {
-  configureAutoUpdates();
+ipcMain.handle("updates:check", async (_event, configOverride = null) => {
+  configureAutoUpdates(configOverride);
 
   if (!updateStatus.supported || !autoUpdater) {
     return {

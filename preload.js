@@ -7,7 +7,7 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   checkCloud: () => ipcRenderer.invoke("cloud:check"),
   openOneDrive: () => ipcRenderer.invoke("cloud:open-onedrive"),
   installAutomation: () => ipcRenderer.invoke("automation:install"),
-  checkForUpdates: () => ipcRenderer.invoke("updates:check"),
+  checkForUpdates: (configOverride) => ipcRenderer.invoke("updates:check", configOverride),
   downloadUpdate: () => ipcRenderer.invoke("updates:download"),
   installUpdate: () => ipcRenderer.invoke("updates:install"),
   openReleasesPage: () => ipcRenderer.invoke("updates:open-releases"),
