@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.27 - 2026-03-22
+
+- Removed the full-screen result modal from the updater flow so checking, downloading, and installing updates now stays inside the Settings panel like the other One Bite apps.
+- Background update checks still refresh the available-version/status state, but they no longer take over the UI with a popup.
+
 ## 1.0.10-beta.26 - 2026-03-22
 
 - Moved the global `Settings` button into the top-right of the header and styled it as a gear-plus-label app control.

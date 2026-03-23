@@ -749,22 +749,7 @@ function maybeShowAutoUpdatePrompt() {
     return;
   }
 
-  if (state.notifiedUpdateVersion === availableVersion) {
-    return;
-  }
-
-  if (state.actionInFlight) {
-    state.pendingUpdateVersion = availableVersion;
-    return;
-  }
-
   state.notifiedUpdateVersion = availableVersion;
-  state.pendingUpdateVersion = null;
-  showResultModal({
-    title: "Update Available",
-    message: updateInfo.message || `Update ${availableVersion} is available to download.`,
-    secondaryAction: updateModalSecondaryAction()
-  });
 }
 
 function setActionButtonsDisabled(disabled) {
@@ -1260,13 +1245,6 @@ async function checkForUpdates() {
   });
   state.meta = payload.meta || state.meta;
   renderMeta();
-
-  const updateMessage = state.meta?.updateStatus?.message || "Update check finished.";
-  showResultModal({
-    title: state.meta?.updateStatus?.updateAvailable ? "Update Available" : "Update Check Complete",
-    message: updateMessage,
-    secondaryAction: updateModalSecondaryAction()
-  });
 }
 
 async function downloadUpdate() {
@@ -1274,17 +1252,10 @@ async function downloadUpdate() {
     return;
   }
 
+  el.updateStatus.textContent = "Downloading update...";
   const payload = await window.onebiteDesktop.downloadUpdate();
   state.meta = payload.meta || state.meta;
   renderMeta();
-
-  if (state.meta?.updateStatus?.downloaded) {
-    showResultModal({
-      title: "Update Ready",
-      message: state.meta.updateStatus.message || "The update has been downloaded and is ready to install.",
-      secondaryAction: updateModalSecondaryAction()
-    });
-  }
 }
 
 async function installUpdate() {
@@ -1292,14 +1263,10 @@ async function installUpdate() {
     return;
   }
 
+  el.updateStatus.textContent = "Installing update and restarting...";
   const payload = await window.onebiteDesktop.installUpdate();
   state.meta = payload.meta || state.meta;
   renderMeta();
-
-  showResultModal({
-    title: payload.ok ? "Installing Update" : "Install Update",
-    message: payload.message || "The update could not be installed."
-  });
 }
 
 async function openLogsFolder() {
