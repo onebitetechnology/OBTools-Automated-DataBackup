@@ -2,6 +2,10 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.33 - 2026-03-23
+
+- Shortened updater error messaging so switching to stable updates before a public release exists now shows a clear plain-English explanation instead of the raw GitHub feed parser error.
+
 ## 1.0.10-beta.32 - 2026-03-23
 
 - Added a clear success/error popup when installing Windows tasks from Settings.

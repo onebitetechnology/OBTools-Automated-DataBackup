@@ -167,6 +167,22 @@ function retentionSummary(retention = { days: 1, months: 0, years: 0 }) {
   return parts.length ? parts.join(" / ") : "1 day";
 }
 
+function summarizeUpdateError(error, channel = currentUpdateChannel || "beta") {
+  const raw = String(error?.message || error || "").trim();
+
+  if (/unable to find latest version on github/i.test(raw) || /cannot parse releases feed/i.test(raw)) {
+    return channel === "beta"
+      ? "No published beta release could be found right now. Try again after the next beta build is published."
+      : "No public release is available yet. Turn beta updates back on if you want to receive internal test builds.";
+  }
+
+  if (/net::|network|timed out|econn|enotfound/i.test(raw)) {
+    return "The app could not reach the update server. Check the internet connection and try again.";
+  }
+
+  return `Update check failed: ${raw}`;
+}
+
 function defaultStatus() {
   return {
     lastBackupAt: null,
@@ -1106,7 +1122,7 @@ function configureAutoUpdates(configOverride = null) {
       ...updateStatus,
       channel: currentUpdateChannel,
       checkedAt: new Date().toISOString(),
-      message: `Update check failed: ${error.message}`,
+      message: summarizeUpdateError(error, currentUpdateChannel),
       downloading: false
     };
     publishUpdateStatus();
@@ -1344,8 +1360,11 @@ ipcMain.handle("updates:check", async (_event, configOverride = null) => {
     updateStatus = {
       ...updateStatus,
       checkedAt: new Date().toISOString(),
-      message: `Update check failed: ${error.message}`,
-      updateAvailable: false
+      message: summarizeUpdateError(error, currentUpdateChannel),
+      updateAvailable: false,
+      availableVersion: null,
+      downloaded: false,
+      downloadProgress: null
     };
     publishUpdateStatus();
   }
