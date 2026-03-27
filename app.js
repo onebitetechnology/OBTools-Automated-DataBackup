@@ -50,6 +50,10 @@ const el = {
   remindersEnabled: document.getElementById("reminders-enabled"),
   reminderDays: document.getElementById("reminder-days"),
   cloudCheckEnabled: document.getElementById("cloud-check-enabled"),
+  supportName: document.getElementById("support-name"),
+  supportPhone: document.getElementById("support-phone"),
+  supportEmail: document.getElementById("support-email"),
+  supportUrl: document.getElementById("support-url"),
   receiveBetaUpdates: document.getElementById("receive-beta-updates"),
   saveConfig: document.getElementById("save-config"),
   runBackup: document.getElementById("run-backup"),
@@ -176,8 +180,16 @@ function normalizeConfig(config) {
     normalizedRetention.days = 1;
   }
 
+  const normalizedSupport = {
+    name: String(config.support?.name || config.businessName || "One Bite Technology").trim(),
+    phone: String(config.support?.phone || "").trim(),
+    email: String(config.support?.email || "jeff@onebitetechnology.ca").trim(),
+    contactUrl: String(config.support?.contactUrl || "").trim()
+  };
+
   return {
     ...config,
+    businessName: config.businessName || "One Bite Technology",
     destination: {
       mode: "driveLetter",
       driveLetter: "",
@@ -193,7 +205,19 @@ function normalizeConfig(config) {
       enabled: true,
       ...(config.cloudCheck || {})
     },
+    schedule: {
+      enabled: true,
+      frequency: "weekly",
+      time: "18:30",
+      ...(config.schedule || {})
+    },
+    reminders: {
+      enabled: true,
+      staleDays: 7,
+      ...(config.reminders || {})
+    },
     retention: normalizedRetention,
+    support: normalizedSupport,
     preferences: {
       timeFormat: "12h",
       ...(config.preferences || {})
@@ -1013,7 +1037,7 @@ function renderTermsGate() {
 }
 
 function renderConfig() {
-  const { destination, retention, schedule, reminders, cloudCheck, updates, preferences } = state.config;
+  const { destination, retention, schedule, reminders, cloudCheck, updates, preferences, support } = state.config;
   state.updateChannelDraft = updates?.channel || "beta";
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
@@ -1054,6 +1078,18 @@ function renderConfig() {
   el.remindersEnabled.checked = Boolean(reminders.enabled);
   el.reminderDays.value = reminders.staleDays;
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
+  if (el.supportName) {
+    el.supportName.value = support?.name || "";
+  }
+  if (el.supportPhone) {
+    el.supportPhone.value = support?.phone || "";
+  }
+  if (el.supportEmail) {
+    el.supportEmail.value = support?.email || "";
+  }
+  if (el.supportUrl) {
+    el.supportUrl.value = support?.contactUrl || "";
+  }
   if (el.receiveBetaUpdates) {
     el.receiveBetaUpdates.checked = (state.updateChannelDraft || "beta") === "beta";
   }
@@ -1100,6 +1136,12 @@ function collectConfig() {
     },
     cloudCheck: {
       enabled: el.cloudCheckEnabled.checked
+    },
+    support: {
+      name: el.supportName?.value.trim() || state.config.support?.name || state.config.businessName || "One Bite Technology",
+      phone: el.supportPhone?.value.trim() || "",
+      email: el.supportEmail?.value.trim() || "",
+      contactUrl: el.supportUrl?.value.trim() || ""
     },
     updates: {
       channel: el.receiveBetaUpdates?.checked ? "beta" : "latest"
@@ -1171,7 +1213,66 @@ async function load() {
   }
 }
 
-async function saveConfig() {
+function buildAutomationPrompt(config) {
+  const parts = [];
+  if (config?.schedule?.enabled) {
+    const cadence = config.schedule.frequency === "weekly" ? "weekly backups" : "daily backups";
+    parts.push(cadence);
+  }
+  if (config?.reminders?.enabled) {
+    parts.push(`backup reminders after ${config.reminders.staleDays} day(s)`);
+  }
+
+  const summary = parts.length
+    ? `Install Windows Tasks so this PC can run ${parts.join(" and ")} automatically.`
+    : "Install Windows Tasks so this PC can run backups and reminders automatically.";
+
+  return {
+    title: "Install Windows Tasks?",
+    message: summary,
+    list: [
+      "Manual backups work without Windows Tasks.",
+      "Windows Tasks are needed for scheduled backups and reminder notifications."
+    ],
+    secondaryAction: {
+      label: "Install Now",
+      onClick: async () => {
+        closeResultModal();
+        await invokeAction("/api/install-automation", { skipSave: true });
+      }
+    },
+    closeLabel: "Later"
+  };
+}
+
+function maybeHandleAutomationSaveResult(payload, showAutomationPrompt = true) {
+  const automation = payload.automation || null;
+  if (!showAutomationPrompt || !automation) {
+    return;
+  }
+
+  if (automation.type === "offer-install") {
+    showResultModal(buildAutomationPrompt(state.config));
+    return;
+  }
+
+  if (automation.type === "updated") {
+    showResultModal({
+      title: "Windows Tasks Updated",
+      message: automation.message || "Windows Tasks were refreshed to match the new schedule settings."
+    });
+    return;
+  }
+
+  if (automation.type === "failed") {
+    showResultModal({
+      title: "Windows Tasks Need Attention",
+      message: automation.message || "The saved schedule changed, but Windows Tasks could not be updated automatically."
+    });
+  }
+}
+
+async function saveConfig(showAutomationPrompt = true) {
   state.config = collectConfig();
   const payload = await request("/api/config", {
     method: "POST",
@@ -1187,6 +1288,7 @@ async function saveConfig() {
     renderStorageAnalysis();
   });
   closeSettingsDrawer();
+  maybeHandleAutomationSaveResult(payload, showAutomationPrompt);
 }
 
 async function acceptTerms() {
@@ -1210,7 +1312,7 @@ async function acceptTerms() {
   renderStatus();
 }
 
-async function invokeAction(path) {
+async function invokeAction(path, options = {}) {
   if (state.actionInFlight) {
     return;
   }
@@ -1242,7 +1344,9 @@ async function invokeAction(path) {
   }
 
   try {
-    await saveConfig();
+    if (!options.skipSave) {
+      await saveConfig(false);
+    }
     const payload = await request(path, {
       method: "POST"
     });

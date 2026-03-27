@@ -2,12 +2,17 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.34 - 2026-03-27
+
+- Added an editable `Support Contact` section in Settings so each shop can set the business name, phone number, support email, and contact page shown to customers.
+- Reminder automation now checks for a missing backup drive, a missing first backup, and stale backups, and shows Windows notification-style alerts with the shop's support contact details.
+- Saving schedule or reminder changes now offers to install Windows Tasks when needed, and refreshes existing Windows Tasks automatically if they were already installed.
+- Updated the support request flow so it uses the configured support destination and falls back more gracefully when no local mail app is available.
+- Fresh installs now default to a weekly backup schedule instead of daily.
+
 ## 1.0.10-beta.33 - 2026-03-23
 
 - Shortened updater error messaging so switching to stable updates before a public release exists now shows a clear plain-English explanation instead of the raw GitHub feed parser error.
-
-## 1.0.10-beta.32 - 2026-03-23
-
 - Added a clear success/error popup when installing Windows tasks from Settings.
 - Added explainer text under `Install Windows Tasks` so users understand that the tasks enable scheduled backups and stale-backup reminders, but are not required for manual backups.
 - Fixed Windows task installation status handling so automation results are tracked in the automation section instead of being mixed into backup messaging.

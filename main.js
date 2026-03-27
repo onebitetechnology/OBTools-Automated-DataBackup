@@ -134,14 +134,38 @@ function normalizeConfigForMain(config) {
     normalizedRetention.days = 1;
   }
 
+  const normalizedSupport = {
+    name: String(config?.support?.name || config?.businessName || "One Bite Technology").trim(),
+    phone: String(config?.support?.phone || "").trim(),
+    email: String(config?.support?.email || "jeff@onebitetechnology.ca").trim(),
+    contactUrl: String(config?.support?.contactUrl || "").trim()
+  };
+
   return {
     ...config,
+    businessName: config?.businessName || "One Bite Technology",
     destination: {
       ...existingDestination,
       folderMode: "managed",
       baseFolder: normalizedBaseFolder
     },
+    schedule: {
+      enabled: true,
+      frequency: "weekly",
+      time: "18:30",
+      ...(config?.schedule || {})
+    },
+    reminders: {
+      enabled: true,
+      staleDays: 7,
+      ...(config?.reminders || {})
+    },
+    cloudCheck: {
+      enabled: true,
+      ...(config?.cloudCheck || {})
+    },
     retention: normalizedRetention,
+    support: normalizedSupport,
     retentionCount: undefined,
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
@@ -252,8 +276,23 @@ function appMeta() {
   };
 }
 
-function supportEmailAddress() {
-  return "jeff@onebitetechnology.ca";
+function supportContact(config = null) {
+  const normalized = normalizeConfigForMain(config || {});
+  return normalized.support || {
+    name: normalized.businessName || "One Bite Technology",
+    phone: "",
+    email: "jeff@onebitetechnology.ca",
+    contactUrl: ""
+  };
+}
+
+function automationSettingsChanged(previousConfig, nextConfig) {
+  return Boolean(
+    previousConfig?.schedule?.enabled !== nextConfig?.schedule?.enabled ||
+    previousConfig?.schedule?.frequency !== nextConfig?.schedule?.frequency ||
+    previousConfig?.schedule?.time !== nextConfig?.schedule?.time ||
+    previousConfig?.reminders?.enabled !== nextConfig?.reminders?.enabled
+  );
 }
 
 function buildSupportBundle(config, status) {
@@ -266,6 +305,7 @@ function buildSupportBundle(config, status) {
   const destinationRoot = resolveDestinationBasePath(config?.destination) || "Not configured";
   const enabledJobs = (config?.jobs || []).filter((job) => job.enabled).map((job) => `${job.name || "Unnamed"} :: ${job.path || "(empty path)"}`);
   const recentSnapshots = (status?.recentSnapshots || []).slice(0, 5);
+  const support = supportContact(config);
 
   const bundle = [
     "OBTools Automated Backups Support Request",
@@ -276,6 +316,10 @@ function buildSupportBundle(config, status) {
     `Update channel: ${channel}`,
     `Platform: ${process.platform}`,
     `OS: ${osLabel}`,
+    `Support name: ${support.name || "Not configured"}`,
+    `Support phone: ${support.phone || "Not configured"}`,
+    `Support email: ${support.email || "Not configured"}`,
+    `Support link: ${support.contactUrl || "Not configured"}`,
     "",
     "Current backup status",
     "---------------------",
@@ -1202,15 +1246,45 @@ ipcMain.handle("state:get", () => {
   };
 });
 
-ipcMain.handle("config:save", (_event, config) => {
+ipcMain.handle("config:save", async (_event, config) => {
   const { configPath, statusPath } = dataPaths();
+  const previousConfig = normalizeConfigForMain(readJson(configPath));
+  const previousStatus = readJson(statusPath);
   const normalizedConfig = normalizeConfigForMain(config);
   writeJson(configPath, normalizedConfig);
   configureAutoUpdates(normalizedConfig);
+  let status = previousStatus;
+  let automation = null;
+
+  if (automationSettingsChanged(previousConfig, normalizedConfig)) {
+    const shouldOfferInstall = !previousStatus?.automation?.installedAt &&
+      (normalizedConfig?.schedule?.enabled || normalizedConfig?.reminders?.enabled);
+
+    if (previousStatus?.automation?.installedAt) {
+      const result = await runPowerShell("install-scheduled-backup.ps1");
+      status = mergeStatus({
+        automation: {
+          installedAt: result.ok ? new Date().toISOString() : previousStatus?.automation?.installedAt || null,
+          message: result.message
+        }
+      });
+      automation = {
+        type: result.ok ? "updated" : "failed",
+        message: result.message
+      };
+    } else if (shouldOfferInstall) {
+      automation = {
+        type: "offer-install",
+        message: "Install Windows Tasks to enable scheduled backups and reminders."
+      };
+    }
+  }
+
   return {
     config: normalizedConfig,
-    status: readJson(statusPath),
-    meta: appMeta()
+    status,
+    meta: appMeta(),
+    automation
   };
 });
 
@@ -1466,10 +1540,12 @@ ipcMain.handle("support:open-email", async () => {
     const config = normalizeConfigForMain(readJson(configPath));
     const status = reconcileStatusWithDisk(config, readJson(statusPath));
     const supportBundle = buildSupportBundle(config, status);
+    const support = supportContact(config);
+    const channel = sanitizeUpdateChannel(config?.updates?.channel, app.getVersion());
 
     const subject = encodeURIComponent(`OBTools Automated Backups Feature Request / Bug Report (${app.getVersion()})`);
     const body = encodeURIComponent([
-      "Hi One Bite Technology,",
+      `Hi ${support.name || "Support Team"},`,
       "",
       "Please describe the feature request or bug below:",
       "",
@@ -1485,24 +1561,54 @@ ipcMain.handle("support:open-email", async () => {
       `- ${path.basename(supportBundle.launcherPath)}`,
       "",
       `App version: ${app.getVersion()}`,
-      `Update channel: ${sanitizeUpdateChannel(config?.updates?.channel, app.getVersion())}`,
+      `Update channel: ${channel}`,
       `Logs folder: ${userDataDir}`,
+      `Support phone: ${support.phone || "Not configured"}`,
       "",
       "The app has already created a support summary file in that folder to make this easier.",
       ""
     ].join("\n"));
 
-    await shell.openExternal(`mailto:${supportEmailAddress()}?subject=${subject}&body=${body}`);
     await shell.openPath(userDataDir);
+    const mailClient = support.email && process.platform === "win32"
+      ? app.getApplicationNameForProtocol("mailto:") || ""
+      : support.email
+        ? "default-mail-client"
+        : "";
+
+    if (support.email && mailClient) {
+      await shell.openExternal(`mailto:${support.email}?subject=${subject}&body=${body}`);
+      return {
+        ok: true,
+        message: `Prepared a support email for ${support.name || "your support team"} and opened the logs folder. Please attach ${path.basename(supportBundle.bundlePath)} plus any relevant log files from ${userDataDir}.`
+      };
+    }
+
+    if (support.contactUrl) {
+      await shell.openExternal(support.contactUrl);
+      return {
+        ok: true,
+        message: `Opened the support link for ${support.name || "your support team"} and the logs folder. If needed, copy the details from ${path.basename(supportBundle.bundlePath)} into the web contact form and attach the log files from ${userDataDir}.`
+      };
+    }
 
     return {
       ok: true,
-      message: `Opened your email app and the logs folder. Please attach ${path.basename(supportBundle.bundlePath)} plus any relevant log files from ${userDataDir}.`
+      message: `Opened the logs folder and prepared ${path.basename(supportBundle.bundlePath)}. Email ${support.email || "your support team"}${support.phone ? ` or call ${support.phone}` : ""} and include your app version plus the files from ${userDataDir}.`
     };
   } catch (error) {
+    const config = (() => {
+      try {
+        const { configPath } = dataPaths();
+        return normalizeConfigForMain(readJson(configPath));
+      } catch (_innerError) {
+        return normalizeConfigForMain({});
+      }
+    })();
+    const support = supportContact(config);
     return {
       ok: false,
-      message: `Could not prepare the support email automatically. Please email ${supportEmailAddress()} and include your app version plus the files from the logs folder. ${error.message}`
+      message: `Could not prepare the support request automatically. Please contact ${support.name || "your support team"}${support.email ? ` at ${support.email}` : ""}${support.phone ? ` or ${support.phone}` : ""}${support.contactUrl ? `, or use ${support.contactUrl}` : ""}, and include your app version plus the files from the logs folder. ${error.message}`
     };
   }
 });

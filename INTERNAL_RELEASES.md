@@ -7,7 +7,7 @@ The app is prepared for local Electron development and Windows installer builds.
 Current app version:
 
 ```text
-1.0.10-beta.33
+1.0.10-beta.34
 ```
 
 Desktop shortcut name:
@@ -91,3 +91,5 @@ Implemented now:
 - prerelease-aware internal update channel for GitHub release testing
 - explicit `beta` channel configuration for GitHub prerelease updates
 - automatic prerelease publishing from GitHub Actions on pushes to `main`
+- editable per-shop support contact info in Settings
+- reminder automation for stale backups and missing backup drives

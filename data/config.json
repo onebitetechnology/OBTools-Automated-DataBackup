@@ -15,7 +15,7 @@
   },
   "schedule": {
     "enabled": true,
-    "frequency": "daily",
+    "frequency": "weekly",
     "time": "18:30"
   },
   "reminders": {
@@ -47,6 +47,12 @@
   ],
   "cloudCheck": {
     "enabled": true
+  },
+  "support": {
+    "name": "One Bite Technology",
+    "phone": "",
+    "email": "jeff@onebitetechnology.ca",
+    "contactUrl": ""
   },
   "preferences": {
     "timeFormat": "12h"
