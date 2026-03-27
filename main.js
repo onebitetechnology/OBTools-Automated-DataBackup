@@ -141,6 +141,15 @@ function normalizeConfigForMain(config) {
     contactUrl: String(config?.support?.contactUrl || "").trim()
   };
 
+  const normalizedLicensing = {
+    enabled: false,
+    planName: String(config?.licensing?.planName || "Annual License").trim(),
+    serviceUrl: String(config?.licensing?.serviceUrl || "").trim(),
+    customerReference: String(config?.licensing?.customerReference || "").trim(),
+    renewalWarningDays: Math.max(Number(config?.licensing?.renewalWarningDays ?? 30) || 30, 1),
+    graceDays: Math.max(Number(config?.licensing?.graceDays ?? 14) || 14, 1)
+  };
+
   return {
     ...config,
     businessName: config?.businessName || "One Bite Technology",
@@ -166,6 +175,7 @@ function normalizeConfigForMain(config) {
     },
     retention: normalizedRetention,
     support: normalizedSupport,
+    licensing: normalizedLicensing,
     retentionCount: undefined,
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
@@ -223,6 +233,13 @@ function defaultStatus() {
     automation: {
       installedAt: null,
       message: "Windows automation has not been installed yet."
+    },
+    licensing: {
+      enabled: false,
+      state: "disabled",
+      message: "Licensing is disabled while backup testing continues.",
+      renewalDate: null,
+      lastCheckedAt: null
     }
   };
 }
@@ -320,6 +337,10 @@ function buildSupportBundle(config, status) {
     `Support phone: ${support.phone || "Not configured"}`,
     `Support email: ${support.email || "Not configured"}`,
     `Support link: ${support.contactUrl || "Not configured"}`,
+    `Licensing enabled: ${config?.licensing?.enabled ? "Yes" : "No (testing mode)"}`,
+    `Licensing service URL: ${config?.licensing?.serviceUrl || "Not configured"}`,
+    `Licensing customer reference: ${config?.licensing?.customerReference || "Not configured"}`,
+    `Licensing status: ${status?.licensing?.state || "disabled"}`,
     "",
     "Current backup status",
     "---------------------",
@@ -475,10 +496,24 @@ function listRecentSnapshots(config) {
 }
 
 function reconcileStatusWithDisk(config, status) {
+  const baseStatus = defaultStatus();
   const snapshotInfo = inspectSnapshots(config);
   const snapshotNames = snapshotInfo.snapshots.map((entry) => entry.name);
   const nextStatus = {
-    ...status
+    ...baseStatus,
+    ...status,
+    cloud: {
+      ...baseStatus.cloud,
+      ...(status?.cloud || {})
+    },
+    automation: {
+      ...baseStatus.automation,
+      ...(status?.automation || {})
+    },
+    licensing: {
+      ...baseStatus.licensing,
+      ...(status?.licensing || {})
+    }
   };
 
   if (snapshotNames.length) {

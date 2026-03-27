@@ -37,6 +37,13 @@ function defaultStatus() {
     automation: {
       installedAt: null,
       message: "Windows automation has not been installed yet."
+    },
+    licensing: {
+      enabled: false,
+      state: "disabled",
+      message: "Licensing is disabled while backup testing continues.",
+      renewalDate: null,
+      lastCheckedAt: null
     }
   };
 }

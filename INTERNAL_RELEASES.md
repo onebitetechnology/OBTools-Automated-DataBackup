@@ -7,7 +7,7 @@ The app is prepared for local Electron development and Windows installer builds.
 Current app version:
 
 ```text
-1.0.10-beta.34
+1.0.10-beta.35
 ```
 
 Desktop shortcut name:
@@ -93,3 +93,4 @@ Implemented now:
 - automatic prerelease publishing from GitHub Actions on pushes to `main`
 - editable per-shop support contact info in Settings
 - reminder automation for stale backups and missing backup drives
+- disabled-by-default annual licensing scaffolding for a future server-side subscription service

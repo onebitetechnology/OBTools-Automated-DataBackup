@@ -54,6 +54,11 @@ const el = {
   supportPhone: document.getElementById("support-phone"),
   supportEmail: document.getElementById("support-email"),
   supportUrl: document.getElementById("support-url"),
+  licensingServiceUrl: document.getElementById("licensing-service-url"),
+  licensingCustomerRef: document.getElementById("licensing-customer-ref"),
+  licensingWarningDays: document.getElementById("licensing-warning-days"),
+  licensingGraceDays: document.getElementById("licensing-grace-days"),
+  licensingStatusCopy: document.getElementById("licensing-status-copy"),
   receiveBetaUpdates: document.getElementById("receive-beta-updates"),
   saveConfig: document.getElementById("save-config"),
   runBackup: document.getElementById("run-backup"),
@@ -187,6 +192,15 @@ function normalizeConfig(config) {
     contactUrl: String(config.support?.contactUrl || "").trim()
   };
 
+  const normalizedLicensing = {
+    enabled: false,
+    planName: String(config.licensing?.planName || "Annual License").trim(),
+    serviceUrl: String(config.licensing?.serviceUrl || "").trim(),
+    customerReference: String(config.licensing?.customerReference || "").trim(),
+    renewalWarningDays: Math.max(Number(config.licensing?.renewalWarningDays ?? 30) || 30, 1),
+    graceDays: Math.max(Number(config.licensing?.graceDays ?? 14) || 14, 1)
+  };
+
   return {
     ...config,
     businessName: config.businessName || "One Bite Technology",
@@ -218,6 +232,7 @@ function normalizeConfig(config) {
     },
     retention: normalizedRetention,
     support: normalizedSupport,
+    licensing: normalizedLicensing,
     preferences: {
       timeFormat: "12h",
       ...(config.preferences || {})
@@ -265,6 +280,14 @@ function normalizeStatus(status) {
       installedAt: null,
       message: "Windows automation has not been installed yet.",
       ...(shouldResetPreviewStatus ? {} : status.automation || {})
+    },
+    licensing: {
+      enabled: false,
+      state: "disabled",
+      message: "Licensing is disabled while backup testing continues.",
+      renewalDate: null,
+      lastCheckedAt: null,
+      ...(shouldResetPreviewStatus ? {} : status.licensing || {})
     }
   };
 }
@@ -1037,7 +1060,7 @@ function renderTermsGate() {
 }
 
 function renderConfig() {
-  const { destination, retention, schedule, reminders, cloudCheck, updates, preferences, support } = state.config;
+  const { destination, retention, schedule, reminders, cloudCheck, updates, preferences, support, licensing } = state.config;
   state.updateChannelDraft = updates?.channel || "beta";
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
@@ -1089,6 +1112,21 @@ function renderConfig() {
   }
   if (el.supportUrl) {
     el.supportUrl.value = support?.contactUrl || "";
+  }
+  if (el.licensingServiceUrl) {
+    el.licensingServiceUrl.value = licensing?.serviceUrl || "";
+  }
+  if (el.licensingCustomerRef) {
+    el.licensingCustomerRef.value = licensing?.customerReference || "";
+  }
+  if (el.licensingWarningDays) {
+    el.licensingWarningDays.value = licensing?.renewalWarningDays ?? 30;
+  }
+  if (el.licensingGraceDays) {
+    el.licensingGraceDays.value = licensing?.graceDays ?? 14;
+  }
+  if (el.licensingStatusCopy) {
+    el.licensingStatusCopy.textContent = state.status?.licensing?.message || "Licensing is disabled while backup testing continues.";
   }
   if (el.receiveBetaUpdates) {
     el.receiveBetaUpdates.checked = (state.updateChannelDraft || "beta") === "beta";
@@ -1142,6 +1180,14 @@ function collectConfig() {
       phone: el.supportPhone?.value.trim() || "",
       email: el.supportEmail?.value.trim() || "",
       contactUrl: el.supportUrl?.value.trim() || ""
+    },
+    licensing: {
+      enabled: false,
+      planName: state.config.licensing?.planName || "Annual License",
+      serviceUrl: el.licensingServiceUrl?.value.trim() || "",
+      customerReference: el.licensingCustomerRef?.value.trim() || "",
+      renewalWarningDays: Math.max(Number(el.licensingWarningDays?.value || 30) || 30, 1),
+      graceDays: Math.max(Number(el.licensingGraceDays?.value || 14) || 14, 1)
     },
     updates: {
       channel: el.receiveBetaUpdates?.checked ? "beta" : "latest"

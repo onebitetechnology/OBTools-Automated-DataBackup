@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.35 - 2026-03-27
+
+- Added a future-facing `Annual Licensing` section in Settings so shops can prefill the licensing service URL, customer reference, renewal warning window, and grace period.
+- Added disabled-by-default licensing config and status scaffolding so the app is ready for a future subscription service without changing any backup behavior during testing.
+- Included licensing details in the support bundle to make future subscription troubleshooting easier.
+
 ## 1.0.10-beta.34 - 2026-03-27
 
 - Added an editable `Support Contact` section in Settings so each shop can set the business name, phone number, support email, and contact page shown to customers.

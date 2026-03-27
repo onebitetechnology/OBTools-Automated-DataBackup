@@ -319,6 +319,31 @@
         </section>
 
         <section class="settings-section">
+          <div class="settings-section-title">Annual Licensing</div>
+          <div class="settings-section-copy">This prepares the app for a future annual license service running on your One Bite server. It is disabled during backup testing and will not block app access yet.</div>
+          <div class="grid two">
+            <label>
+              <span>Licensing Service URL</span>
+              <input id="licensing-service-url" type="url" placeholder="https://licensing.onebitetechnology.ca">
+            </label>
+            <label>
+              <span>Customer or Subscription Reference</span>
+              <input id="licensing-customer-ref" type="text" placeholder="Customer account or subscription ID">
+            </label>
+            <label>
+              <span>Renewal Warning Days</span>
+              <input id="licensing-warning-days" type="number" min="1" max="365">
+            </label>
+            <label>
+              <span>Grace Period Days</span>
+              <input id="licensing-grace-days" type="number" min="1" max="90">
+            </label>
+          </div>
+          <p id="licensing-status-copy" class="settings-meta-value">Licensing is disabled while backup testing continues.</p>
+          <p class="hint">Recommended plan: one annual license per customer install, with renewal warnings and a grace period before any future enforcement.</p>
+        </section>
+
+        <section class="settings-section">
           <div class="settings-section-title">App Updates</div>
           <div class="settings-section-copy">Choose whether this PC should receive stable releases only or internal beta builds too.</div>
           <div class="updates-card">
