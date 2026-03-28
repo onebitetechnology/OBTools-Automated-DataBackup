@@ -58,6 +58,7 @@ const el = {
   supportPhone: document.getElementById("support-phone"),
   supportEmail: document.getElementById("support-email"),
   supportUrl: document.getElementById("support-url"),
+  appearanceLogoPreviewShell: document.getElementById("appearance-logo-preview-shell"),
   appearanceLogoPreview: document.getElementById("appearance-logo-preview"),
   appearanceLogoEmpty: document.getElementById("appearance-logo-empty"),
   appearanceUploadLogo: document.getElementById("appearance-upload-logo"),
@@ -1032,6 +1033,36 @@ function closeSettingsDrawer() {
   document.body.classList.remove("settings-open");
 }
 
+function initializeSettingsSections() {
+  document.querySelectorAll(".settings-section").forEach((section) => {
+    const toggle = section.querySelector(":scope > .settings-section-toggle");
+    const toggleText = section.querySelector(":scope > .settings-section-toggle .settings-section-toggle-text");
+
+    if (!toggle || !toggleText) {
+      return;
+    }
+
+    const syncSectionState = () => {
+      const expanded = !section.classList.contains("collapsed");
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      toggleText.textContent = expanded ? "Hide Details" : "Show Details";
+    };
+
+    if (section.classList.contains("settings-section-open")) {
+      section.classList.remove("collapsed");
+    } else if (!section.classList.contains("collapsed")) {
+      section.classList.add("collapsed");
+    }
+
+    syncSectionState();
+
+    toggle.addEventListener("click", () => {
+      section.classList.toggle("collapsed");
+      syncSectionState();
+    });
+  });
+}
+
 function renderSettingsSummary() {
   const { retention, schedule, preferences } = state.config;
   el.settingsRetentionSummary.textContent = retentionSummary(retention);
@@ -1112,6 +1143,10 @@ function renderHeaderBranding() {
 
   if (el.appearanceLogoEmpty) {
     el.appearanceLogoEmpty.hidden = hasLogo;
+  }
+
+  if (el.appearanceLogoPreviewShell) {
+    el.appearanceLogoPreviewShell.classList.toggle("is-empty", !hasLogo);
   }
 }
 
@@ -1804,6 +1839,8 @@ el.termsSkip.addEventListener("click", () => {
   state.termsBypassedForSession = true;
   renderTermsGate();
 });
+
+initializeSettingsSections();
 
 load().catch((error) => {
   el.protectionState.textContent = "Unavailable";

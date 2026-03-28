@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.38 - 2026-03-28
+
+- Rebuilt the Settings modal to use Ticket Listing-style collapsible section cards with `Show Details / Hide Details` toggles while keeping the centered modal layout.
+- Made `Automation` and `App Updates` open by default, moved action buttons into the section bodies, and added a stronger grouped `Maintenance Tools` area inside App Updates.
+- Converted `Appearance` into a parent section with a compact `Branding` subsection and tightened the overall settings spacing, card styling, and empty-logo preview state to better match the other apps.
+
 ## 1.0.10-beta.37 - 2026-03-27
 
 - Rebalanced the hero layout so the backup status panel is now the larger primary panel and the title panel is more compact.
