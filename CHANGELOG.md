@@ -2,6 +2,10 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.36 - 2026-03-27
+
+- Removed the extra `Backup Companion` badge from the top hero so the header reads more cleanly.
+
 ## 1.0.10-beta.35 - 2026-03-27
 
 - Added a future-facing `Annual Licensing` section in Settings so shops can prefill the licensing service URL, customer reference, renewal warning window, and grace period.
