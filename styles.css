@@ -78,7 +78,7 @@ select {
 
 .hero {
   display: grid;
-  grid-template-columns: 1.4fr 0.75fr;
+  grid-template-columns: 0.72fr 1.48fr;
   gap: 16px;
   margin-bottom: 16px;
   align-items: stretch;
@@ -111,6 +111,10 @@ select {
     radial-gradient(circle at top right, rgba(83, 184, 255, 0.18), transparent 28%),
     linear-gradient(160deg, rgba(9, 20, 52, 0.62), rgba(11, 24, 58, 0.42));
   color: #eff8ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
 }
 
 .hero-copy h1,
@@ -122,20 +126,6 @@ select {
   margin: 0;
 }
 
-.hero-copy h1 {
-  font-size: clamp(1.85rem, 2.6vw, 3rem);
-  line-height: 1.02;
-  max-width: 13ch;
-  margin-bottom: 10px;
-}
-
-.lede {
-  max-width: 56ch;
-  color: rgba(255, 247, 238, 0.84);
-  font-size: 0.96rem;
-  line-height: 1.45;
-}
-
 .brand-lockup {
   display: flex;
   align-items: center;
@@ -144,11 +134,11 @@ select {
 }
 
 .hero-topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) 132px;
+  align-items: center;
   gap: 16px;
-  margin-bottom: 10px;
+  width: 100%;
 }
 
 .brand-logo {
@@ -169,17 +159,32 @@ select {
   color: #eef6ff;
 }
 
-.brand-badge {
-  display: inline-flex;
+.centered-brand-lockup {
+  justify-content: center;
+  text-align: center;
+}
+
+.hero-brand-name {
+  font-size: clamp(1.55rem, 2.3vw, 2.2rem);
+  letter-spacing: 0.02em;
+}
+
+.hero-corner-logo {
+  min-height: 60px;
+  display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(83, 184, 255, 0.14);
-  color: #cfeaff;
-  font-size: 0.86rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  border: 1px solid rgba(120, 190, 255, 0.18);
+  justify-content: flex-start;
+}
+
+.customer-corner-logo {
+  max-width: 112px;
+  max-height: 56px;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 20px rgba(7, 16, 45, 0.28));
+}
+
+.hero-topbar-spacer {
+  min-height: 1px;
 }
 
 .app-settings-button {
@@ -188,6 +193,7 @@ select {
   gap: 8px;
   padding: 10px 14px;
   white-space: nowrap;
+  justify-self: end;
 }
 
 .settings-gear {
@@ -198,23 +204,6 @@ select {
   height: 18px;
   font-size: 0.98rem;
   line-height: 1;
-}
-
-.hero-points {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 14px;
-}
-
-.hero-points span {
-  padding: 8px 10px;
-  border-radius: 999px;
-  background: rgba(20, 39, 90, 0.42);
-  color: rgba(220, 241, 255, 0.92);
-  font-size: 0.84rem;
-  border: 1px solid rgba(112, 168, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .hero-status,
@@ -228,6 +217,35 @@ select {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+}
+
+.hero-status-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.version-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(112, 168, 255, 0.14);
+  background: linear-gradient(180deg, rgba(18, 35, 85, 0.3), rgba(9, 20, 48, 0.34));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.version-status-light {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  background: #8fb4e7;
+  box-shadow: 0 0 0 4px rgba(143, 180, 231, 0.12);
 }
 
 .status-label {
@@ -266,6 +284,28 @@ select {
 
 .status-error #protection-state {
   color: #ff7d93;
+}
+
+.status-good .version-status-light,
+.version-status-light.status-good {
+  background: #67f0de;
+  box-shadow: 0 0 0 4px rgba(103, 240, 222, 0.14);
+}
+
+.status-warning .version-status-light,
+.version-status-light.status-warning {
+  background: #ffd968;
+  box-shadow: 0 0 0 4px rgba(255, 217, 104, 0.16);
+}
+
+.status-error .version-status-light,
+.version-status-light.status-error {
+  background: #ff7d93;
+  box-shadow: 0 0 0 4px rgba(255, 125, 147, 0.18);
+}
+
+.status-flashing {
+  animation: status-flash 1.1s ease-in-out infinite;
 }
 
 .status-label,
@@ -412,6 +452,38 @@ label span {
 
 .grid.three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.appearance-logo-card,
+.appearance-actions-card {
+  display: grid;
+  gap: 10px;
+}
+
+.appearance-logo-preview {
+  min-height: 148px;
+  border-radius: 18px;
+  border: 1px solid rgba(112, 168, 255, 0.14);
+  background: linear-gradient(180deg, rgba(18, 35, 85, 0.3), rgba(9, 20, 48, 0.34));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+  color: rgba(220, 241, 255, 0.72);
+}
+
+.appearance-logo-preview img {
+  max-width: 100%;
+  max-height: 112px;
+  object-fit: contain;
+}
+
+.appearance-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 label {
@@ -732,9 +804,9 @@ select:focus {
 }
 
 .build-version {
-  margin: 14px 0 0;
-  color: rgba(224, 241, 255, 0.82);
-  font-size: 0.9rem;
+  margin: 0;
+  color: rgba(224, 241, 255, 0.9);
+  font-size: 0.86rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -1196,6 +1268,17 @@ select:focus {
   }
 }
 
+@keyframes status-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.46;
+  }
+}
+
 @media (max-width: 960px) {
   .hero,
   .dashboard,
@@ -1219,6 +1302,16 @@ select:focus {
   }
 
   .hero-topbar {
+    grid-template-columns: 1fr;
+    justify-items: flex-start;
+  }
+
+  .centered-brand-lockup {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .hero-status-topbar {
     flex-direction: column;
     align-items: stretch;
   }

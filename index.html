@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>One Bite Technology Backup Companion</title>
+    <title>OBTools Auto-Backup</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -11,28 +11,29 @@
       <header class="hero">
         <div class="hero-copy">
           <div class="hero-topbar">
-            <div class="brand-lockup">
+            <div class="hero-corner-logo">
+              <img id="header-customer-logo" src="" alt="Custom shop logo" class="customer-corner-logo" hidden>
+            </div>
+            <div class="brand-lockup centered-brand-lockup">
               <img src="assets/obtools-mark.svg" alt="OBTools logo" class="brand-logo">
               <div class="brand-meta">
-                <p class="eyebrow">One Bite Technology</p>
-                <span class="brand-name">OBTools Automated Backups</span>
+                <span class="brand-name hero-brand-name">OBTools Auto-Backup</span>
               </div>
+            </div>
+            <div class="hero-topbar-spacer" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div id="backup-status-card" class="hero-status card status-good">
+          <div class="hero-status-topbar">
+            <div id="version-status-pill" class="version-status-pill status-good">
+              <span id="version-status-light" class="version-status-light status-good" aria-hidden="true"></span>
+              <span id="build-version" class="build-version">Version loading...</span>
             </div>
             <button id="open-settings" class="app-settings-button ghost" type="button">
               <span class="settings-gear" aria-hidden="true">⚙</span>
               <span>Settings</span>
             </button>
           </div>
-          <h1>Protect important files.</h1>
-          <p class="lede">Set a backup drive once, choose what matters, and let the app keep your customer or household data safe with one-click sync and scheduled reminders.</p>
-          <div class="hero-points">
-            <span>USB and external HDD ready</span>
-            <span>Redundant snapshots</span>
-            <span>Cloud sync recommendations</span>
-          </div>
-          <p id="build-version" class="build-version">Version loading...</p>
-        </div>
-        <div id="backup-status-card" class="hero-status card status-good">
           <p class="status-label">Backup Status</p>
           <h2 id="protection-state">Loading</h2>
           <p id="protection-message">Checking backup health.</p>
@@ -225,6 +226,29 @@
           </div>
         </div>
         <div class="settings-modal-body">
+
+        <section class="settings-section">
+          <div class="settings-section-title">Appearance</div>
+          <div class="settings-section-copy">Customize the logo shown in the upper-left corner while keeping the main app title centered.</div>
+          <div class="grid two">
+            <div class="appearance-logo-card">
+              <span>Corner Logo Preview</span>
+              <div class="appearance-logo-preview">
+                <img id="appearance-logo-preview" src="" alt="Selected logo preview" hidden>
+                <p id="appearance-logo-empty">No custom logo selected.</p>
+              </div>
+              <p class="hint">Transparent PNG or SVG logos tend to look best here.</p>
+            </div>
+            <div class="appearance-actions-card">
+              <span>Logo Controls</span>
+              <div class="appearance-actions">
+                <button id="appearance-upload-logo" class="secondary" type="button">Upload Logo</button>
+                <button id="appearance-clear-logo" class="ghost" type="button">Remove Logo</button>
+              </div>
+              <p class="hint">This only affects the branding for this deployed copy of the app.</p>
+            </div>
+          </div>
+        </section>
 
         <section class="settings-section">
           <div class="settings-section-title">Retention</div>

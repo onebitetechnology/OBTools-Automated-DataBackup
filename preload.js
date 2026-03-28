@@ -26,5 +26,6 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   detectBrowsers: () => ipcRenderer.invoke("browsers:detect"),
   analyzeStorage: () => ipcRenderer.invoke("storage:analyze"),
   pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),
-  pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder")
+  pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder"),
+  pickBrandingLogo: () => ipcRenderer.invoke("branding:pick-logo")
 });

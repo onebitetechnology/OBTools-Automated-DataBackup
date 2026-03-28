@@ -54,6 +54,9 @@
     "email": "jeff@onebitetechnology.ca",
     "contactUrl": ""
   },
+  "appearance": {
+    "headerLogoDataUrl": ""
+  },
   "licensing": {
     "enabled": false,
     "planName": "Annual License",

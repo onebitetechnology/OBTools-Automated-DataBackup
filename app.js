@@ -8,6 +8,7 @@ const state = {
   notifiedUpdateVersion: null,
   pendingUpdateVersion: null,
   updateChannelDraft: null,
+  appearanceDraftLogoDataUrl: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: []
@@ -28,6 +29,8 @@ const el = {
   cloudHealthLabel: document.getElementById("cloud-health-label"),
   cloudRecommendations: document.getElementById("cloud-recommendations"),
   buildVersion: document.getElementById("build-version"),
+  versionStatusPill: document.getElementById("version-status-pill"),
+  versionStatusLight: document.getElementById("version-status-light"),
   snapshotList: document.getElementById("snapshot-list"),
   jobsList: document.getElementById("jobs-list"),
   destinationMode: document.getElementById("destination-mode"),
@@ -36,6 +39,7 @@ const el = {
   destinationBaseFolder: document.getElementById("destination-base-folder"),
   destinationPickedSummary: document.getElementById("destination-picked-summary"),
   destinationFinalSummary: document.getElementById("destination-final-summary"),
+  headerCustomerLogo: document.getElementById("header-customer-logo"),
   backupSizeEstimate: document.getElementById("backup-size-estimate"),
   destinationFreeSpace: document.getElementById("destination-free-space"),
   retentionBehaviorSummary: document.getElementById("retention-behavior-summary"),
@@ -54,6 +58,10 @@ const el = {
   supportPhone: document.getElementById("support-phone"),
   supportEmail: document.getElementById("support-email"),
   supportUrl: document.getElementById("support-url"),
+  appearanceLogoPreview: document.getElementById("appearance-logo-preview"),
+  appearanceLogoEmpty: document.getElementById("appearance-logo-empty"),
+  appearanceUploadLogo: document.getElementById("appearance-upload-logo"),
+  appearanceClearLogo: document.getElementById("appearance-clear-logo"),
   licensingServiceUrl: document.getElementById("licensing-service-url"),
   licensingCustomerRef: document.getElementById("licensing-customer-ref"),
   licensingWarningDays: document.getElementById("licensing-warning-days"),
@@ -192,6 +200,10 @@ function normalizeConfig(config) {
     contactUrl: String(config.support?.contactUrl || "").trim()
   };
 
+  const normalizedAppearance = {
+    headerLogoDataUrl: String(config.appearance?.headerLogoDataUrl || "").trim()
+  };
+
   const normalizedLicensing = {
     enabled: false,
     planName: String(config.licensing?.planName || "Annual License").trim(),
@@ -232,6 +244,7 @@ function normalizeConfig(config) {
     },
     retention: normalizedRetention,
     support: normalizedSupport,
+    appearance: normalizedAppearance,
     licensing: normalizedLicensing,
     preferences: {
       timeFormat: "12h",
@@ -941,6 +954,20 @@ function renderStatus() {
 
   el.backupStatusCard.classList.remove("status-good", "status-warning", "status-error");
   el.backupStatusCard.classList.add(`status-${summary.tone}`);
+  if (el.versionStatusPill) {
+    el.versionStatusPill.classList.remove("status-good", "status-warning", "status-error", "status-flashing");
+    el.versionStatusPill.classList.add(`status-${summary.tone}`);
+    if (summary.tone !== "good") {
+      el.versionStatusPill.classList.add("status-flashing");
+    }
+  }
+  if (el.versionStatusLight) {
+    el.versionStatusLight.classList.remove("status-good", "status-warning", "status-error", "status-flashing");
+    el.versionStatusLight.classList.add(`status-${summary.tone}`);
+    if (summary.tone !== "good") {
+      el.versionStatusLight.classList.add("status-flashing");
+    }
+  }
   el.protectionState.textContent = summary.title;
   el.protectionMessage.textContent = summary.message;
   el.lastBackup.textContent = formatDate(state.status.lastBackupAt);
@@ -998,7 +1025,9 @@ function openSettingsDrawer() {
 
 function closeSettingsDrawer() {
   state.updateChannelDraft = state.config?.updates?.channel || "beta";
+  state.appearanceDraftLogoDataUrl = state.config?.appearance?.headerLogoDataUrl || "";
   renderMeta();
+  renderHeaderBranding();
   el.settingsDrawer.hidden = true;
   document.body.classList.remove("settings-open");
 }
@@ -1059,9 +1088,37 @@ function renderTermsGate() {
   el.termsAccept.disabled = true;
 }
 
+function renderHeaderBranding() {
+  const logoDataUrl = (state.appearanceDraftLogoDataUrl ?? state.config?.appearance?.headerLogoDataUrl) || "";
+  const hasLogo = Boolean(logoDataUrl);
+
+  if (el.headerCustomerLogo) {
+    el.headerCustomerLogo.hidden = !hasLogo;
+    if (hasLogo) {
+      el.headerCustomerLogo.src = logoDataUrl;
+    } else {
+      el.headerCustomerLogo.removeAttribute("src");
+    }
+  }
+
+  if (el.appearanceLogoPreview) {
+    el.appearanceLogoPreview.hidden = !hasLogo;
+    if (hasLogo) {
+      el.appearanceLogoPreview.src = logoDataUrl;
+    } else {
+      el.appearanceLogoPreview.removeAttribute("src");
+    }
+  }
+
+  if (el.appearanceLogoEmpty) {
+    el.appearanceLogoEmpty.hidden = hasLogo;
+  }
+}
+
 function renderConfig() {
   const { destination, retention, schedule, reminders, cloudCheck, updates, preferences, support, licensing } = state.config;
   state.updateChannelDraft = updates?.channel || "beta";
+  state.appearanceDraftLogoDataUrl = state.config?.appearance?.headerLogoDataUrl || "";
   el.destinationMode.value = destination.mode;
   el.destinationDriveLetter.value = destination.driveLetter;
   el.destinationLabel.value = destination.label;
@@ -1128,6 +1185,7 @@ function renderConfig() {
   if (el.licensingStatusCopy) {
     el.licensingStatusCopy.textContent = state.status?.licensing?.message || "Licensing is disabled while backup testing continues.";
   }
+  renderHeaderBranding();
   if (el.receiveBetaUpdates) {
     el.receiveBetaUpdates.checked = (state.updateChannelDraft || "beta") === "beta";
   }
@@ -1180,6 +1238,9 @@ function collectConfig() {
       phone: el.supportPhone?.value.trim() || "",
       email: el.supportEmail?.value.trim() || "",
       contactUrl: el.supportUrl?.value.trim() || ""
+    },
+    appearance: {
+      headerLogoDataUrl: state.appearanceDraftLogoDataUrl || ""
     },
     licensing: {
       enabled: false,
@@ -1584,6 +1645,29 @@ async function browseDestinationFolder() {
   renderConfig();
 }
 
+async function uploadHeaderLogo() {
+  if (!window.onebiteDesktop?.pickBrandingLogo) {
+    showResultModal({
+      title: "Logo Upload",
+      message: "Logo upload is available in the installed desktop app."
+    });
+    return;
+  }
+
+  const result = await window.onebiteDesktop.pickBrandingLogo();
+  if (!result) {
+    return;
+  }
+
+  state.appearanceDraftLogoDataUrl = result.dataUrl || "";
+  renderHeaderBranding();
+}
+
+function clearHeaderLogo() {
+  state.appearanceDraftLogoDataUrl = "";
+  renderHeaderBranding();
+}
+
 el.saveConfig.addEventListener("click", saveConfig);
 el.runBackup.addEventListener("click", () => {
   invokeAction("/api/run-backup").catch((error) => {
@@ -1643,6 +1727,19 @@ el.openLogsFolder.addEventListener("click", () => {
     });
   });
 });
+if (el.appearanceUploadLogo) {
+  el.appearanceUploadLogo.addEventListener("click", () => {
+    uploadHeaderLogo().catch((error) => {
+      showResultModal({
+        title: "Logo Upload",
+        message: error.message
+      });
+    });
+  });
+}
+if (el.appearanceClearLogo) {
+  el.appearanceClearLogo.addEventListener("click", clearHeaderLogo);
+}
 el.downloadUpdate.addEventListener("click", () => {
   downloadUpdate().catch((error) => {
     el.updateStatus.textContent = error.message;

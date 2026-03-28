@@ -4,6 +4,22 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
+function mimeTypeForExtension(extension) {
+  switch (String(extension || "").toLowerCase()) {
+    case ".png":
+      return "image/png";
+    case ".svg":
+      return "image/svg+xml";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
 const APP_ROOT = __dirname;
 const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : APP_ROOT;
 const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
@@ -175,6 +191,9 @@ function normalizeConfigForMain(config) {
     },
     retention: normalizedRetention,
     support: normalizedSupport,
+    appearance: {
+      headerLogoDataUrl: String(config?.appearance?.headerLogoDataUrl || "").trim()
+    },
     licensing: normalizedLicensing,
     retentionCount: undefined,
     updates: {
@@ -960,7 +979,7 @@ function createWindow() {
     minWidth: 1080,
     minHeight: 760,
     backgroundColor: "#f4efe7",
-    title: "One Bite Technology Backup Companion",
+    title: "OBTools Auto-Backup",
     show: true,
     webPreferences: {
       preload: path.join(APP_ROOT, "preload.js")
@@ -1354,6 +1373,31 @@ ipcMain.handle("destination:pick-folder", async () => {
     driveLetter,
     baseFolder: relativeFolder === "" ? "" : relativeFolder,
     displayPath: selectedPath
+  };
+});
+
+ipcMain.handle("branding:pick-logo", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [
+      {
+        name: "Images",
+        extensions: ["png", "jpg", "jpeg", "svg", "webp"]
+      }
+    ]
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  const selectedPath = result.filePaths[0];
+  const mimeType = mimeTypeForExtension(path.extname(selectedPath));
+  const buffer = fs.readFileSync(selectedPath);
+
+  return {
+    name: path.basename(selectedPath),
+    dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`
   };
 });
 

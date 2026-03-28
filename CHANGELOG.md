@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.37 - 2026-03-27
+
+- Rebalanced the hero layout so the backup status panel is now the larger primary panel and the title panel is more compact.
+- Removed the extra marketing copy from the left side of the hero and moved Settings plus a live version/status pill into the top-right of the main status panel.
+- Added an `Appearance` section in Settings with upload/remove controls for a custom corner logo and updated the centered app title to `OBTools Auto-Backup`.
+
 ## 1.0.10-beta.36 - 2026-03-27
 
 - Removed the extra `Backup Companion` badge from the top hero so the header reads more cleanly.
