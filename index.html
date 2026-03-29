@@ -10,17 +10,23 @@
     <div class="page-shell">
       <header class="hero">
         <div class="hero-copy">
-          <div class="hero-topbar">
-            <div class="hero-corner-logo">
-              <img id="header-customer-logo" src="" alt="Custom shop logo" class="customer-corner-logo" hidden>
-            </div>
-            <div class="brand-lockup centered-brand-lockup">
-              <img src="assets/obtools-mark.svg" alt="OBTools logo" class="brand-logo">
-              <div class="brand-meta">
-                <span class="brand-name hero-brand-name">OBTools Auto-Backup</span>
+          <div class="hero-copy-inner">
+            <div class="hero-topbar">
+              <div class="hero-corner-logo">
+                <img id="header-customer-logo" src="" alt="Custom shop logo" class="customer-corner-logo" hidden>
               </div>
+              <div class="brand-lockup centered-brand-lockup">
+                <img src="assets/obtools-mark.svg" alt="OBTools logo" class="brand-logo">
+                <div class="brand-meta">
+                  <span class="brand-name hero-brand-name">OBTools Auto-Backup</span>
+                </div>
+              </div>
+              <div class="hero-topbar-spacer" aria-hidden="true"></div>
             </div>
-            <div class="hero-topbar-spacer" aria-hidden="true"></div>
+            <div class="hero-copy-actions">
+              <button id="run-backup" class="primary">Run Backup Now</button>
+              <button id="run-cloud-check" class="secondary">Check Cloud Sync</button>
+            </div>
           </div>
         </div>
         <div id="backup-status-card" class="hero-status card status-good">
@@ -47,10 +53,23 @@
               <p id="snapshot-count" class="mini-value">0</p>
             </div>
           </div>
-          <div class="hero-actions">
-            <button id="run-backup" class="primary">Run Backup Now</button>
-            <button id="run-cloud-check" class="secondary">Check Cloud Sync</button>
+          <div class="hero-status-details">
+            <article class="status-insight-card">
+              <p class="metric-label">Snapshots</p>
+              <ul id="snapshot-list" class="snapshot-list"></ul>
+            </article>
+            <article class="status-insight-card">
+              <p class="metric-label">Cloud Health</p>
+              <div class="cloud-health-head">
+                <span id="cloud-health-indicator" class="health-indicator health-indicator-neutral" aria-hidden="true"></span>
+                <p id="cloud-health-label" class="health-label">Not checked yet</p>
+              </div>
+              <p id="cloud-summary" class="metric-note">Cloud check has not been run yet.</p>
+              <ul id="cloud-recommendations" class="recommendations"></ul>
+            </article>
           </div>
+          <p class="hero-status-note">Most recent backup: <span id="last-backup-detail">Never</span></p>
+          <p id="last-backup-message" class="metric-note">No backup has been completed yet.</p>
         </div>
       </header>
 
@@ -59,7 +78,7 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Quick Setup</p>
-              <h3>Your backup in four steps</h3>
+              <h3>Your backup in three steps</h3>
             </div>
           </div>
           <div class="steps-grid">
@@ -77,11 +96,6 @@
               <p class="step-number">03</p>
               <h4>Set automatic reminders</h4>
               <p>Get nudges if a backup hasn’t happened recently enough.</p>
-            </article>
-            <article class="step-card">
-              <p class="step-number">04</p>
-              <h4>Run and review</h4>
-              <p>See backup history, snapshots, and cloud sync recommendations in one place.</p>
             </article>
           </div>
         </section>
@@ -152,36 +166,6 @@
             </article>
           </div>
           <p class="section-note top-gap">Advanced settings still includes reminders, scheduling, updates, and support logs, but customers can complete normal setup from the main screen.</p>
-        </section>
-
-        <section class="card panel wide">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Step 4</p>
-              <h3>Review backup health</h3>
-              <p class="section-note">Use this area to confirm the last run, inspect available snapshots, and review cloud sync recommendations.</p>
-            </div>
-          </div>
-          <div class="insights">
-            <div>
-              <p class="metric-label">Last Backup</p>
-              <p id="last-backup-detail" class="metric-value">Never</p>
-              <p id="last-backup-message" class="metric-note">No backup has been completed yet.</p>
-            </div>
-            <div>
-              <p class="metric-label">Snapshots</p>
-              <ul id="snapshot-list" class="snapshot-list"></ul>
-            </div>
-            <div>
-              <p class="metric-label">Cloud Health</p>
-              <div class="cloud-health-head">
-                <span id="cloud-health-indicator" class="health-indicator health-indicator-neutral" aria-hidden="true"></span>
-                <p id="cloud-health-label" class="health-label">Not checked yet</p>
-              </div>
-              <p id="cloud-summary" class="metric-note">Cloud check has not been run yet.</p>
-              <ul id="cloud-recommendations" class="recommendations"></ul>
-            </div>
-          </div>
         </section>
       </main>
     </div>
@@ -494,8 +478,8 @@
         <div class="settings-modal-footer">
           <div class="settings-footer-copy">Settings save to this machine. Retention, automation, and update preferences apply the next time a backup or cloud check runs.</div>
           <div class="settings-actions">
-            <button id="close-settings" class="ghost" type="button">Cancel</button>
-            <button id="save-config" class="primary" type="button">Save</button>
+            <button id="close-settings" class="ghost" type="button">Close</button>
+            <button id="save-config" class="primary" type="button">Save Settings</button>
           </div>
         </div>
       </aside>

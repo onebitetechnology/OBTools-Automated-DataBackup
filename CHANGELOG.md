@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.39 - 2026-03-28
+
+- Removed the old bottom `Step 4` review panel and moved backup review details into the hero area where they are visible immediately on launch.
+- Reworked the top layout so the centered app title and action buttons live on the left while the backup status, snapshots, and cloud health summary live together on the right.
+- Simplified the setup overview from four steps to three so the main dashboard no longer repeats health information lower on the page.
+
 ## 1.0.10-beta.38 - 2026-03-28
 
 - Rebuilt the Settings modal to use Ticket Listing-style collapsible section cards with `Show Details / Hide Details` toggles while keeping the centered modal layout.
