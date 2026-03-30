@@ -654,31 +654,36 @@ function detectInstalledBrowsers() {
       id: "chrome-user-data",
       name: "Google Chrome",
       path: path.join(localAppData, "Google", "Chrome", "User Data"),
-      detail: "Chrome profiles, bookmarks, extensions, and browser settings"
+      detail: "Chrome profiles, bookmarks, extensions, and browser settings",
+      processNames: ["chrome"]
     },
     {
       id: "edge-user-data",
       name: "Microsoft Edge",
       path: path.join(localAppData, "Microsoft", "Edge", "User Data"),
-      detail: "Edge profiles, bookmarks, extensions, and browser settings"
+      detail: "Edge profiles, bookmarks, extensions, and browser settings",
+      processNames: ["msedge"]
     },
     {
       id: "brave-user-data",
       name: "Brave",
       path: path.join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
-      detail: "Brave profiles, bookmarks, extensions, and browser settings"
+      detail: "Brave profiles, bookmarks, extensions, and browser settings",
+      processNames: ["brave"]
     },
     {
       id: "firefox-profiles",
       name: "Mozilla Firefox",
       path: path.join(roamingAppData, "Mozilla", "Firefox"),
-      detail: "Firefox profiles, bookmarks, and browser settings"
+      detail: "Firefox profiles, bookmarks, and browser settings",
+      processNames: ["firefox"]
     },
     {
       id: "opera-stable",
       name: "Opera",
       path: path.join(roamingAppData, "Opera Software"),
-      detail: "Opera profiles and browser settings"
+      detail: "Opera profiles and browser settings",
+      processNames: ["opera"]
     }
   ];
 
@@ -686,7 +691,9 @@ function detectInstalledBrowsers() {
     .filter((entry) => entry.path && fs.existsSync(entry.path))
     .map((entry) => ({
       ...entry,
-      type: "folder"
+      type: "folder",
+      sourceKind: "browser",
+      restoreSupport: "good"
     }));
 }
 
@@ -737,6 +744,146 @@ function detectUserFolders() {
       }))
       .filter((entry) => entry.path && fs.existsSync(entry.path));
   });
+}
+
+function sanitizePathSegment(value) {
+  return String(value || "")
+    .replace(/\.[^./\\]+$/, "")
+    .replace(/[^a-zA-Z0-9 _-]/g, "-")
+    .trim() || "Item";
+}
+
+function detectInstalledEmailData() {
+  if (process.platform !== "win32") {
+    return [];
+  }
+
+  const systemDrive = process.env.SystemDrive || "C:";
+  const usersRoot = path.join(`${systemDrive}\\`, "Users");
+  if (!fs.existsSync(usersRoot)) {
+    return [];
+  }
+
+  const ignoredUsers = new Set([
+    "All Users",
+    "Default",
+    "Default User",
+    "Public",
+    "defaultuser0"
+  ]);
+
+  let userDirectories = [];
+  try {
+    userDirectories = fs.readdirSync(usersRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !ignoredUsers.has(entry.name));
+  } catch (_error) {
+    return [];
+  }
+
+  const detected = [];
+  const seenPaths = new Set();
+
+  const addItem = (item) => {
+    const normalizedPath = String(item.path || "").toLowerCase();
+    if (!normalizedPath || seenPaths.has(normalizedPath) || !fs.existsSync(item.path)) {
+      return;
+    }
+
+    seenPaths.add(normalizedPath);
+    detected.push(item);
+  };
+
+  userDirectories.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const userDir of userDirectories) {
+    const userName = userDir.name;
+    const userRoot = path.join(usersRoot, userName);
+    const roamingAppData = path.join(userRoot, "AppData", "Roaming");
+    const localAppData = path.join(userRoot, "AppData", "Local");
+    const documentsDir = path.join(userRoot, "Documents");
+
+    const thunderbirdPath = path.join(roamingAppData, "Thunderbird");
+    addItem({
+      id: `${userName.toLowerCase()}-thunderbird-profile`,
+      name: `${userName} Thunderbird Profile`,
+      userName,
+      emailApp: "thunderbird",
+      path: thunderbirdPath,
+      detail: "Mail, account settings, address books, and local Thunderbird profile data",
+      type: "folder",
+      sourceKind: "email",
+      restoreSupport: "good",
+      processNames: ["thunderbird"],
+      relativeDestination: ["Users", userName, "Email Data", "Thunderbird"]
+    });
+
+    const signaturesPath = path.join(roamingAppData, "Microsoft", "Signatures");
+    addItem({
+      id: `${userName.toLowerCase()}-outlook-signatures`,
+      name: `${userName} Outlook Signatures`,
+      userName,
+      emailApp: "outlook-classic",
+      path: signaturesPath,
+      detail: "Classic Outlook signatures and signature assets",
+      type: "folder",
+      sourceKind: "email",
+      restoreSupport: "partial",
+      processNames: ["outlook"],
+      relativeDestination: ["Users", userName, "Email Data", "Outlook Signatures"]
+    });
+
+    const templatesPath = path.join(roamingAppData, "Microsoft", "Templates");
+    addItem({
+      id: `${userName.toLowerCase()}-outlook-templates`,
+      name: `${userName} Outlook Templates`,
+      userName,
+      emailApp: "outlook-classic",
+      path: templatesPath,
+      detail: "Classic Outlook templates and reusable email forms",
+      type: "folder",
+      sourceKind: "email",
+      restoreSupport: "partial",
+      processNames: ["outlook"],
+      relativeDestination: ["Users", userName, "Email Data", "Outlook Templates"]
+    });
+
+    const pstRoots = [
+      path.join(documentsDir, "Outlook Files"),
+      path.join(localAppData, "Microsoft", "Outlook")
+    ];
+
+    for (const pstRoot of pstRoots) {
+      if (!fs.existsSync(pstRoot)) {
+        continue;
+      }
+
+      let pstFiles = [];
+      try {
+        pstFiles = fs.readdirSync(pstRoot, { withFileTypes: true })
+          .filter((entry) => entry.isFile() && /\.pst$/i.test(entry.name));
+      } catch (_error) {
+        pstFiles = [];
+      }
+
+      for (const pstFile of pstFiles) {
+        addItem({
+          id: `${userName.toLowerCase()}-${sanitizePathSegment(pstFile.name).toLowerCase()}-pst`,
+          name: `${userName} Outlook Data File (${pstFile.name})`,
+          userName,
+          emailApp: "outlook-pst",
+          path: path.join(pstRoot, pstFile.name),
+          detail: "Classic Outlook PST archive/data file. Restore support is good, but Outlook may still need to reconnect accounts afterward.",
+          type: "file",
+          sourceKind: "email",
+          restoreSupport: "good",
+          processNames: ["outlook"],
+          relativeDestination: ["Users", userName, "Email Data", "Outlook Data Files", sanitizePathSegment(pstFile.name)]
+        });
+      }
+    }
+  }
+
+  return detected;
 }
 
 function simulateAction(scriptName) {
@@ -802,10 +949,14 @@ function simulateAction(scriptName) {
     return { ok: true, message: status.automation.message };
   }
 
+  if (scriptName === "restore-snapshot.ps1") {
+    return { ok: true, message: "Preview mode: snapshot restore simulated." };
+  }
+
   return { ok: true, message: `Preview mode: simulated ${scriptName}.` };
 }
 
-function runPowerShell(scriptName) {
+function runPowerShell(scriptName, extraScriptArgs = []) {
   return new Promise((resolve) => {
     if (process.platform !== "win32") {
       resolve({
@@ -829,6 +980,10 @@ function runPowerShell(scriptName) {
       "-StatusPath",
       statusPath
     ];
+
+    if (Array.isArray(extraScriptArgs) && extraScriptArgs.length) {
+      args.push(...extraScriptArgs);
+    }
 
     if (scriptName === "install-scheduled-backup.ps1") {
       args.push("-ScriptRoot", WINDOWS_DIR);
@@ -1487,6 +1642,12 @@ ipcMain.handle("browsers:detect", async () => {
   };
 });
 
+ipcMain.handle("email:detect", async () => {
+  return {
+    items: detectInstalledEmailData()
+  };
+});
+
 ipcMain.handle("folders:detect-user-folders", async () => {
   return {
     folders: detectUserFolders()
@@ -1498,6 +1659,64 @@ ipcMain.handle("storage:analyze", async () => {
   const config = readJson(configPath);
   return {
     storage: analyzeStorage(config)
+  };
+});
+
+ipcMain.handle("restore:run", async (_event, payload = {}) => {
+  const snapshotName = String(payload.snapshotName || "").trim();
+  const jobId = String(payload.jobId || "").trim();
+  const mode = payload.mode === "alternate" ? "alternate" : "original";
+  const targetPath = String(payload.targetPath || "").trim();
+
+  if (!snapshotName || !jobId) {
+    throw new Error("Choose both a snapshot and a backup item before restoring.");
+  }
+
+  if (mode === "alternate" && !targetPath) {
+    throw new Error("Choose a restore folder before restoring to another location.");
+  }
+
+  const extraArgs = [
+    "-SnapshotName",
+    snapshotName,
+    "-JobId",
+    jobId,
+    "-RestoreMode",
+    mode
+  ];
+
+  if (targetPath) {
+    extraArgs.push("-TargetPath", targetPath);
+  }
+
+  writeLauncherLog(`IPC restore:run received. snapshot=${snapshotName} job=${jobId} mode=${mode}`);
+  writeRuntimeLog(`Restore requested. snapshot=${snapshotName} job=${jobId} mode=${mode}`);
+  const result = await runPowerShell("restore-snapshot.ps1", extraArgs);
+  writeLauncherLog(`IPC restore:run completed. ok=${result.ok} message=${result.message}`);
+  writeRuntimeLog(`Restore completed. ok=${result.ok} message=${result.message}`);
+
+  if (!result.ok) {
+    throw new Error(result.message || "The selected snapshot could not be restored.");
+  }
+
+  const { configPath } = dataPaths();
+  const config = readJson(configPath);
+  const selectedJob = (config.jobs || []).find((job) => job.id === jobId);
+  const notes = [];
+
+  if (selectedJob?.sourceKind === "browser") {
+    notes.push("Reopen the browser after the restore finishes. If this is a fresh install, launching the browser once before restore is safest.");
+  } else if (selectedJob?.sourceKind === "email") {
+    notes.push("Reopen the email app after the restore finishes. Some email apps may still need sign-in or profile reconnect steps afterward.");
+  } else {
+    notes.push("Review the restored files before deleting or changing the current live copy.");
+  }
+
+  return {
+    ok: true,
+    message: result.message || "The selected snapshot was restored successfully.",
+    notes,
+    meta: appMeta()
   };
 });
 

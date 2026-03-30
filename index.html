@@ -103,6 +103,7 @@
           <div class="panel-actions-underhead">
             <button id="detect-user-folders" class="secondary" type="button">Choose User Folders</button>
             <button id="detect-browsers" class="secondary" type="button">Choose Browser Data</button>
+            <button id="detect-email-data" class="secondary" type="button">Backup Email Data</button>
             <button id="add-job" class="ghost">Add Item</button>
           </div>
           <div id="jobs-list" class="jobs-list"></div>
@@ -427,6 +428,52 @@
         <section class="settings-section collapsed">
           <button class="settings-section-toggle" type="button" aria-expanded="false">
             <span class="settings-section-toggle-copy">
+              <span class="settings-section-title">Restore</span>
+              <span class="settings-section-copy">Restore files, browser data, or supported email data from a saved snapshot back to the PC.</span>
+            </span>
+            <span class="settings-section-toggle-label">
+              <span class="settings-section-toggle-text">Show Details</span>
+              <span class="settings-section-caret">▾</span>
+            </span>
+          </button>
+          <div class="settings-section-body">
+            <div class="grid two">
+              <label>
+                <span>Snapshot to Restore</span>
+                <select id="restore-snapshot-select"></select>
+              </label>
+              <label>
+                <span>Backup Item</span>
+                <select id="restore-job-select"></select>
+              </label>
+            </div>
+            <p id="restore-support-note" class="settings-meta-value">Choose a snapshot and backup item to review restore support notes.</p>
+            <div class="grid two">
+              <label>
+                <span>Restore Mode</span>
+                <select id="restore-mode-select">
+                  <option value="original">Restore to original location</option>
+                  <option value="alternate">Restore to another folder</option>
+                </select>
+              </label>
+              <div class="restore-target-card">
+                <span>Alternate Restore Folder</span>
+                <div class="settings-inline-actions">
+                  <button id="restore-pick-target" class="secondary" type="button">Choose Restore Folder</button>
+                </div>
+                <p id="restore-target-summary" class="hint">Original location will be used unless you choose another folder.</p>
+              </div>
+            </div>
+            <div class="settings-inline-actions">
+              <button id="run-restore" class="primary" type="button">Restore Selected Snapshot</button>
+            </div>
+            <p class="hint">For browser and email restores, close the related app first. Fresh installs are usually safest after launching the app once before restoring its data.</p>
+          </div>
+        </section>
+
+        <section class="settings-section collapsed">
+          <button class="settings-section-toggle" type="button" aria-expanded="false">
+            <span class="settings-section-toggle-copy">
               <span class="settings-section-title">Support Logs</span>
               <span class="settings-section-copy">Open the local app-data folder to review runtime and launcher logs when something behaves unexpectedly.</span>
             </span>
@@ -511,6 +558,19 @@
         <div class="terms-actions result-actions">
           <button id="browser-modal-close" class="secondary" type="button">Close</button>
           <button id="browser-modal-apply" class="primary" type="button">Add Selected</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="email-modal" class="terms-gate" hidden>
+      <div class="terms-backdrop"></div>
+      <section class="terms-modal browser-modal">
+        <h2>Email Data Backups</h2>
+        <p id="email-modal-message" class="terms-intro">Check the email data you want to include in backups.</p>
+        <div id="email-modal-list" class="browser-list"></div>
+        <div class="terms-actions result-actions">
+          <button id="email-modal-close" class="secondary" type="button">Close</button>
+          <button id="email-modal-apply" class="primary" type="button">Add Selected</button>
         </div>
       </section>
     </div>

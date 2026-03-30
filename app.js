@@ -12,8 +12,10 @@ const state = {
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: [],
+  detectedEmailData: [],
   detectedUserFolders: [],
-  pendingAddItem: null
+  pendingAddItem: null,
+  restoreTargetPath: ""
 };
 
 let backupProgressTimer = null;
@@ -110,12 +112,18 @@ const el = {
   addJob: document.getElementById("add-job"),
   detectUserFolders: document.getElementById("detect-user-folders"),
   detectBrowsers: document.getElementById("detect-browsers"),
+  detectEmailData: document.getElementById("detect-email-data"),
   jobTemplate: document.getElementById("job-template"),
   browserModal: document.getElementById("browser-modal"),
   browserModalMessage: document.getElementById("browser-modal-message"),
   browserModalList: document.getElementById("browser-modal-list"),
   browserModalClose: document.getElementById("browser-modal-close"),
   browserModalApply: document.getElementById("browser-modal-apply"),
+  emailModal: document.getElementById("email-modal"),
+  emailModalMessage: document.getElementById("email-modal-message"),
+  emailModalList: document.getElementById("email-modal-list"),
+  emailModalClose: document.getElementById("email-modal-close"),
+  emailModalApply: document.getElementById("email-modal-apply"),
   userFolderModal: document.getElementById("user-folder-modal"),
   userFolderModalMessage: document.getElementById("user-folder-modal-message"),
   userFolderModalList: document.getElementById("user-folder-modal-list"),
@@ -128,6 +136,13 @@ const el = {
   addItemSelectionPath: document.getElementById("add-item-selection-path"),
   addItemModalClose: document.getElementById("add-item-modal-close"),
   addItemModalApply: document.getElementById("add-item-modal-apply"),
+  restoreSnapshotSelect: document.getElementById("restore-snapshot-select"),
+  restoreJobSelect: document.getElementById("restore-job-select"),
+  restoreSupportNote: document.getElementById("restore-support-note"),
+  restoreModeSelect: document.getElementById("restore-mode-select"),
+  restorePickTarget: document.getElementById("restore-pick-target"),
+  restoreTargetSummary: document.getElementById("restore-target-summary"),
+  runRestore: document.getElementById("run-restore"),
   termsGate: document.getElementById("terms-gate"),
   termsConfirm: document.getElementById("terms-confirm"),
   termsAccept: document.getElementById("terms-accept"),
@@ -189,8 +204,16 @@ async function desktopRequest(url, options = {}) {
     return window.onebiteDesktop.detectUserFolders();
   }
 
+  if (url === "/api/detect-email-data") {
+    return window.onebiteDesktop.detectEmailData();
+  }
+
   if (url === "/api/storage-analysis") {
     return window.onebiteDesktop.analyzeStorage();
+  }
+
+  if (url === "/api/restore-snapshot" && options.method === "POST") {
+    return window.onebiteDesktop.restoreSnapshot(body);
   }
 
   throw new Error(`Unsupported desktop request: ${url}`);
@@ -861,6 +884,74 @@ function closeBrowserModal() {
   el.browserModal.hidden = true;
 }
 
+function renderEmailModal() {
+  el.emailModalList.innerHTML = "";
+
+  if (!state.detectedEmailData.length) {
+    el.emailModalMessage.textContent = "No supported email data was found on this PC.";
+    el.emailModalApply.disabled = true;
+    return;
+  }
+
+  el.emailModalMessage.textContent = "Check the email data you want to include in backups.";
+  el.emailModalApply.disabled = false;
+
+  const groupedItems = state.detectedEmailData.reduce((groups, item) => {
+    const key = item.userName || "Current User";
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(item);
+    return groups;
+  }, new Map());
+
+  groupedItems.forEach((items, userName) => {
+    const group = document.createElement("section");
+    group.className = "folder-group";
+
+    const heading = document.createElement("div");
+    heading.className = "folder-group-title";
+    heading.textContent = userName;
+    group.appendChild(heading);
+
+    items.forEach((itemData) => {
+      const row = document.createElement("label");
+      row.className = "browser-option";
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = true;
+      input.value = itemData.id;
+
+      const copy = document.createElement("div");
+      copy.className = "browser-option-copy";
+
+      const title = document.createElement("div");
+      title.className = "browser-option-title";
+      title.textContent = itemData.name;
+
+      const detail = document.createElement("div");
+      detail.className = "browser-option-detail";
+      detail.textContent = `${itemData.detail} | ${itemData.path}`;
+
+      copy.append(title, detail);
+      row.append(input, copy);
+      group.appendChild(row);
+    });
+
+    el.emailModalList.appendChild(group);
+  });
+}
+
+function openEmailModal() {
+  renderEmailModal();
+  el.emailModal.hidden = false;
+}
+
+function closeEmailModal() {
+  el.emailModal.hidden = true;
+}
+
 function openUserFolderModal() {
   renderUserFolderModal();
   el.userFolderModal.hidden = false;
@@ -964,6 +1055,8 @@ function addDetectedBrowserJobs() {
       path: browser.path,
       type: "folder",
       sourceKind: "browser",
+      restoreSupport: browser.restoreSupport || "good",
+      processNames: browser.processNames || [],
       enabled: true
     });
   });
@@ -1023,6 +1116,52 @@ async function detectUserFolders() {
   const payload = await request("/api/detect-user-folders");
   state.detectedUserFolders = payload.folders || [];
   openUserFolderModal();
+}
+
+async function detectEmailData() {
+  const payload = await request("/api/detect-email-data");
+  state.detectedEmailData = payload.items || [];
+  openEmailModal();
+}
+
+function addDetectedEmailJobs() {
+  const selectedIds = Array.from(el.emailModalList.querySelectorAll("input[type='checkbox']:checked"))
+    .map((input) => input.value);
+
+  if (!selectedIds.length) {
+    closeEmailModal();
+    return;
+  }
+
+  const existingPaths = new Set(state.config.jobs.map((job) => String(job.path || "").toLowerCase()));
+  const toAdd = state.detectedEmailData.filter((item) => selectedIds.includes(item.id));
+
+  toAdd.forEach((item) => {
+    if (existingPaths.has(item.path.toLowerCase())) {
+      return;
+    }
+
+    state.config.jobs.push({
+      id: `job-${Date.now()}-${item.id}`,
+      name: item.name,
+      path: item.path,
+      type: item.type || "folder",
+      sourceKind: "email",
+      userName: item.userName || "",
+      emailApp: item.emailApp || "",
+      restoreSupport: item.restoreSupport || "partial",
+      processNames: item.processNames || [],
+      relativeDestination: item.relativeDestination || null,
+      enabled: true
+    });
+  });
+
+  renderJobs();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
+  closeEmailModal();
 }
 
 function updateModalSecondaryAction() {
@@ -1107,6 +1246,10 @@ function displayJobType(job) {
     return "Browser Data";
   }
 
+  if (job.sourceKind === "email") {
+    return "Email Data";
+  }
+
   if (job.type === "file") {
     return "File";
   }
@@ -1115,8 +1258,10 @@ function displayJobType(job) {
 }
 
 async function syncJobTypeFromPath(job, typeDisplayInput) {
-  if (job.sourceKind === "browser") {
-    job.type = "folder";
+  if (job.sourceKind === "browser" || job.sourceKind === "email") {
+    if (job.sourceKind === "browser") {
+      job.type = "folder";
+    }
     if (typeDisplayInput) {
       typeDisplayInput.value = displayJobType(job);
     }
@@ -1176,11 +1321,11 @@ function renderJobs() {
 
     const browseButton = card.querySelector("[data-action='browse']");
     const pathInput = card.querySelector("[data-field='path']");
-    if (job.sourceKind === "browser") {
+    if (job.sourceKind === "browser" || job.sourceKind === "email") {
       browseButton.textContent = "View Path";
     }
 
-    if (pathInput && job.sourceKind !== "browser") {
+    if (pathInput && job.sourceKind !== "browser" && job.sourceKind !== "email") {
       pathInput.addEventListener("blur", () => {
         syncJobTypeFromPath(job, typeDisplayInput).catch(() => {
           if (typeDisplayInput) {
@@ -1191,10 +1336,10 @@ function renderJobs() {
     }
 
     browseButton.addEventListener("click", async () => {
-      if (job.sourceKind === "browser") {
+      if (job.sourceKind === "browser" || job.sourceKind === "email") {
         showResultModal({
-          title: `${job.name || "Browser Data"} Path`,
-          message: job.path || "No browser path is configured yet."
+          title: `${job.name || "Backed-Up Data"} Path`,
+          message: job.path || "No backup path is configured yet."
         });
         return;
       }
@@ -1305,6 +1450,8 @@ function renderStatus() {
       el.cloudRecommendations.appendChild(item);
     });
   }
+
+  renderRestoreSection();
 }
 
 function openSettingsDrawer() {
@@ -1361,6 +1508,90 @@ function renderSettingsSummary() {
   }
 
   el.settingsScheduleSummary.textContent = `${schedule.frequency} at ${formatTimeOfDay(schedule.time, preferences?.timeFormat)}`;
+}
+
+function restoreSupportNote(job) {
+  if (!job) {
+    return "Choose a snapshot and backup item to review restore support notes.";
+  }
+
+  if (job.sourceKind === "browser") {
+    return "Browser restores usually work best when the browser is fully closed. On a fresh install, launch the browser once, close it, then restore the selected snapshot.";
+  }
+
+  if (job.sourceKind === "email") {
+    if (job.emailApp === "thunderbird") {
+      return "Thunderbird profile restores are usually reliable when Thunderbird is closed first. On a fresh install, launch Thunderbird once before restoring.";
+    }
+
+    if (job.emailApp === "outlook-pst") {
+      return "Outlook PST data files can be restored, but account sign-in and profile reconnect steps may still be needed afterward. Close Outlook first.";
+    }
+
+    return "Email restores may need follow-up inside the mail app after files are copied back. Close the email app before restoring.";
+  }
+
+  return "Restoring to the original location will copy the selected snapshot back over the current files. Restoring to another folder is safer if you want to compare files first.";
+}
+
+function renderRestoreSection() {
+  if (!el.restoreSnapshotSelect || !el.restoreJobSelect) {
+    return;
+  }
+
+  const snapshots = state.status?.recentSnapshots || [];
+  const jobs = state.config?.jobs || [];
+  const currentSnapshot = el.restoreSnapshotSelect.value;
+  const currentJobId = el.restoreJobSelect.value;
+
+  el.restoreSnapshotSelect.innerHTML = "";
+  if (!snapshots.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No snapshots available yet";
+    el.restoreSnapshotSelect.appendChild(option);
+    el.restoreSnapshotSelect.disabled = true;
+  } else {
+    snapshots.forEach((snapshot, index) => {
+      const option = document.createElement("option");
+      option.value = snapshot;
+      option.textContent = formatSnapshotLabel(snapshot);
+      if ((currentSnapshot && currentSnapshot === snapshot) || (!currentSnapshot && index === 0)) {
+        option.selected = true;
+      }
+      el.restoreSnapshotSelect.appendChild(option);
+    });
+    el.restoreSnapshotSelect.disabled = false;
+  }
+
+  el.restoreJobSelect.innerHTML = "";
+  if (!jobs.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No backup items configured yet";
+    el.restoreJobSelect.appendChild(option);
+    el.restoreJobSelect.disabled = true;
+  } else {
+    jobs.forEach((job, index) => {
+      const option = document.createElement("option");
+      option.value = job.id;
+      option.textContent = `${job.name} (${displayJobType(job)})`;
+      if ((currentJobId && currentJobId === job.id) || (!currentJobId && index === 0)) {
+        option.selected = true;
+      }
+      el.restoreJobSelect.appendChild(option);
+    });
+    el.restoreJobSelect.disabled = false;
+  }
+
+  const selectedJob = jobs.find((job) => job.id === el.restoreJobSelect.value) || jobs[0] || null;
+  el.restoreSupportNote.textContent = restoreSupportNote(selectedJob);
+  const usingAlternate = el.restoreModeSelect?.value === "alternate";
+  el.restorePickTarget.disabled = !usingAlternate;
+  el.restoreTargetSummary.textContent = usingAlternate
+    ? (state.restoreTargetPath || "Choose a restore folder for the recovered files.")
+    : "Original location will be used unless you choose another folder.";
+  el.runRestore.disabled = !snapshots.length || !jobs.length || (usingAlternate && !state.restoreTargetPath);
 }
 
 function renderStorageAnalysis() {
@@ -1514,6 +1745,7 @@ function renderConfig() {
   }
   renderJobs();
   renderSettingsSummary();
+  renderRestoreSection();
   renderStorageAnalysis();
   renderMeta();
   renderTermsGate();
@@ -1968,6 +2200,103 @@ async function browseDestinationFolder() {
   renderConfig();
 }
 
+async function chooseRestoreTargetFolder() {
+  if (!window.onebiteDesktop?.pickDestinationFolder) {
+    showResultModal({
+      title: "Restore Folder",
+      message: "Choosing a restore folder is available in the installed desktop app."
+    });
+    return;
+  }
+
+  const selected = await window.onebiteDesktop.pickDestinationFolder();
+  if (!selected) {
+    return;
+  }
+
+  state.restoreTargetPath = selected.displayPath || "";
+  renderRestoreSection();
+}
+
+async function performRestore() {
+  const snapshotName = el.restoreSnapshotSelect?.value || "";
+  const jobId = el.restoreJobSelect?.value || "";
+  const mode = el.restoreModeSelect?.value || "original";
+
+  if (!snapshotName || !jobId) {
+    showResultModal({
+      title: "Restore",
+      message: "Choose both a snapshot and a backup item before restoring."
+    });
+    return;
+  }
+
+  if (mode === "alternate" && !state.restoreTargetPath) {
+    showResultModal({
+      title: "Restore Folder Needed",
+      message: "Choose a restore folder before restoring to another location."
+    });
+    return;
+  }
+
+  showResultModal({
+    title: "Restore In Progress",
+    message: "Copying the selected snapshot back to the PC. This can take a little while for large browser or email data folders.",
+    hideClose: true,
+    progress: {
+      percent: 10,
+      detail: "Preparing the restore request...",
+      indeterminate: true
+    }
+  });
+
+  try {
+    const payload = await request("/api/restore-snapshot", {
+      method: "POST",
+      body: JSON.stringify({
+        snapshotName,
+        jobId,
+        mode,
+        targetPath: mode === "alternate" ? state.restoreTargetPath : ""
+      })
+    });
+
+    state.meta = payload.meta || state.meta;
+    renderMeta();
+    showResultModal({
+      title: "Restore Complete",
+      message: payload.message || "The selected snapshot was restored successfully.",
+      list: payload.notes || []
+    });
+  } catch (error) {
+    showResultModal({
+      title: "Restore Needs Attention",
+      message: summarizeActionMessage(error.message || "The selected snapshot could not be restored.")
+    });
+  }
+}
+
+async function runRestore() {
+  const selectedJob = (state.config?.jobs || []).find((job) => job.id === (el.restoreJobSelect?.value || ""));
+  const destinationCopy = el.restoreModeSelect?.value === "alternate"
+    ? (state.restoreTargetPath || "the selected restore folder")
+    : (selectedJob?.path || "the original location");
+
+  showResultModal({
+    title: "Restore This Snapshot?",
+    message: `Restore ${selectedJob?.name || "the selected backup item"} to ${destinationCopy}? This will copy the saved snapshot back onto the PC.`,
+    list: [
+      "Close the related browser or email app first.",
+      "Restore to another folder if you want to compare files before replacing the live copy."
+    ],
+    secondaryAction: {
+      label: "Restore Now",
+      onClick: performRestore
+    },
+    closeLabel: "Cancel"
+  });
+}
+
 async function uploadHeaderLogo() {
   if (!window.onebiteDesktop?.pickBrandingLogo) {
     showResultModal({
@@ -2107,8 +2436,18 @@ el.detectBrowsers.addEventListener("click", () => {
     });
   });
 });
+el.detectEmailData.addEventListener("click", () => {
+  detectEmailData().catch((error) => {
+    showResultModal({
+      title: "Email Detection",
+      message: error.message
+    });
+  });
+});
 el.browserModalClose.addEventListener("click", closeBrowserModal);
 el.browserModalApply.addEventListener("click", addDetectedBrowserJobs);
+el.emailModalClose.addEventListener("click", closeEmailModal);
+el.emailModalApply.addEventListener("click", addDetectedEmailJobs);
 el.userFolderModalClose.addEventListener("click", closeUserFolderModal);
 el.userFolderModalApply.addEventListener("click", addDetectedUserFolderJobs);
 el.addItemChooseFolder.addEventListener("click", () => {
@@ -2129,6 +2468,35 @@ el.addItemChooseFile.addEventListener("click", () => {
 });
 el.addItemModalClose.addEventListener("click", closeAddItemModal);
 el.addItemModalApply.addEventListener("click", addSelectedItemFromModal);
+if (el.restoreSnapshotSelect) {
+  el.restoreSnapshotSelect.addEventListener("change", renderRestoreSection);
+}
+if (el.restoreJobSelect) {
+  el.restoreJobSelect.addEventListener("change", renderRestoreSection);
+}
+if (el.restoreModeSelect) {
+  el.restoreModeSelect.addEventListener("change", renderRestoreSection);
+}
+if (el.restorePickTarget) {
+  el.restorePickTarget.addEventListener("click", () => {
+    chooseRestoreTargetFolder().catch((error) => {
+      showResultModal({
+        title: "Restore Folder",
+        message: error.message
+      });
+    });
+  });
+}
+if (el.runRestore) {
+  el.runRestore.addEventListener("click", () => {
+    runRestore().catch((error) => {
+      showResultModal({
+        title: "Restore Needs Attention",
+        message: error.message
+      });
+    });
+  });
+}
 el.termsConfirm.addEventListener("change", () => {
   el.termsAccept.disabled = !el.termsConfirm.checked;
 });

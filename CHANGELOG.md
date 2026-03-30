@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.43 - 2026-03-30
+
+- Added a new `Backup Email Data` picker that scans for supported email data like Thunderbird profiles and classic Outlook PST/signature/template data.
+- Added a first-pass `Restore` section in Settings so users can restore a selected snapshot item back to its original location or another folder.
+- Added restore safety guidance for browser and email data, including prompts to close the related app first and notes about fresh-install restore expectations.
+
 ## 1.0.10-beta.42 - 2026-03-29
 
 - Reworked the main screen into a cleaner app bar plus action-and-health layout so the most important information is easier for non-technical users to scan.
