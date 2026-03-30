@@ -6,7 +6,7 @@ const releaseType = process.env.OBTOOLS_RELEASE_TYPE || (releaseChannel === "bet
 
 module.exports = {
   appId: "ca.onebitetechnology.backupcompanion",
-  productName: "OBTools Automated Backups",
+  productName: "DataSafe",
   generateUpdatesFilesForAllChannels: true,
   files: [
     "app.js",
@@ -29,6 +29,7 @@ module.exports = {
   ],
   asar: true,
   win: {
+    icon: "assets/datasafe-icon.png",
     target: [
       {
         target: "nsis",
@@ -52,6 +53,6 @@ module.exports = {
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
     deleteAppDataOnUninstall: true,
-    shortcutName: "OBTools Automated Backups"
+    shortcutName: "DataSafe"
   }
 };

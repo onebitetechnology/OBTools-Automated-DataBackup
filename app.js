@@ -198,8 +198,8 @@ async function desktopRequest(url, options = {}) {
 
 function normalizeConfig(config) {
   const existingDestination = config.destination || {};
-  const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || !existingDestination.baseFolder
-    ? "OB Tools Backup"
+  const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || existingDestination.baseFolder === "OB Tools Backup" || !existingDestination.baseFolder
+    ? "DataSafe Backup"
     : existingDestination.baseFolder;
   const retentionSource = config.retention || {};
   const legacyCount = Number(config.retentionCount || 0);
@@ -1262,7 +1262,9 @@ function renderStatus() {
   el.protectionMessage.textContent = summary.message;
   el.lastBackup.textContent = formatDate(state.status.lastBackupAt);
   el.lastBackupDetail.textContent = formatDate(state.status.lastBackupAt);
-  el.lastBackupMessage.textContent = friendlyBackupMessage(state.status);
+  const backupDetailMessage = friendlyBackupMessage(state.status);
+  el.lastBackupMessage.textContent = backupDetailMessage;
+  el.lastBackupMessage.hidden = !backupDetailMessage || backupDetailMessage === summary.message;
   el.cloudSummary.textContent = state.status.cloud?.summary || "Cloud check has not been run yet.";
   el.cloudSummary.classList.toggle("warning-copy", state.status.cloud?.level === "warning");
   el.cloudSummary.classList.toggle("error-copy", state.status.cloud?.level === "error");
@@ -1295,11 +1297,8 @@ function renderStatus() {
 
   el.cloudRecommendations.innerHTML = "";
   const recommendations = state.status.cloud?.recommendations || [];
-  if (!recommendations.length) {
-    const item = document.createElement("li");
-    item.textContent = "No recommendations right now.";
-    el.cloudRecommendations.appendChild(item);
-  } else {
+  el.cloudRecommendations.hidden = !recommendations.length;
+  if (recommendations.length) {
     recommendations.forEach((entry) => {
       const item = document.createElement("li");
       item.textContent = entry;
@@ -1455,7 +1454,7 @@ function renderConfig() {
     el.destinationPickedSummary.textContent = "No backup drive or folder selected yet.";
   }
 
-  const managedFolderName = destination.baseFolder || "OB Tools Backup";
+  const managedFolderName = destination.baseFolder || "DataSafe Backup";
   el.destinationModeSummary.textContent = `The app will create and maintain an ${managedFolderName} folder on the selected drive.`;
 
   if (el.useManagedFolder) {
@@ -1964,8 +1963,8 @@ async function browseDestinationFolder() {
   el.destinationMode.value = "driveLetter";
   el.destinationDriveLetter.value = selected.driveLetter;
   el.destinationLabel.value = "";
-  state.config.destination.baseFolder = "OB Tools Backup";
-  el.destinationBaseFolder.value = "OB Tools Backup";
+  state.config.destination.baseFolder = "DataSafe Backup";
+  el.destinationBaseFolder.value = "DataSafe Backup";
   renderConfig();
 }
 

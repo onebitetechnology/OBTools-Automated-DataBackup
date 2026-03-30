@@ -135,8 +135,8 @@ function sanitizeUpdateChannel(value, fallbackVersion = app.getVersion()) {
 
 function normalizeConfigForMain(config) {
   const existingDestination = config?.destination || {};
-  const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || !existingDestination.baseFolder
-    ? "OB Tools Backup"
+  const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || existingDestination.baseFolder === "OB Tools Backup" || !existingDestination.baseFolder
+    ? "DataSafe Backup"
     : existingDestination.baseFolder;
   const retentionSource = config?.retention || {};
   const legacyCount = Number(config?.retentionCount || 0);
@@ -344,7 +344,7 @@ function buildSupportBundle(config, status) {
   const support = supportContact(config);
 
   const bundle = [
-    "OBTools Automated Backups Support Request",
+    "DataSafe Support Request",
     "=======================================",
     "",
     `Generated: ${new Date().toISOString()}`,
@@ -1022,13 +1022,15 @@ function runPowerShell(scriptName) {
 
 function createWindow() {
   writeLauncherLog("Creating main window.");
+  const appIconPath = path.join(APP_ROOT, "assets", "datasafe-icon.png");
   const window = new BrowserWindow({
     width: 1360,
     height: 920,
     minWidth: 1080,
     minHeight: 760,
     backgroundColor: "#f4efe7",
-    title: "OBTools Auto-Backup",
+    title: "DataSafe",
+    icon: appIconPath,
     show: true,
     webPreferences: {
       preload: path.join(APP_ROOT, "preload.js")
@@ -1068,7 +1070,7 @@ function createWindow() {
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     writeLauncherLog(`Renderer failed to load. code=${errorCode} description=${errorDescription} url=${validatedURL}`);
     dialog.showErrorBox(
-      "OBTools Automated Backups",
+      "DataSafe",
       `The app window failed to load.\n\n${errorDescription} (${errorCode})`
     );
   });
@@ -1079,7 +1081,7 @@ function createWindow() {
 
   window.webContents.on("preload-error", (_event, preloadPath, error) => {
     writeLauncherLog(`Preload error at ${preloadPath}: ${error.message}`);
-    dialog.showErrorBox("OBTools Automated Backups", `Preload failed: ${error.message}`);
+    dialog.showErrorBox("DataSafe", `Preload failed: ${error.message}`);
   });
 
   window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
@@ -1098,7 +1100,7 @@ function createWindow() {
 
   window.loadFile(indexPath).catch((error) => {
     writeLauncherLog(`loadFile failed: ${error.stack || error.message}`);
-    dialog.showErrorBox("OBTools Automated Backups", error.message);
+    dialog.showErrorBox("DataSafe", error.message);
   });
 }
 
@@ -1317,7 +1319,7 @@ setTimeout(() => {
 process.on("uncaughtException", (error) => {
   writeLauncherLog(`Uncaught exception: ${error.stack || error.message}`);
   if (app.isReady()) {
-    dialog.showErrorBox("OBTools Automated Backups", error.message);
+    dialog.showErrorBox("DataSafe", error.message);
   }
 });
 
@@ -1706,7 +1708,7 @@ ipcMain.handle("support:open-email", async () => {
     const support = supportContact(config);
     const channel = sanitizeUpdateChannel(config?.updates?.channel, app.getVersion());
 
-    const subject = encodeURIComponent(`OBTools Automated Backups Feature Request / Bug Report (${app.getVersion()})`);
+    const subject = encodeURIComponent(`DataSafe Feature Request / Bug Report (${app.getVersion()})`);
     const body = encodeURIComponent([
       `Hi ${support.name || "Support Team"},`,
       "",

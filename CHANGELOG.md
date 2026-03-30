@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.42 - 2026-03-29
+
+- Reworked the main screen into a cleaner app bar plus action-and-health layout so the most important information is easier for non-technical users to scan.
+- Moved version and Settings into the top app bar, simplified the main action area, and reduced duplicate backup-status messaging.
+- Renamed the app-facing brand to `DataSafe`, switched the backup destination folder name to `DataSafe Backup`, and wired in the new DataSafe icon for the app/build configuration.
+
 ## 1.0.10-beta.41 - 2026-03-29
 
 - Upgraded `Choose User Folders` so it detects multiple Windows user profiles, groups their folders in the picker, and preserves that user separation in the backup destination.
