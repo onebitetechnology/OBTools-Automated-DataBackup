@@ -236,8 +236,24 @@ function Copy-BackupItem($Job, [string]$RootPath) {
     throw "Backup source missing: $source"
   }
 
-  $safeName = ($Job.name -replace '[^a-zA-Z0-9_-]', '-').Trim('-')
-  $destination = Join-Path $RootPath $safeName
+  $destination = $null
+  if ($null -ne $Job.PSObject.Properties["relativeDestination"] -and $Job.relativeDestination) {
+    $segments = @($Job.relativeDestination | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") } | ForEach-Object {
+      (("$_") -replace '[^a-zA-Z0-9 _-]', '-').Trim()
+    })
+
+    if ($segments.Count -gt 0) {
+      $destination = $RootPath
+      foreach ($segment in $segments) {
+        $destination = Join-Path $destination $segment
+      }
+    }
+  }
+
+  if (-not $destination) {
+    $safeName = ($Job.name -replace '[^a-zA-Z0-9_-]', '-').Trim('-')
+    $destination = Join-Path $RootPath $safeName
+  }
 
   if ($Job.type -eq "folder") {
     New-Item -ItemType Directory -Force -Path $destination | Out-Null

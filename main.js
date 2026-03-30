@@ -691,56 +691,52 @@ function detectInstalledBrowsers() {
 }
 
 function detectUserFolders() {
-  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
-  if (!userProfile) {
+  const systemDrive = process.env.SystemDrive || "C:";
+  const usersRoot = path.join(`${systemDrive}\\`, "Users");
+  if (!fs.existsSync(usersRoot)) {
     return [];
   }
 
-  const checks = [
-    {
-      id: "desktop",
-      name: "Desktop",
-      path: path.join(userProfile, "Desktop"),
-      detail: "Files and shortcuts currently kept on the desktop"
-    },
-    {
-      id: "documents",
-      name: "Documents",
-      path: path.join(userProfile, "Documents"),
-      detail: "Documents, saved work files, and common exported files"
-    },
-    {
-      id: "downloads",
-      name: "Downloads",
-      path: path.join(userProfile, "Downloads"),
-      detail: "Items downloaded from browsers, email, and other apps"
-    },
-    {
-      id: "pictures",
-      name: "Pictures",
-      path: path.join(userProfile, "Pictures"),
-      detail: "Photos, screenshots, and saved images"
-    },
-    {
-      id: "music",
-      name: "Music",
-      path: path.join(userProfile, "Music"),
-      detail: "Music and audio stored in the user profile"
-    },
-    {
-      id: "videos",
-      name: "Videos",
-      path: path.join(userProfile, "Videos"),
-      detail: "Video files stored in the user profile"
-    }
+  const ignoredUsers = new Set([
+    "All Users",
+    "Default",
+    "Default User",
+    "Public",
+    "defaultuser0"
+  ]);
+
+  const folderChecks = [
+    ["desktop", "Desktop", "Files and shortcuts currently kept on the desktop"],
+    ["documents", "Documents", "Documents, saved work files, and common exported files"],
+    ["downloads", "Downloads", "Items downloaded from browsers, email, and other apps"],
+    ["pictures", "Pictures", "Photos, screenshots, and saved images"],
+    ["music", "Music", "Music and audio stored in the user profile"],
+    ["videos", "Videos", "Video files stored in the user profile"]
   ];
 
-  return checks
-    .filter((entry) => entry.path && fs.existsSync(entry.path))
-    .map((entry) => ({
-      ...entry,
-      type: "folder"
-    }));
+  let userDirectories = [];
+  try {
+    userDirectories = fs.readdirSync(usersRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !ignoredUsers.has(entry.name));
+  } catch (_error) {
+    return [];
+  }
+
+  userDirectories.sort((left, right) => left.name.localeCompare(right.name));
+
+  return userDirectories.flatMap((userDir) => {
+    const userRoot = path.join(usersRoot, userDir.name);
+    return folderChecks
+      .map(([id, name, detail]) => ({
+        id: `${userDir.name.toLowerCase()}-${id}`,
+        name,
+        userName: userDir.name,
+        path: path.join(userRoot, name),
+        detail,
+        type: "folder"
+      }))
+      .filter((entry) => entry.path && fs.existsSync(entry.path));
+  });
 }
 
 function simulateAction(scriptName) {

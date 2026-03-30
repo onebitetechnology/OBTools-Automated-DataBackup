@@ -12,7 +12,8 @@ const state = {
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: [],
-  detectedUserFolders: []
+  detectedUserFolders: [],
+  pendingAddItem: null
 };
 
 let backupProgressTimer = null;
@@ -120,6 +121,13 @@ const el = {
   userFolderModalList: document.getElementById("user-folder-modal-list"),
   userFolderModalClose: document.getElementById("user-folder-modal-close"),
   userFolderModalApply: document.getElementById("user-folder-modal-apply"),
+  addItemModal: document.getElementById("add-item-modal"),
+  addItemChooseFolder: document.getElementById("add-item-choose-folder"),
+  addItemChooseFile: document.getElementById("add-item-choose-file"),
+  addItemSelectionName: document.getElementById("add-item-selection-name"),
+  addItemSelectionPath: document.getElementById("add-item-selection-path"),
+  addItemModalClose: document.getElementById("add-item-modal-close"),
+  addItemModalApply: document.getElementById("add-item-modal-apply"),
   termsGate: document.getElementById("terms-gate"),
   termsConfirm: document.getElementById("terms-confirm"),
   termsAccept: document.getElementById("terms-accept"),
@@ -702,6 +710,28 @@ function closeResultModal() {
   renderResultProgress(null);
 }
 
+function confirmRemoveJob(job) {
+  showResultModal({
+    title: "Remove Backup Item?",
+    message: `Remove ${job.name || "this backup item"} from the backup list? This does not delete any files from the backup drive, but it will stop future backups for this item.`,
+    secondaryAction: {
+      label: "Remove",
+      onClick: async () => {
+        state.config.jobs = state.config.jobs.filter((candidate) => candidate.id !== job.id);
+        renderJobs();
+        closeResultModal();
+        try {
+          await refreshStorageAnalysis();
+        } catch (_error) {
+          state.storage = null;
+          renderStorageAnalysis();
+        }
+      }
+    },
+    closeLabel: "Cancel"
+  });
+}
+
 function renderResultProgress(progress = null) {
   if (!progress) {
     el.resultProgressShell.hidden = true;
@@ -775,29 +805,50 @@ function renderUserFolderModal() {
   el.userFolderModalMessage.textContent = "Check the user folders you want to include in backups.";
   el.userFolderModalApply.disabled = false;
 
-  state.detectedUserFolders.forEach((folder) => {
-    const row = document.createElement("label");
-    row.className = "browser-option";
+  const groupedFolders = state.detectedUserFolders.reduce((groups, folder) => {
+    const key = folder.userName || "Current User";
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(folder);
+    return groups;
+  }, new Map());
 
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = true;
-    input.value = folder.id;
+  groupedFolders.forEach((folders, userName) => {
+    const group = document.createElement("section");
+    group.className = "folder-group";
 
-    const copy = document.createElement("div");
-    copy.className = "browser-option-copy";
+    const heading = document.createElement("div");
+    heading.className = "folder-group-title";
+    heading.textContent = userName;
+    group.appendChild(heading);
 
-    const title = document.createElement("div");
-    title.className = "browser-option-title";
-    title.textContent = folder.name;
+    folders.forEach((folder) => {
+      const row = document.createElement("label");
+      row.className = "browser-option";
 
-    const detail = document.createElement("div");
-    detail.className = "browser-option-detail";
-    detail.textContent = `${folder.detail} | ${folder.path}`;
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = true;
+      input.value = folder.id;
 
-    copy.append(title, detail);
-    row.append(input, copy);
-    el.userFolderModalList.appendChild(row);
+      const copy = document.createElement("div");
+      copy.className = "browser-option-copy";
+
+      const title = document.createElement("div");
+      title.className = "browser-option-title";
+      title.textContent = folder.name;
+
+      const detail = document.createElement("div");
+      detail.className = "browser-option-detail";
+      detail.textContent = `${folder.detail} | ${folder.path}`;
+
+      copy.append(title, detail);
+      row.append(input, copy);
+      group.appendChild(row);
+    });
+
+    el.userFolderModalList.appendChild(group);
   });
 }
 
@@ -817,6 +868,77 @@ function openUserFolderModal() {
 
 function closeUserFolderModal() {
   el.userFolderModal.hidden = true;
+}
+
+function renderAddItemModal() {
+  const pending = state.pendingAddItem;
+  if (!pending) {
+    el.addItemSelectionName.textContent = "Nothing selected yet";
+    el.addItemSelectionPath.textContent = "Choose a file or folder to continue.";
+    el.addItemModalApply.disabled = true;
+    return;
+  }
+
+  el.addItemSelectionName.textContent = pending.name || "Selected Item";
+  el.addItemSelectionPath.textContent = pending.path || "";
+  el.addItemModalApply.disabled = !pending.path;
+}
+
+function openAddItemModal() {
+  state.pendingAddItem = null;
+  renderAddItemModal();
+  el.addItemModal.hidden = false;
+}
+
+function closeAddItemModal() {
+  el.addItemModal.hidden = true;
+}
+
+async function chooseItemForAdd(type) {
+  if (!window.onebiteDesktop) {
+    return;
+  }
+
+  const selected = await window.onebiteDesktop.pickPath(type);
+  if (!selected) {
+    return;
+  }
+
+  const selectedPath = typeof selected === "string" ? selected : selected.path || "";
+  const selectedType = typeof selected === "string" ? type : (selected.type || type);
+  const normalizedName = selectedPath
+    ? selectedPath.split(/[\\/]/).filter(Boolean).pop()
+    : "New Backup Item";
+
+  state.pendingAddItem = {
+    name: normalizedName || "New Backup Item",
+    path: selectedPath,
+    type: selectedType === "file" ? "file" : "folder",
+    enabled: true
+  };
+
+  renderAddItemModal();
+}
+
+function addSelectedItemFromModal() {
+  if (!state.pendingAddItem?.path) {
+    return;
+  }
+
+  state.config.jobs.push({
+    id: `job-${Date.now()}`,
+    name: state.pendingAddItem.name || "New Backup Item",
+    path: state.pendingAddItem.path,
+    type: state.pendingAddItem.type || "folder",
+    enabled: true
+  });
+
+  renderJobs();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
+  closeAddItemModal();
 }
 
 function addDetectedBrowserJobs() {
@@ -873,9 +995,12 @@ function addDetectedUserFolderJobs() {
 
     state.config.jobs.push({
       id: `job-${Date.now()}-${folder.id}`,
-      name: folder.name,
+      name: folder.userName ? `${folder.userName} ${folder.name}` : folder.name,
       path: folder.path,
       type: "folder",
+      sourceKind: "user-folder",
+      userName: folder.userName || "",
+      relativeDestination: ["Users", folder.userName || "Current User", folder.name],
       enabled: true
     });
   });
@@ -1097,8 +1222,7 @@ function renderJobs() {
     });
 
     card.querySelector("[data-action='remove']").addEventListener("click", () => {
-      state.config.jobs = state.config.jobs.filter((candidate) => candidate.id !== job.id);
-      renderJobs();
+      confirmRemoveJob(job);
     });
 
     el.jobsList.appendChild(fragment);
@@ -1967,20 +2091,7 @@ el.browseDestination.addEventListener("click", () => {
 });
 el.openSettings.addEventListener("click", openSettingsDrawer);
 el.closeSettings.addEventListener("click", closeSettingsDrawer);
-el.addJob.addEventListener("click", () => {
-  state.config.jobs.push({
-    id: `job-${Date.now()}`,
-    name: "New Backup Item",
-    path: "",
-    type: "folder",
-    enabled: true
-  });
-  renderJobs();
-  refreshStorageAnalysis().catch(() => {
-    state.storage = null;
-    renderStorageAnalysis();
-  });
-});
+el.addJob.addEventListener("click", openAddItemModal);
 el.detectUserFolders.addEventListener("click", () => {
   detectUserFolders().catch((error) => {
     showResultModal({
@@ -2001,6 +2112,24 @@ el.browserModalClose.addEventListener("click", closeBrowserModal);
 el.browserModalApply.addEventListener("click", addDetectedBrowserJobs);
 el.userFolderModalClose.addEventListener("click", closeUserFolderModal);
 el.userFolderModalApply.addEventListener("click", addDetectedUserFolderJobs);
+el.addItemChooseFolder.addEventListener("click", () => {
+  chooseItemForAdd("folder").catch((error) => {
+    showResultModal({
+      title: "Choose Folder",
+      message: error.message
+    });
+  });
+});
+el.addItemChooseFile.addEventListener("click", () => {
+  chooseItemForAdd("file").catch((error) => {
+    showResultModal({
+      title: "Choose File",
+      message: error.message
+    });
+  });
+});
+el.addItemModalClose.addEventListener("click", closeAddItemModal);
+el.addItemModalApply.addEventListener("click", addSelectedItemFromModal);
 el.termsConfirm.addEventListener("change", () => {
   el.termsAccept.disabled = !el.termsConfirm.checked;
 });

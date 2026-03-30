@@ -202,6 +202,14 @@ select {
   flex-wrap: wrap;
 }
 
+.hero-plan-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: min(100%, 560px);
+  margin: 0 auto;
+}
+
 .app-settings-button {
   display: inline-flex;
   align-items: center;
@@ -1309,10 +1317,52 @@ select:focus {
   width: min(760px, calc(100vw - 32px));
 }
 
+.add-item-modal {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.add-item-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+
+.add-item-selection-card {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(112, 168, 255, 0.12);
+  background: rgba(15, 31, 74, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.add-item-selection-card .summary-value,
+.add-item-selection-card .hint {
+  margin: 0;
+}
+
 .browser-list {
   display: grid;
   gap: 12px;
   margin: 0 0 18px;
+}
+
+.folder-group {
+  display: grid;
+  gap: 10px;
+}
+
+.folder-group-title {
+  color: #eef6ff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.82;
+  padding: 2px 4px 0;
 }
 
 .browser-option {

@@ -27,6 +27,16 @@
               <button id="run-backup" class="primary">Run Backup Now</button>
               <button id="run-cloud-check" class="secondary">Check Cloud Sync</button>
             </div>
+            <div class="hero-plan-summary">
+              <article class="summary-card compact-summary">
+                <p class="metric-label">Retention Plan</p>
+                <p id="settings-retention-summary" class="summary-value">3 days</p>
+              </article>
+              <article class="summary-card compact-summary">
+                <p class="metric-label">Automation</p>
+                <p id="settings-schedule-summary" class="summary-value">Manual only</p>
+              </article>
+            </div>
           </div>
         </div>
         <div id="backup-status-card" class="hero-status card status-good">
@@ -122,25 +132,6 @@
           <input id="destination-label" type="hidden">
         </section>
 
-        <section class="card panel">
-          <div class="panel-head">
-            <div>
-              <h3>Review your backup plan</h3>
-              <p class="section-note">Confirm the retention plan and whether automation is on before handing the app to a customer.</p>
-            </div>
-          </div>
-          <div class="settings-summary-grid two-up">
-            <article class="summary-card">
-              <p class="metric-label">Retention Plan</p>
-              <p id="settings-retention-summary" class="summary-value">3 days</p>
-            </article>
-            <article class="summary-card">
-              <p class="metric-label">Automation</p>
-              <p id="settings-schedule-summary" class="summary-value">Manual only</p>
-            </article>
-          </div>
-          <p class="section-note top-gap">Advanced settings still includes reminders, scheduling, updates, and support logs, but customers can complete normal setup from the main screen.</p>
-        </section>
       </main>
     </div>
 
@@ -526,6 +517,27 @@
         <div class="terms-actions result-actions">
           <button id="user-folder-modal-close" class="secondary" type="button">Close</button>
           <button id="user-folder-modal-apply" class="primary" type="button">Add Selected</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="add-item-modal" class="terms-gate" hidden>
+      <div class="terms-backdrop"></div>
+      <section class="terms-modal add-item-modal">
+        <h2>Add Backup Item</h2>
+        <p class="terms-intro">Choose a file or folder first, and the app will add it to the backup list automatically.</p>
+        <div class="add-item-actions">
+          <button id="add-item-choose-folder" class="secondary" type="button">Choose Folder</button>
+          <button id="add-item-choose-file" class="secondary" type="button">Choose File</button>
+        </div>
+        <div class="add-item-selection-card">
+          <p class="metric-label">Selected Item</p>
+          <p id="add-item-selection-name" class="summary-value">Nothing selected yet</p>
+          <p id="add-item-selection-path" class="hint">Choose a file or folder to continue.</p>
+        </div>
+        <div class="terms-actions result-actions">
+          <button id="add-item-modal-close" class="secondary" type="button">Close</button>
+          <button id="add-item-modal-apply" class="primary" type="button" disabled>Add Selected</button>
         </div>
       </section>
     </div>

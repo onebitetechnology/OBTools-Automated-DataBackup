@@ -2,6 +2,13 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.41 - 2026-03-29
+
+- Upgraded `Choose User Folders` so it detects multiple Windows user profiles, groups their folders in the picker, and preserves that user separation in the backup destination.
+- Changed `Add Item` into a guided picker modal so users choose a file or folder first, then add one clean backup item instead of creating empty rows.
+- Added a confirmation popup before removing a backup target and moved the retention/automation summary into the hero while removing the old bottom review panel.
+- Updated scheduled Windows tasks to launch PowerShell hidden so background automations no longer show a console window to end users.
+
 ## 1.0.10-beta.40 - 2026-03-29
 
 - Replaced the generic browser finder button with a clearer `Choose Browser Data` flow and kept browser items labeled as `Browser Data` instead of generic file or folder types.
