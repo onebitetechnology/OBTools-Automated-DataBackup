@@ -11,7 +11,8 @@ const state = {
   appearanceDraftLogoDataUrl: null,
   actionInFlight: false,
   termsBypassedForSession: false,
-  detectedBrowsers: []
+  detectedBrowsers: [],
+  detectedUserFolders: []
 };
 
 let backupProgressTimer = null;
@@ -106,6 +107,7 @@ const el = {
   resultModalSecondary: document.getElementById("result-modal-secondary"),
   resultModalClose: document.getElementById("result-modal-close"),
   addJob: document.getElementById("add-job"),
+  detectUserFolders: document.getElementById("detect-user-folders"),
   detectBrowsers: document.getElementById("detect-browsers"),
   jobTemplate: document.getElementById("job-template"),
   browserModal: document.getElementById("browser-modal"),
@@ -113,6 +115,11 @@ const el = {
   browserModalList: document.getElementById("browser-modal-list"),
   browserModalClose: document.getElementById("browser-modal-close"),
   browserModalApply: document.getElementById("browser-modal-apply"),
+  userFolderModal: document.getElementById("user-folder-modal"),
+  userFolderModalMessage: document.getElementById("user-folder-modal-message"),
+  userFolderModalList: document.getElementById("user-folder-modal-list"),
+  userFolderModalClose: document.getElementById("user-folder-modal-close"),
+  userFolderModalApply: document.getElementById("user-folder-modal-apply"),
   termsGate: document.getElementById("terms-gate"),
   termsConfirm: document.getElementById("terms-confirm"),
   termsAccept: document.getElementById("terms-accept"),
@@ -168,6 +175,10 @@ async function desktopRequest(url, options = {}) {
 
   if (url === "/api/detect-browsers") {
     return window.onebiteDesktop.detectBrowsers();
+  }
+
+  if (url === "/api/detect-user-folders") {
+    return window.onebiteDesktop.detectUserFolders();
   }
 
   if (url === "/api/storage-analysis") {
@@ -752,6 +763,44 @@ function renderBrowserModal() {
   });
 }
 
+function renderUserFolderModal() {
+  el.userFolderModalList.innerHTML = "";
+
+  if (!state.detectedUserFolders.length) {
+    el.userFolderModalMessage.textContent = "No common user folders were found on this PC.";
+    el.userFolderModalApply.disabled = true;
+    return;
+  }
+
+  el.userFolderModalMessage.textContent = "Check the user folders you want to include in backups.";
+  el.userFolderModalApply.disabled = false;
+
+  state.detectedUserFolders.forEach((folder) => {
+    const row = document.createElement("label");
+    row.className = "browser-option";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = true;
+    input.value = folder.id;
+
+    const copy = document.createElement("div");
+    copy.className = "browser-option-copy";
+
+    const title = document.createElement("div");
+    title.className = "browser-option-title";
+    title.textContent = folder.name;
+
+    const detail = document.createElement("div");
+    detail.className = "browser-option-detail";
+    detail.textContent = `${folder.detail} | ${folder.path}`;
+
+    copy.append(title, detail);
+    row.append(input, copy);
+    el.userFolderModalList.appendChild(row);
+  });
+}
+
 function openBrowserModal() {
   renderBrowserModal();
   el.browserModal.hidden = false;
@@ -759,6 +808,15 @@ function openBrowserModal() {
 
 function closeBrowserModal() {
   el.browserModal.hidden = true;
+}
+
+function openUserFolderModal() {
+  renderUserFolderModal();
+  el.userFolderModal.hidden = false;
+}
+
+function closeUserFolderModal() {
+  el.userFolderModal.hidden = true;
 }
 
 function addDetectedBrowserJobs() {
@@ -796,10 +854,50 @@ function addDetectedBrowserJobs() {
   closeBrowserModal();
 }
 
+function addDetectedUserFolderJobs() {
+  const selectedIds = Array.from(el.userFolderModalList.querySelectorAll("input[type='checkbox']:checked"))
+    .map((input) => input.value);
+
+  if (!selectedIds.length) {
+    closeUserFolderModal();
+    return;
+  }
+
+  const existingPaths = new Set(state.config.jobs.map((job) => String(job.path || "").toLowerCase()));
+  const toAdd = state.detectedUserFolders.filter((folder) => selectedIds.includes(folder.id));
+
+  toAdd.forEach((folder) => {
+    if (existingPaths.has(folder.path.toLowerCase())) {
+      return;
+    }
+
+    state.config.jobs.push({
+      id: `job-${Date.now()}-${folder.id}`,
+      name: folder.name,
+      path: folder.path,
+      type: "folder",
+      enabled: true
+    });
+  });
+
+  renderJobs();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
+  closeUserFolderModal();
+}
+
 async function detectBrowsers() {
   const payload = await request("/api/detect-browsers");
   state.detectedBrowsers = payload.browsers || [];
   openBrowserModal();
+}
+
+async function detectUserFolders() {
+  const payload = await request("/api/detect-user-folders");
+  state.detectedUserFolders = payload.folders || [];
+  openUserFolderModal();
 }
 
 function updateModalSecondaryAction() {
@@ -879,16 +977,63 @@ function setActionButtonsDisabled(disabled) {
   renderMeta();
 }
 
+function displayJobType(job) {
+  if (job.sourceKind === "browser") {
+    return "Browser Data";
+  }
+
+  if (job.type === "file") {
+    return "File";
+  }
+
+  return "Folder";
+}
+
+async function syncJobTypeFromPath(job, typeDisplayInput) {
+  if (job.sourceKind === "browser") {
+    job.type = "folder";
+    if (typeDisplayInput) {
+      typeDisplayInput.value = displayJobType(job);
+    }
+    return;
+  }
+
+  if (!job.path || !window.onebiteDesktop?.inspectPath) {
+    if (typeDisplayInput) {
+      typeDisplayInput.value = displayJobType(job);
+    }
+    return;
+  }
+
+  try {
+    const inspection = await window.onebiteDesktop.inspectPath(job.path);
+    if (inspection?.type === "file" || inspection?.type === "folder") {
+      job.type = inspection.type;
+    }
+  } catch (_error) {
+    // Keep the existing inferred type when the path can't be inspected.
+  }
+
+  if (typeDisplayInput) {
+    typeDisplayInput.value = displayJobType(job);
+  }
+}
+
 function renderJobs() {
   el.jobsList.innerHTML = "";
 
   state.config.jobs.forEach((job) => {
     const fragment = el.jobTemplate.content.cloneNode(true);
     const card = fragment.querySelector(".job-card");
-    const typeInput = card.querySelector("[data-field='type']");
+    const typeDisplayInput = card.querySelector("[data-field='type-display']");
 
     for (const input of card.querySelectorAll("[data-field]")) {
       const field = input.dataset.field;
+      if (field === "type-display") {
+        input.value = displayJobType(job);
+        continue;
+      }
+
       if (input.type === "checkbox") {
         input.checked = Boolean(job[field]);
       } else {
@@ -900,18 +1045,24 @@ function renderJobs() {
       });
     }
 
-    if (job.sourceKind === "browser" && typeInput) {
-      typeInput.innerHTML = '<option value="folder">Browser Data</option>';
-      typeInput.value = "folder";
-      typeInput.disabled = true;
-    } else if (typeInput) {
-      typeInput.disabled = false;
-      typeInput.value = job.type || "folder";
+    if (typeDisplayInput) {
+      typeDisplayInput.value = displayJobType(job);
     }
 
     const browseButton = card.querySelector("[data-action='browse']");
+    const pathInput = card.querySelector("[data-field='path']");
     if (job.sourceKind === "browser") {
       browseButton.textContent = "View Path";
+    }
+
+    if (pathInput && job.sourceKind !== "browser") {
+      pathInput.addEventListener("blur", () => {
+        syncJobTypeFromPath(job, typeDisplayInput).catch(() => {
+          if (typeDisplayInput) {
+            typeDisplayInput.value = displayJobType(job);
+          }
+        });
+      });
     }
 
     browseButton.addEventListener("click", async () => {
@@ -932,8 +1083,17 @@ function renderJobs() {
         return;
       }
 
-      job.path = selected;
-      card.querySelector("[data-field='path']").value = selected;
+      if (typeof selected === "string") {
+        job.path = selected;
+      } else {
+        job.path = selected.path || "";
+        if (selected.type === "file" || selected.type === "folder") {
+          job.type = selected.type;
+        }
+      }
+
+      pathInput.value = job.path;
+      await syncJobTypeFromPath(job, typeDisplayInput);
     });
 
     card.querySelector("[data-action='remove']").addEventListener("click", () => {
@@ -942,6 +1102,11 @@ function renderJobs() {
     });
 
     el.jobsList.appendChild(fragment);
+    syncJobTypeFromPath(job, typeDisplayInput).catch(() => {
+      if (typeDisplayInput) {
+        typeDisplayInput.value = displayJobType(job);
+      }
+    });
   });
 }
 
@@ -1816,6 +1981,14 @@ el.addJob.addEventListener("click", () => {
     renderStorageAnalysis();
   });
 });
+el.detectUserFolders.addEventListener("click", () => {
+  detectUserFolders().catch((error) => {
+    showResultModal({
+      title: "User Folder Detection",
+      message: error.message
+    });
+  });
+});
 el.detectBrowsers.addEventListener("click", () => {
   detectBrowsers().catch((error) => {
     showResultModal({
@@ -1826,6 +1999,8 @@ el.detectBrowsers.addEventListener("click", () => {
 });
 el.browserModalClose.addEventListener("click", closeBrowserModal);
 el.browserModalApply.addEventListener("click", addDetectedBrowserJobs);
+el.userFolderModalClose.addEventListener("click", closeUserFolderModal);
+el.userFolderModalApply.addEventListener("click", addDetectedUserFolderJobs);
 el.termsConfirm.addEventListener("change", () => {
   el.termsAccept.disabled = !el.termsConfirm.checked;
 });

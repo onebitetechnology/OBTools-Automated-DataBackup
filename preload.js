@@ -24,8 +24,10 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
     return () => ipcRenderer.removeListener("backup:progress", listener);
   },
   detectBrowsers: () => ipcRenderer.invoke("browsers:detect"),
+  detectUserFolders: () => ipcRenderer.invoke("folders:detect-user-folders"),
   analyzeStorage: () => ipcRenderer.invoke("storage:analyze"),
   pickPath: (type) => ipcRenderer.invoke("job:pick-path", type),
+  inspectPath: (targetPath) => ipcRenderer.invoke("job:inspect-path", targetPath),
   pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder"),
   pickBrandingLogo: () => ipcRenderer.invoke("branding:pick-logo")
 });

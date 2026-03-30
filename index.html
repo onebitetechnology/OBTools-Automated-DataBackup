@@ -30,17 +30,19 @@
           </div>
         </div>
         <div id="backup-status-card" class="hero-status card status-good">
-          <div class="hero-status-topbar">
-            <div id="version-status-pill" class="version-status-pill status-good">
-              <span id="version-status-light" class="version-status-light status-good" aria-hidden="true"></span>
-              <span id="build-version" class="build-version">Version loading...</span>
+          <div class="hero-status-headerline">
+            <p class="status-label">Backup Status</p>
+            <div class="hero-status-topbar">
+              <div id="version-status-pill" class="version-status-pill status-good">
+                <span id="version-status-light" class="version-status-light status-good" aria-hidden="true"></span>
+                <span id="build-version" class="build-version">Version loading...</span>
+              </div>
+              <button id="open-settings" class="app-settings-button ghost" type="button">
+                <span class="settings-gear" aria-hidden="true">⚙</span>
+                <span>Settings</span>
+              </button>
             </div>
-            <button id="open-settings" class="app-settings-button ghost" type="button">
-              <span class="settings-gear" aria-hidden="true">⚙</span>
-              <span>Settings</span>
-            </button>
           </div>
-          <p class="status-label">Backup Status</p>
           <h2 id="protection-state">Loading</h2>
           <p id="protection-message">Checking backup health.</p>
           <div class="status-strip">
@@ -68,48 +70,22 @@
               <ul id="cloud-recommendations" class="recommendations"></ul>
             </article>
           </div>
-          <p class="hero-status-note">Most recent backup: <span id="last-backup-detail">Never</span></p>
+          <span id="last-backup-detail" hidden>Never</span>
           <p id="last-backup-message" class="metric-note">No backup has been completed yet.</p>
         </div>
       </header>
 
       <main class="dashboard">
-        <section class="card panel setup-panel wide">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Quick Setup</p>
-              <h3>Your backup in three steps</h3>
-            </div>
-          </div>
-          <div class="steps-grid">
-            <article class="step-card">
-              <p class="step-number">01</p>
-              <h4>Pick what to protect</h4>
-              <p>Add folders, files, and bookmark exports that matter most.</p>
-            </article>
-            <article class="step-card">
-              <p class="step-number">02</p>
-              <h4>Choose a backup drive</h4>
-              <p>Choose the right USB or external HDD and let the app create its backup folder automatically.</p>
-            </article>
-            <article class="step-card">
-              <p class="step-number">03</p>
-              <h4>Set automatic reminders</h4>
-              <p>Get nudges if a backup hasn’t happened recently enough.</p>
-            </article>
-          </div>
-        </section>
-
         <section class="card panel">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Step 1</p>
               <h3>Choose what gets backed up</h3>
               <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
             </div>
           </div>
           <div class="panel-actions-underhead">
-            <button id="detect-browsers" class="secondary" type="button">Find Browsers</button>
+            <button id="detect-user-folders" class="secondary" type="button">Choose User Folders</button>
+            <button id="detect-browsers" class="secondary" type="button">Choose Browser Data</button>
             <button id="add-job" class="ghost">Add Item</button>
           </div>
           <div id="jobs-list" class="jobs-list"></div>
@@ -118,7 +94,6 @@
         <section class="card panel">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Step 2</p>
               <h3>Choose a backup destination</h3>
               <p class="section-note">Choose the external drive where backups should live. The app will automatically create and use an <strong>OB Tools Backup</strong> folder on that drive.</p>
             </div>
@@ -150,7 +125,6 @@
         <section class="card panel">
           <div class="panel-head">
             <div>
-              <p class="eyebrow">Step 3</p>
               <h3>Review your backup plan</h3>
               <p class="section-note">Confirm the retention plan and whether automation is on before handing the app to a customer.</p>
             </div>
@@ -179,10 +153,7 @@
           </label>
           <label>
             <span>Type</span>
-            <select data-field="type">
-              <option value="folder">Folder</option>
-              <option value="file">File</option>
-            </select>
+            <input data-field="type-display" type="text" readonly>
           </label>
           <label class="checkbox inline-toggle">
             <input data-field="enabled" type="checkbox">
@@ -542,6 +513,19 @@
         <div class="terms-actions result-actions">
           <button id="browser-modal-close" class="secondary" type="button">Close</button>
           <button id="browser-modal-apply" class="primary" type="button">Add Selected</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="user-folder-modal" class="terms-gate" hidden>
+      <div class="terms-backdrop"></div>
+      <section class="terms-modal browser-modal">
+        <h2>User Folder Backups</h2>
+        <p id="user-folder-modal-message" class="terms-intro">Check the user folders you want to include in backups.</p>
+        <div id="user-folder-modal-list" class="browser-list"></div>
+        <div class="terms-actions result-actions">
+          <button id="user-folder-modal-close" class="secondary" type="button">Close</button>
+          <button id="user-folder-modal-apply" class="primary" type="button">Add Selected</button>
         </div>
       </section>
     </div>

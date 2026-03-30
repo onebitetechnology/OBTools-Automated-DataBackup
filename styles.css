@@ -142,9 +142,9 @@ select {
 
 .hero-topbar {
   display: grid;
-  grid-template-columns: 132px minmax(0, 1fr) 132px;
+  grid-template-columns: 88px minmax(0, 1fr) 88px;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   width: 100%;
 }
 
@@ -172,8 +172,9 @@ select {
 }
 
 .hero-brand-name {
-  font-size: clamp(1.55rem, 2.3vw, 2.2rem);
+  font-size: clamp(1.35rem, 2vw, 1.9rem);
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .hero-corner-logo {
@@ -233,12 +234,19 @@ select {
   gap: 12px;
 }
 
+.hero-status-headerline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .hero-status-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-left: auto;
 }
 
 .version-status-pill {
@@ -263,7 +271,7 @@ select {
 }
 
 .status-label {
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 0.98rem;
   font-weight: 700;
   letter-spacing: 0.16em;
@@ -647,12 +655,6 @@ button:disabled {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-.hero-status-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
 .metric-value {
   margin: 6px 0;
   font-size: 1.5rem;
@@ -774,45 +776,6 @@ button:disabled {
   margin-top: 14px;
 }
 
-.setup-panel {
-  background:
-    linear-gradient(180deg, rgba(15, 30, 74, 0.44), rgba(8, 16, 42, 0.42));
-}
-
-.steps-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.step-card {
-  padding: 14px;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(18, 35, 85, 0.3), rgba(9, 20, 48, 0.34));
-  border: 1px solid rgba(112, 168, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-.step-card h4 {
-  margin: 0 0 6px;
-  font-size: 0.98rem;
-}
-
-.step-card p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.4;
-  font-size: 0.9rem;
-}
-
-.step-number {
-  margin: 0 0 8px;
-  color: #78dfff;
-  font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", sans-serif;
-  font-size: 0.82rem;
-  letter-spacing: 0.12em;
-}
-
 .snapshot-list,
 .recommendations {
   margin: 10px 0 0;
@@ -878,13 +841,15 @@ select:focus {
   width: min(920px, calc(100vw - 40px));
   max-height: calc(100vh - 36px);
   padding: 18px;
-  overflow: auto;
+  overflow: hidden;
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(11, 23, 58, 0.72), rgba(8, 18, 45, 0.58));
   border: 1px solid rgba(112, 168, 255, 0.2);
   box-shadow: 0 30px 90px rgba(1, 7, 24, 0.5);
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-modal-header {
@@ -918,6 +883,29 @@ select:focus {
   padding-top: 14px;
   display: grid;
   gap: 12px;
+  overflow: auto;
+  min-height: 0;
+  padding-right: 6px;
+}
+
+.settings-modal-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.settings-modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-modal-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(112, 168, 255, 0.22);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.settings-modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(112, 168, 255, 0.34);
+  background-clip: padding-box;
 }
 
 .settings-section {
@@ -1498,7 +1486,6 @@ select:focus {
   .grid.three,
   .insights,
   .hero-status-details,
-  .steps-grid,
   .status-strip,
   .settings-summary-grid,
   .storage-analysis-grid {
@@ -1524,13 +1511,18 @@ select:focus {
     text-align: left;
   }
 
+  .hero-copy-actions {
+    flex-direction: column;
+  }
+
+  .hero-status-headerline,
   .hero-status-topbar {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .hero-copy-actions {
-    flex-direction: column;
+  .hero-status-topbar {
+    margin-left: 0;
   }
 
   .result-progress-times {

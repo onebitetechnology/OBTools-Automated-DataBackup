@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.40 - 2026-03-29
+
+- Replaced the generic browser finder button with a clearer `Choose Browser Data` flow and kept browser items labeled as `Browser Data` instead of generic file or folder types.
+- Added a matching `Choose User Folders` picker that detects common Windows user folders, pre-selects them, and lets the user include only the folders they want.
+- Made the visible backup item `Type` field app-driven so the UI reflects `Browser Data`, `Folder`, or `File` based on the selected path instead of asking the user to guess.
+
 ## 1.0.10-beta.39 - 2026-03-28
 
 - Removed the old bottom `Step 4` review panel and moved backup review details into the hero area where they are visible immediately on launch.

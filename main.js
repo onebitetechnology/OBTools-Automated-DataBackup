@@ -690,6 +690,59 @@ function detectInstalledBrowsers() {
     }));
 }
 
+function detectUserFolders() {
+  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
+  if (!userProfile) {
+    return [];
+  }
+
+  const checks = [
+    {
+      id: "desktop",
+      name: "Desktop",
+      path: path.join(userProfile, "Desktop"),
+      detail: "Files and shortcuts currently kept on the desktop"
+    },
+    {
+      id: "documents",
+      name: "Documents",
+      path: path.join(userProfile, "Documents"),
+      detail: "Documents, saved work files, and common exported files"
+    },
+    {
+      id: "downloads",
+      name: "Downloads",
+      path: path.join(userProfile, "Downloads"),
+      detail: "Items downloaded from browsers, email, and other apps"
+    },
+    {
+      id: "pictures",
+      name: "Pictures",
+      path: path.join(userProfile, "Pictures"),
+      detail: "Photos, screenshots, and saved images"
+    },
+    {
+      id: "music",
+      name: "Music",
+      path: path.join(userProfile, "Music"),
+      detail: "Music and audio stored in the user profile"
+    },
+    {
+      id: "videos",
+      name: "Videos",
+      path: path.join(userProfile, "Videos"),
+      detail: "Video files stored in the user profile"
+    }
+  ];
+
+  return checks
+    .filter((entry) => entry.path && fs.existsSync(entry.path))
+    .map((entry) => ({
+      ...entry,
+      type: "folder"
+    }));
+}
+
 function simulateAction(scriptName) {
   const { statusPath } = dataPaths();
   const status = readJson(statusPath);
@@ -1352,7 +1405,36 @@ ipcMain.handle("job:pick-path", async (_event, type) => {
     return null;
   }
 
-  return result.filePaths[0];
+  return {
+    path: result.filePaths[0],
+    type: type === "file" ? "file" : "folder"
+  };
+});
+
+ipcMain.handle("job:inspect-path", async (_event, targetPath) => {
+  if (!targetPath) {
+    return { type: null };
+  }
+
+  const expandedPath = expandEnvironmentVariables(targetPath);
+  if (!expandedPath || !fs.existsSync(expandedPath)) {
+    return { type: null };
+  }
+
+  try {
+    const stats = fs.statSync(expandedPath);
+    if (stats.isFile()) {
+      return { type: "file" };
+    }
+
+    if (stats.isDirectory()) {
+      return { type: "folder" };
+    }
+  } catch (_error) {
+    return { type: null };
+  }
+
+  return { type: null };
 });
 
 ipcMain.handle("destination:pick-folder", async () => {
@@ -1404,6 +1486,12 @@ ipcMain.handle("branding:pick-logo", async () => {
 ipcMain.handle("browsers:detect", async () => {
   return {
     browsers: detectInstalledBrowsers()
+  };
+});
+
+ipcMain.handle("folders:detect-user-folders", async () => {
+  return {
+    folders: detectUserFolders()
   };
 });
 
