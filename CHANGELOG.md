@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.47 - 2026-04-01
+
+- Reworked the Settings navigation so the left rail now uses an explicit Ticket Listing-style section list instead of relying on a generated placeholder shell.
+- Updated panel switching so the left-side section buttons control which settings panel is shown on the right, matching the expected Appearance/Retention/Automation-style behavior.
+- Kept the current DataSafe settings content intact while making the navigation model much closer to the Ticket Listing project.
+
 ## 1.0.10-beta.46 - 2026-04-01
 
 - Added multi-drive awareness so DataSafe can remember known backup drives, compare their snapshot freshness, and notice when more than one known drive is connected.

@@ -1610,7 +1610,7 @@ function setActiveSettingsPanel(nextPanelId) {
     return;
   }
 
-  const panels = [...panelStage.querySelectorAll(".settings-stage-panel")];
+  const panels = [...panelStage.querySelectorAll(".settings-panel")];
   if (!panels.length) {
     return;
   }
@@ -1626,7 +1626,9 @@ function setActiveSettingsPanel(nextPanelId) {
   });
 
   el.settingsNav?.querySelectorAll(".settings-nav-button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.panelId === resolvedPanelId);
+    const active = button.dataset.panelTarget === resolvedPanelId;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-current", active ? "page" : "false");
   });
 
   panelStage.scrollTop = 0;
@@ -1639,30 +1641,16 @@ function initializeSettingsPanels() {
     return;
   }
 
-  const panels = [...panelStage.querySelectorAll(".settings-stage-panel")];
-  nav.innerHTML = `
-    <section class="settings-nav-card">
-      <div class="settings-nav-title">Control Room</div>
-      <div class="settings-nav-list" id="settings-nav-list"></div>
-    </section>
-  `;
+  const panels = [...panelStage.querySelectorAll(".settings-panel")];
+  const buttons = [...nav.querySelectorAll(".settings-nav-button")];
+  if (!panels.length || !buttons.length) {
+    return;
+  }
 
-  const list = nav.querySelector("#settings-nav-list");
-  panels.forEach((panel) => {
-    const label = panel.dataset.navLabel || panel.querySelector(":scope > h3")?.textContent?.trim() || "Section";
-    const copy = panel.dataset.navCopy || panel.querySelector(":scope > .settings-section-copy")?.textContent?.trim() || "";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "settings-nav-button";
-    button.dataset.panelId = panel.id;
-    button.innerHTML = `
-      <span class="settings-nav-button-label">${escapeHtml(label)}</span>
-      <span class="settings-nav-button-copy">${escapeHtml(copy)}</span>
-    `;
+  buttons.forEach((button) => {
     button.addEventListener("click", () => {
-      setActiveSettingsPanel(panel.id);
+      setActiveSettingsPanel(button.dataset.panelTarget);
     });
-    list.appendChild(button);
   });
 
   setActiveSettingsPanel(state.settingsActivePanelId || "automation-section");

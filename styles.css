@@ -1032,12 +1032,14 @@ select:focus {
   background-clip: padding-box;
 }
 
+.settings-panel,
 .settings-stage-panel {
   display: none;
   align-content: start;
   min-height: 0;
 }
 
+.settings-panel.active,
 .settings-stage-panel.active {
   display: grid;
 }
@@ -1139,14 +1141,20 @@ select:focus {
   line-height: 1.45;
 }
 
+.settings-panel .grid,
 .settings-stage-panel .grid {
   gap: 12px;
 }
 
+.settings-panel label,
 .settings-stage-panel label {
   gap: 6px;
 }
 
+.settings-panel label > span:first-child,
+.settings-panel .appearance-logo-card > span,
+.settings-panel .appearance-actions-card > span,
+.settings-panel .updates-meta-label,
 .settings-stage-panel label > span:first-child,
 .settings-stage-panel .appearance-logo-card > span,
 .settings-stage-panel .appearance-actions-card > span,
@@ -1157,6 +1165,8 @@ select:focus {
   color: rgba(215, 232, 255, 0.76);
 }
 
+.settings-panel input,
+.settings-panel select,
 .settings-stage-panel input,
 .settings-stage-panel select {
   padding: 10px 12px;
@@ -1164,6 +1174,7 @@ select:focus {
   font-size: 0.88rem;
 }
 
+.settings-panel button,
 .settings-stage-panel button {
   min-height: 34px;
   padding: 0 14px;
@@ -1171,16 +1182,19 @@ select:focus {
   font-size: 0.8rem;
 }
 
+.settings-panel .checkbox,
 .settings-stage-panel .checkbox {
   gap: 10px;
   padding: 8px 10px;
   border-radius: 10px;
 }
 
+.settings-panel .checkbox span,
 .settings-stage-panel .checkbox span {
   font-size: 0.88rem;
 }
 
+.settings-panel .hint,
 .settings-stage-panel .hint {
   font-size: 0.74rem;
   line-height: 1.45;
