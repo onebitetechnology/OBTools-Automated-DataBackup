@@ -135,11 +135,62 @@ function sanitizeUpdateChannel(value, fallbackVersion = app.getVersion()) {
   return defaultUpdateChannelForVersion(fallbackVersion);
 }
 
+function normalizeDestinationRecord(record = {}, fallbackBaseFolder = "DataSafe Backup", installId = "") {
+  const normalizedBaseFolder = record.baseFolder === "One Bite Backups" || record.baseFolder === "OB Tools Backup" || !record.baseFolder
+    ? fallbackBaseFolder
+    : record.baseFolder;
+
+  return {
+    id: String(record.id || crypto.randomUUID()),
+    installId: String(record.installId || installId || ""),
+    mode: String(record.mode || "driveLetter"),
+    driveLetter: String(record.driveLetter || "").trim(),
+    baseFolder: String(normalizedBaseFolder || fallbackBaseFolder).trim(),
+    folderMode: "managed",
+    selectedPath: String(record.selectedPath || "").trim(),
+    label: String(record.label || "").trim(),
+    lastSeenAt: record.lastSeenAt || null,
+    lastSnapshotAt: record.lastSnapshotAt || null,
+    lastSnapshotName: record.lastSnapshotName || null
+  };
+}
+
+function normalizeKnownDestinations(entries = [], currentDestination = null, installId = "") {
+  const fallbackBaseFolder = currentDestination?.baseFolder || "DataSafe Backup";
+  const records = [];
+  const seenKeys = new Set();
+  const pushRecord = (value) => {
+    const record = normalizeDestinationRecord(value, fallbackBaseFolder, installId);
+    if (!record.driveLetter) {
+      return;
+    }
+
+    const dedupeKey = `${record.id}::${record.driveLetter.toUpperCase()}::${record.baseFolder.toLowerCase()}`;
+    if (seenKeys.has(dedupeKey)) {
+      return;
+    }
+
+    seenKeys.add(dedupeKey);
+    records.push(record);
+  };
+
+  entries.forEach(pushRecord);
+  if (currentDestination?.driveLetter) {
+    pushRecord({
+      ...currentDestination,
+      installId: currentDestination.installId || installId
+    });
+  }
+
+  return records;
+}
+
 function normalizeConfigForMain(config) {
   const existingDestination = config?.destination || {};
   const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || existingDestination.baseFolder === "OB Tools Backup" || !existingDestination.baseFolder
     ? "DataSafe Backup"
     : existingDestination.baseFolder;
+  const installId = config?.installId || crypto.randomUUID();
   const retentionSource = config?.retention || {};
   const legacyCount = Number(config?.retentionCount || 0);
   const normalizedRetention = {
@@ -170,13 +221,14 @@ function normalizeConfigForMain(config) {
 
   return {
     ...config,
-    installId: config?.installId || crypto.randomUUID(),
+    installId,
     businessName: config?.businessName || "One Bite Technology",
-    destination: {
+    destination: normalizeDestinationRecord({
       ...existingDestination,
+      id: existingDestination.id || crypto.randomUUID(),
       folderMode: "managed",
       baseFolder: normalizedBaseFolder
-    },
+    }, normalizedBaseFolder, installId),
     schedule: {
       enabled: true,
       frequency: "weekly",
@@ -201,7 +253,12 @@ function normalizeConfigForMain(config) {
     retentionCount: undefined,
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
-    }
+    },
+    knownDestinations: normalizeKnownDestinations(config?.knownDestinations || [], {
+      ...existingDestination,
+      id: existingDestination.id || crypto.randomUUID(),
+      baseFolder: normalizedBaseFolder
+    }, installId)
   };
 }
 
@@ -439,17 +496,22 @@ function expandEnvironmentVariables(value) {
   return String(value || "").replace(/%([^%]+)%/g, (_match, name) => envValue(name) || `%${name}%`);
 }
 
+function destinationFromInput(input) {
+  return input?.destination ? input.destination : input;
+}
+
 function resolveDestinationRoot(destination) {
+  const normalized = destinationFromInput(destination);
   if (!destination) {
     return null;
   }
 
-  if (destination.selectedPath) {
-    return path.parse(destination.selectedPath).root || null;
+  if (normalized.selectedPath) {
+    return path.parse(normalized.selectedPath).root || null;
   }
 
-  if (destination.driveLetter) {
-    return `${String(destination.driveLetter).replace(":", "")}:\\`;
+  if (normalized.driveLetter) {
+    return `${String(normalized.driveLetter).replace(":", "")}:\\`;
   }
 
   return null;
@@ -461,12 +523,13 @@ function resolveDestinationBasePath(destination) {
     return null;
   }
 
-  const baseFolder = String(destination?.baseFolder || "").trim();
+  const normalized = destinationFromInput(destination);
+  const baseFolder = String(normalized?.baseFolder || "").trim();
   return baseFolder ? path.join(destinationRoot, baseFolder) : destinationRoot;
 }
 
 function inspectSnapshots(config) {
-  const baseRoot = resolveDestinationBasePath(config?.destination);
+  const baseRoot = resolveDestinationBasePath(config);
   if (!baseRoot) {
     return {
       baseRoot: null,
@@ -513,6 +576,17 @@ function inspectSnapshots(config) {
   }
 }
 
+function destinationDisplayLabel(destination) {
+  const normalized = destinationFromInput(destination);
+  if (!normalized?.driveLetter) {
+    return "Unknown drive";
+  }
+
+  const drive = `${String(normalized.driveLetter).replace(":", "")}:`;
+  const folder = normalized.baseFolder ? `\\${normalized.baseFolder}` : "";
+  return `${drive}${folder}`;
+}
+
 function destinationMarkerPath(config) {
   const baseRoot = resolveDestinationBasePath(config?.destination);
   return baseRoot ? path.join(baseRoot, DESTINATION_MARKER_FILE) : null;
@@ -552,7 +626,17 @@ function checkDestinationContinuity(config, status, forceNewDestination = false)
   const marker = readDestinationMarker(config);
   const snapshotInfo = inspectSnapshots(config);
 
-  if (marker?.installId && config?.installId && marker.installId === config.installId) {
+  if (
+    marker?.installId &&
+    config?.installId &&
+    marker.installId === config.installId &&
+    (!marker?.destinationId || !config?.destination?.id || marker.destinationId === config.destination.id)
+  ) {
+    return { ok: true };
+  }
+
+  const knownDestinationMatch = (config?.knownDestinations || []).find((entry) => entry.id && entry.id === marker?.destinationId);
+  if (marker?.installId && config?.installId && marker.installId === config.installId && knownDestinationMatch) {
     return { ok: true };
   }
 
@@ -580,6 +664,109 @@ function checkDestinationContinuity(config, status, forceNewDestination = false)
     ok: false,
     requiresConfirmation: true,
     message: "The selected drive is connected, but the previous DataSafe Backup folder was not found. This may be a different drive using the same letter. If you continue, the app will create a new backup set on this drive."
+  };
+}
+
+function inspectKnownDestinations(config) {
+  const known = normalizeKnownDestinations(config?.knownDestinations || [], config?.destination, config?.installId);
+  return known.map((destination) => {
+    const rootPath = resolveDestinationRoot(destination);
+    const baseRoot = resolveDestinationBasePath(destination);
+    const connected = Boolean(rootPath && fs.existsSync(rootPath));
+    const marker = readDestinationMarker(destination);
+    const snapshotInfo = inspectSnapshots(destination);
+    const newestSnapshot = snapshotInfo.snapshots[0] || null;
+
+    return {
+      ...destination,
+      rootPath,
+      baseRoot,
+      connected,
+      markerInstallId: marker?.installId || null,
+      markerDestinationId: marker?.destinationId || null,
+      snapshotCount: snapshotInfo.snapshots.length,
+      lastSnapshotAt: newestSnapshot?.createdAt ? new Date(newestSnapshot.createdAt).toISOString() : (destination.lastSnapshotAt || null),
+      lastSnapshotName: newestSnapshot?.name || destination.lastSnapshotName || null,
+      displayLabel: destinationDisplayLabel(destination)
+    };
+  });
+}
+
+function syncKnownDestinationsInConfig(config) {
+  const inspected = inspectKnownDestinations(config);
+  const synced = inspected.map((entry) => ({
+    id: entry.id,
+    installId: entry.installId || config?.installId || "",
+    mode: "driveLetter",
+    driveLetter: entry.driveLetter,
+    label: entry.label || "",
+    baseFolder: entry.baseFolder || "DataSafe Backup",
+    folderMode: "managed",
+    selectedPath: entry.selectedPath || "",
+    lastSeenAt: entry.connected ? new Date().toISOString() : entry.lastSeenAt || null,
+    lastSnapshotAt: entry.lastSnapshotAt || null,
+    lastSnapshotName: entry.lastSnapshotName || null
+  }));
+
+  return {
+    config: {
+      ...config,
+      knownDestinations: synced
+    },
+    inspected
+  };
+}
+
+function buildDriveInsights(config, inspectedDestinations = []) {
+  const connected = inspectedDestinations.filter((entry) => entry.connected);
+  if (connected.length < 2) {
+    return null;
+  }
+
+  const byFreshness = [...connected].sort((left, right) => {
+    const leftTime = left.lastSnapshotAt ? new Date(left.lastSnapshotAt).getTime() : 0;
+    const rightTime = right.lastSnapshotAt ? new Date(right.lastSnapshotAt).getTime() : 0;
+    return rightTime - leftTime;
+  });
+
+  const newest = byFreshness[0];
+  const current = connected.find((entry) => entry.id === config?.destination?.id) || null;
+  const staleAlternates = byFreshness.filter((entry) => entry.id !== newest.id);
+
+  if (!newest || !staleAlternates.length || !newest.lastSnapshotAt) {
+    return null;
+  }
+
+  const target = staleAlternates[0];
+  const newestLabel = newest.displayLabel;
+  const targetLabel = target.displayLabel;
+
+  if (current && current.id === newest.id) {
+    return {
+      type: "alternate-stale-connected",
+      signature: `stale:${newest.id}:${target.id}:${newest.lastSnapshotAt}:${target.lastSnapshotAt || "never"}`,
+      message: `${targetLabel} is connected, but it is older than your current backup drive ${newestLabel}. If you want to bring it up to date, switch to that drive and run a new backup.`,
+      targetDestinationId: target.id,
+      currentDestinationId: newest.id
+    };
+  }
+
+  if (current && current.id === target.id) {
+    return {
+      type: "newer-drive-available",
+      signature: `newer:${current.id}:${newest.id}:${newest.lastSnapshotAt}:${current.lastSnapshotAt || "never"}`,
+      message: `${newestLabel} is connected and has newer snapshots than the currently selected backup drive ${targetLabel}. You can switch to the newer drive to keep using the freshest backup history.`,
+      targetDestinationId: newest.id,
+      currentDestinationId: current.id
+    };
+  }
+
+  return {
+    type: "multiple-known-drives",
+    signature: `multi:${newest.id}:${target.id}:${newest.lastSnapshotAt}:${target.lastSnapshotAt || "never"}`,
+    message: `Multiple known DataSafe backup drives are connected. ${newestLabel} has the newest snapshots, while ${targetLabel} is older. You can switch the primary drive if needed before the next backup.`,
+    targetDestinationId: newest.id,
+    currentDestinationId: current?.id || null
   };
 }
 
@@ -1565,7 +1752,9 @@ app.on("window-all-closed", () => {
 ipcMain.handle("state:get", () => {
   const { configPath, statusPath } = dataPaths();
   const rawConfig = readJson(configPath);
-  const config = normalizeConfigForMain(rawConfig);
+  let config = normalizeConfigForMain(rawConfig);
+  const syncedDestinations = syncKnownDestinationsInConfig(config);
+  config = syncedDestinations.config;
   if (JSON.stringify(rawConfig) !== JSON.stringify(config)) {
     writeJson(configPath, config);
   }
@@ -1575,7 +1764,8 @@ ipcMain.handle("state:get", () => {
   return {
     config,
     status,
-    meta: appMeta()
+    meta: appMeta(),
+    driveInsights: buildDriveInsights(config, syncedDestinations.inspected)
   };
 });
 
@@ -1583,7 +1773,9 @@ ipcMain.handle("config:save", async (_event, config) => {
   const { configPath, statusPath } = dataPaths();
   const previousConfig = normalizeConfigForMain(readJson(configPath));
   const previousStatus = readJson(statusPath);
-  const normalizedConfig = normalizeConfigForMain(config);
+  let normalizedConfig = normalizeConfigForMain(config);
+  const syncedDestinations = syncKnownDestinationsInConfig(normalizedConfig);
+  normalizedConfig = syncedDestinations.config;
   writeJson(configPath, normalizedConfig);
   configureAutoUpdates(normalizedConfig);
   let status = previousStatus;
@@ -1617,7 +1809,8 @@ ipcMain.handle("config:save", async (_event, config) => {
     config: normalizedConfig,
     status,
     meta: appMeta(),
-    automation
+    automation,
+    driveInsights: buildDriveInsights(normalizedConfig, syncedDestinations.inspected)
   };
 });
 
@@ -1823,6 +2016,7 @@ ipcMain.handle("backup:run", async (_event, options = {}) => {
   const recentSnapshots = snapshotInfo.snapshots.map((entry) => entry.name);
   const newestSnapshot = snapshotInfo.snapshots[0] || null;
   const partialSuccess = !result.ok && recentSnapshots.length > 0;
+  let updatedConfig = config;
   writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Backup run completed. ok=${result.ok} message=${result.message}`);
   publishBackupProgress({
@@ -1842,11 +2036,27 @@ ipcMain.handle("backup:run", async (_event, options = {}) => {
 
   if (result.ok || partialSuccess) {
     statusPatch.lastBackupAt = new Date(newestSnapshot?.createdAt || Date.now()).toISOString();
+    const synced = syncKnownDestinationsInConfig(config);
+    updatedConfig = {
+      ...synced.config,
+      knownDestinations: synced.config.knownDestinations.map((entry) => (
+        entry.id === config.destination.id
+          ? {
+              ...entry,
+              lastSeenAt: new Date().toISOString(),
+              lastSnapshotAt: statusPatch.lastBackupAt,
+              lastSnapshotName: newestSnapshot?.name || entry.lastSnapshotName || null
+            }
+          : entry
+      ))
+    };
+    writeJson(configPath, updatedConfig);
   }
 
   return {
     status: mergeStatus(statusPatch),
-    meta: appMeta()
+    meta: appMeta(),
+    driveInsights: buildDriveInsights(updatedConfig, inspectKnownDestinations(updatedConfig))
   };
 });
 

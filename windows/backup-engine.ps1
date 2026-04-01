@@ -22,6 +22,7 @@ function Write-DestinationMarker([string]$BaseRoot, $Config) {
   $markerPath = Join-Path $BaseRoot ".datasafe-backup.json"
   $marker = [ordered]@{
     installId = if ($null -ne $Config.PSObject.Properties["installId"]) { "$($Config.installId)" } else { "" }
+    destinationId = if ($null -ne $Config.destination.PSObject.Properties["id"]) { "$($Config.destination.id)" } else { "" }
     businessName = if ($null -ne $Config.PSObject.Properties["businessName"]) { "$($Config.businessName)" } else { "" }
     createdAt = (Get-Date).ToString("o")
     machineName = $env:COMPUTERNAME

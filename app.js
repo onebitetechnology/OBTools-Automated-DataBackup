@@ -3,6 +3,7 @@ const state = {
   status: null,
   meta: null,
   storage: null,
+  driveInsights: null,
   backupProgress: null,
   backupTiming: null,
   notifiedUpdateVersion: null,
@@ -10,6 +11,7 @@ const state = {
   updateChannelDraft: null,
   appearanceDraftLogoDataUrl: null,
   settingsActivePanelId: "automation-section",
+  notifiedDriveInsightSignature: null,
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: [],
@@ -225,6 +227,18 @@ function normalizeConfig(config) {
   const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || existingDestination.baseFolder === "OB Tools Backup" || !existingDestination.baseFolder
     ? "DataSafe Backup"
     : existingDestination.baseFolder;
+  const normalizedDestination = {
+    id: existingDestination.id || `dest-${Math.random().toString(36).slice(2, 10)}`,
+    mode: "driveLetter",
+    driveLetter: "",
+    label: "",
+    baseFolder: normalizedBaseFolder,
+    folderMode: "managed",
+    selectedPath: "",
+    ...existingDestination,
+    folderMode: "managed",
+    baseFolder: normalizedBaseFolder
+  };
   const retentionSource = config.retention || {};
   const legacyCount = Number(config.retentionCount || 0);
   const normalizedRetention = {
@@ -260,17 +274,23 @@ function normalizeConfig(config) {
   return {
     ...config,
     businessName: config.businessName || "One Bite Technology",
-    destination: {
-      mode: "driveLetter",
-      driveLetter: "",
-      label: "",
-      baseFolder: normalizedBaseFolder,
-      folderMode: "managed",
-      selectedPath: "",
-      ...existingDestination,
-      folderMode: "managed",
-      baseFolder: normalizedBaseFolder
-    },
+    destination: normalizedDestination,
+    knownDestinations: Array.isArray(config.knownDestinations)
+      ? config.knownDestinations.map((entry) => ({
+          id: entry.id || `dest-${Math.random().toString(36).slice(2, 10)}`,
+          mode: "driveLetter",
+          driveLetter: "",
+          label: "",
+          baseFolder: normalizedBaseFolder,
+          folderMode: "managed",
+          selectedPath: "",
+          lastSeenAt: null,
+          lastSnapshotAt: null,
+          lastSnapshotName: null,
+          ...entry,
+          folderMode: "managed"
+        }))
+      : (normalizedDestination.driveLetter ? [normalizedDestination] : []),
     cloudCheck: {
       enabled: true,
       ...(config.cloudCheck || {})
@@ -736,6 +756,137 @@ function showResultModal({ title, message, list = [], secondaryAction = null, hi
 function closeResultModal() {
   el.resultModal.hidden = true;
   renderResultProgress(null);
+  setTimeout(() => {
+    maybeShowDriveInsightPrompt();
+  }, 0);
+}
+
+function findKnownDestination(destinationId) {
+  if (!destinationId) {
+    return null;
+  }
+
+  return (state.config?.knownDestinations || []).find((entry) => entry.id === destinationId) || null;
+}
+
+async function switchPrimaryDestination(destinationId) {
+  const destination = findKnownDestination(destinationId);
+  if (!destination) {
+    throw new Error("That backup drive could not be found in the remembered destinations.");
+  }
+
+  state.config = normalizeConfig({
+    ...state.config,
+    destination: {
+      ...state.config.destination,
+      ...destination
+    }
+  });
+  renderConfig();
+  renderStatus();
+  await saveConfig(false, { suppressDriveInsightPrompt: true });
+}
+
+function driveInsightModalConfig(insight) {
+  if (!insight) {
+    return null;
+  }
+
+  if (insight.type === "alternate-stale-connected") {
+    return {
+      title: "Older Backup Drive Connected",
+      message: insight.message,
+      list: [
+        "Your current drive already has the newest snapshots.",
+        "Switching will make the older drive your active backup location so you can update it."
+      ],
+      secondaryAction: {
+        label: "Switch To Older Drive",
+        onClick: async () => {
+          closeResultModal();
+          await switchPrimaryDestination(insight.targetDestinationId);
+          showResultModal({
+            title: "Primary Backup Drive Updated",
+            message: "The older backup drive is now selected. Run a new backup to bring it up to date."
+          });
+        }
+      },
+      closeLabel: "Keep Current Drive"
+    };
+  }
+
+  if (insight.type === "newer-drive-available") {
+    return {
+      title: "Newer Backup Drive Available",
+      message: insight.message,
+      list: [
+        "The connected drive has newer snapshots than the currently selected backup drive.",
+        "Switching will make that newer drive your active backup location."
+      ],
+      secondaryAction: {
+        label: "Use Newer Drive",
+        onClick: async () => {
+          closeResultModal();
+          await switchPrimaryDestination(insight.targetDestinationId);
+          showResultModal({
+            title: "Primary Backup Drive Updated",
+            message: "The newer backup drive is now selected as the primary destination."
+          });
+        }
+      },
+      closeLabel: "Keep Current Drive"
+    };
+  }
+
+  return {
+    title: "Multiple Backup Drives Detected",
+    message: insight.message,
+    list: [
+      "DataSafe can remember more than one backup drive for the same PC.",
+      "Use the newest one as your primary drive unless you intentionally want to update an older backup drive."
+    ],
+    secondaryAction: insight.targetDestinationId
+      ? {
+          label: "Use Newest Drive",
+          onClick: async () => {
+            closeResultModal();
+            await switchPrimaryDestination(insight.targetDestinationId);
+            showResultModal({
+              title: "Primary Backup Drive Updated",
+              message: "The newest connected backup drive is now selected as the primary destination."
+            });
+          }
+        }
+      : null,
+    closeLabel: "Keep Current Drive"
+  };
+}
+
+function maybeShowDriveInsightPrompt(force = false) {
+  const insight = state.driveInsights;
+  if (!insight?.signature) {
+    return;
+  }
+
+  if (!force && state.notifiedDriveInsightSignature === insight.signature) {
+    return;
+  }
+
+  if (!el.termsGate.hidden) {
+    return;
+  }
+
+  if (!force && !el.resultModal.hidden) {
+    return;
+  }
+
+  const modalConfig = driveInsightModalConfig(insight);
+  if (!modalConfig) {
+    return;
+  }
+
+  state.notifiedDriveInsightSignature = insight.signature;
+  showResultModal(modalConfig);
 }
 
 function confirmRemoveJob(job) {
@@ -1849,6 +2000,7 @@ async function load() {
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
   state.meta = payload.meta || null;
+  state.driveInsights = payload.driveInsights || null;
   state.updateChannelDraft = state.config?.updates?.channel || state.meta?.updateStatus?.channel || "beta";
   if (window.onebiteDesktop?.onUpdateStatus) {
     window.onebiteDesktop.onUpdateStatus((updateStatus) => {
@@ -1887,6 +2039,7 @@ async function load() {
     state.storage = null;
     renderStorageAnalysis();
   });
+  maybeShowDriveInsightPrompt(true);
 
   if (window.onebiteDesktop?.checkForUpdates) {
     setTimeout(() => {
@@ -1960,7 +2113,7 @@ function maybeHandleAutomationSaveResult(payload, showAutomationPrompt = true) {
   }
 }
 
-async function saveConfig(showAutomationPrompt = true) {
+async function saveConfig(showAutomationPrompt = true, options = {}) {
   state.config = collectConfig();
   const payload = await request("/api/config", {
     method: "POST",
@@ -1969,6 +2122,7 @@ async function saveConfig(showAutomationPrompt = true) {
   state.config = normalizeConfig(payload.config);
   state.status = normalizeStatus(payload.status);
   state.meta = payload.meta || state.meta;
+  state.driveInsights = payload.driveInsights || null;
   renderConfig();
   renderStatus();
   await refreshStorageAnalysis().catch(() => {
@@ -1977,6 +2131,9 @@ async function saveConfig(showAutomationPrompt = true) {
   });
   closeSettingsDrawer();
   maybeHandleAutomationSaveResult(payload, showAutomationPrompt);
+  if (!options.suppressDriveInsightPrompt) {
+    maybeShowDriveInsightPrompt();
+  }
 }
 
 async function acceptTerms() {
@@ -2079,6 +2236,7 @@ async function invokeAction(path, options = {}) {
     }
     state.status = normalizeStatus(payload.status);
     state.meta = payload.meta || state.meta;
+    state.driveInsights = payload.driveInsights || null;
     renderStatus();
     renderMeta();
 
@@ -2112,6 +2270,7 @@ async function invokeAction(path, options = {}) {
           "Backup reminder checks can notify the user when backups have not run recently."
         ]
       });
+      maybeShowDriveInsightPrompt();
       return;
     }
 
@@ -2125,8 +2284,11 @@ async function invokeAction(path, options = {}) {
         message: summarizeActionMessage(state.status.lastBackupMessage || "Backup finished."),
         list: (state.status.recentSnapshots || []).slice(0, 5).map((snapshot) => `Snapshot: ${snapshot}`)
       });
+      maybeShowDriveInsightPrompt();
       return;
     }
+
+    maybeShowDriveInsightPrompt();
   } catch (error) {
     el.backupStatusCard.classList.remove("status-good", "status-warning");
     el.backupStatusCard.classList.add("status-error");

@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.46 - 2026-04-01
+
+- Added multi-drive awareness so DataSafe can remember known backup drives, compare their snapshot freshness, and notice when more than one known drive is connected.
+- Added prompts that help the user decide whether to keep the current primary drive, switch to a newer connected drive, or temporarily switch to an older drive so it can be brought up to date.
+- Stored destination IDs inside the backup-drive marker file so future continuity checks can tell the difference between the current drive, another known drive from the same install, and an unrelated drive.
+
 ## 1.0.10-beta.45 - 2026-04-01
 
 - Reworked the Settings modal into a left navigation / right content layout to match the Ticket Listing Build more closely.
