@@ -7,13 +7,13 @@ The app is prepared for local Electron development and Windows installer builds.
 Current app version:
 
 ```text
-1.0.10-beta.37
+1.0.10-beta.44
 ```
 
 Desktop shortcut name:
 
 ```text
-OBTools Automated Backups
+DataSafe
 ```
 
 Build command:

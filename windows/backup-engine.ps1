@@ -18,6 +18,18 @@ function Write-Json([string]$Path, $Value) {
   [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
+function Write-DestinationMarker([string]$BaseRoot, $Config) {
+  $markerPath = Join-Path $BaseRoot ".datasafe-backup.json"
+  $marker = [ordered]@{
+    installId = if ($null -ne $Config.PSObject.Properties["installId"]) { "$($Config.installId)" } else { "" }
+    businessName = if ($null -ne $Config.PSObject.Properties["businessName"]) { "$($Config.businessName)" } else { "" }
+    createdAt = (Get-Date).ToString("o")
+    machineName = $env:COMPUTERNAME
+  }
+
+  Write-Json $markerPath $marker
+}
+
 function Get-RetentionPolicy($Config) {
   $legacyCount = 0
   if ($null -ne $Config.PSObject.Properties["retentionCount"]) {
@@ -335,6 +347,7 @@ for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
 
 $remainingSnapshots = @(Prune-Snapshots $snapshotsRoot $retentionPolicy)
 $remaining = @($remainingSnapshots | Select-Object -ExpandProperty Name)
+Write-DestinationMarker $baseRoot $config
 $status.lastBackupAt = (Get-Date).ToString("o")
 $status.lastBackupResult = "success"
 $status.lastBackupMessage = "Backup completed to $baseRoot"

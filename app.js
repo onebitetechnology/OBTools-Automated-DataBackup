@@ -26,22 +26,20 @@ const el = {
   protectionMessage: document.getElementById("protection-message"),
   lastBackup: document.getElementById("last-backup"),
   lastBackupDetail: document.getElementById("last-backup-detail"),
-  lastBackupMessage: document.getElementById("last-backup-message"),
   snapshotCount: document.getElementById("snapshot-count"),
   cloudSummary: document.getElementById("cloud-summary"),
   cloudHealthIndicator: document.getElementById("cloud-health-indicator"),
   cloudHealthLabel: document.getElementById("cloud-health-label"),
-  cloudRecommendations: document.getElementById("cloud-recommendations"),
   buildVersion: document.getElementById("build-version"),
   versionStatusPill: document.getElementById("version-status-pill"),
   versionStatusLight: document.getElementById("version-status-light"),
-  snapshotList: document.getElementById("snapshot-list"),
   jobsList: document.getElementById("jobs-list"),
   destinationMode: document.getElementById("destination-mode"),
   destinationDriveLetter: document.getElementById("destination-drive-letter"),
   destinationLabel: document.getElementById("destination-label"),
   destinationBaseFolder: document.getElementById("destination-base-folder"),
   destinationPickedSummary: document.getElementById("destination-picked-summary"),
+  destinationHealthSummary: document.getElementById("destination-health-summary"),
   destinationFinalSummary: document.getElementById("destination-final-summary"),
   headerCustomerLogo: document.getElementById("header-customer-logo"),
   backupSizeEstimate: document.getElementById("backup-size-estimate"),
@@ -181,7 +179,7 @@ async function desktopRequest(url, options = {}) {
   }
 
   if (url === "/api/run-backup" && options.method === "POST") {
-    return window.onebiteDesktop.runBackup();
+    return window.onebiteDesktop.runBackup(body);
   }
 
   if (url === "/api/check-cloud" && options.method === "POST") {
@@ -541,6 +539,14 @@ function protectionSummary(status) {
   const staleDays = state.config?.reminders?.staleDays || 7;
   const backupMessage = summarizeActionMessage(status.lastBackupMessage || "The latest backup needs review.");
 
+  if (status.destinationStatus === "Destination Not Recognized") {
+    return {
+      tone: "warning",
+      title: "Check Backup Drive",
+      message: "The selected drive does not look like the backup drive that was used before."
+    };
+  }
+
   if (status.destinationStatus === "Drive Not Connected") {
     return {
       tone: "warning",
@@ -589,14 +595,6 @@ function protectionSummary(status) {
   };
 }
 
-function friendlyBackupMessage(status) {
-  if (status.destinationStatus === "Drive Not Connected") {
-    return "The selected backup drive is not connected. Plug it in and run the backup again.";
-  }
-
-  return summarizeActionMessage(status.lastBackupMessage || "No backup history yet.");
-}
-
 function renderMeta() {
   const version = state.meta?.version || "Unknown";
   const updateInfo = state.meta?.updateStatus || {};
@@ -641,6 +639,10 @@ function summarizeActionMessage(message) {
 
   if (/Destination drive is not available/i.test(raw)) {
     return "The selected backup drive is not connected. Reconnect it and try again.";
+  }
+
+  if (/does not look like the backup drive that was used before/i.test(raw) || /previous DataSafe Backup folder was not found/i.test(raw) || /appears to belong to a different install/i.test(raw)) {
+    return "The selected drive does not look like the backup drive used before. Confirm the correct backup drive is connected before creating a new backup set.";
   }
 
   if (/Backup source missing:/i.test(raw)) {
@@ -1407,9 +1409,6 @@ function renderStatus() {
   el.protectionMessage.textContent = summary.message;
   el.lastBackup.textContent = formatDate(state.status.lastBackupAt);
   el.lastBackupDetail.textContent = formatDate(state.status.lastBackupAt);
-  const backupDetailMessage = friendlyBackupMessage(state.status);
-  el.lastBackupMessage.textContent = backupDetailMessage;
-  el.lastBackupMessage.hidden = !backupDetailMessage || backupDetailMessage === summary.message;
   el.cloudSummary.textContent = state.status.cloud?.summary || "Cloud check has not been run yet.";
   el.cloudSummary.classList.toggle("warning-copy", state.status.cloud?.level === "warning");
   el.cloudSummary.classList.toggle("error-copy", state.status.cloud?.level === "error");
@@ -1424,31 +1423,13 @@ function renderStatus() {
       : cloudChecked
         ? "Cloud sync reviewed"
         : "Cloud health not checked yet";
-
-  el.snapshotList.innerHTML = "";
   const snapshots = state.status.recentSnapshots || [];
   el.snapshotCount.textContent = String(snapshots.length);
-  if (!snapshots.length) {
-    const item = document.createElement("li");
-    item.textContent = "No snapshots yet.";
-    el.snapshotList.appendChild(item);
-  } else {
-    snapshots.forEach((snapshot) => {
-      const item = document.createElement("li");
-      item.textContent = formatSnapshotLabel(snapshot);
-      el.snapshotList.appendChild(item);
-    });
-  }
 
-  el.cloudRecommendations.innerHTML = "";
-  const recommendations = state.status.cloud?.recommendations || [];
-  el.cloudRecommendations.hidden = !recommendations.length;
-  if (recommendations.length) {
-    recommendations.forEach((entry) => {
-      const item = document.createElement("li");
-      item.textContent = entry;
-      el.cloudRecommendations.appendChild(item);
-    });
+  if (el.destinationHealthSummary) {
+    el.destinationHealthSummary.textContent = state.config?.destination?.driveLetter
+      ? `Using ${state.config.destination.driveLetter.replace(":", "")}:\\${state.config.destination.baseFolder || "DataSafe Backup"}`
+      : "No backup location selected yet.";
   }
 
   renderRestoreSection();
@@ -1696,9 +1677,16 @@ function renderConfig() {
   }
 
   if (destination.driveLetter) {
-    el.destinationFinalSummary.textContent = `Backups will be saved to: ${destination.driveLetter.replace(":", "")}:\\${managedFolderName}`;
+    const summaryText = `Backups will be saved to: ${destination.driveLetter.replace(":", "")}:\\${managedFolderName}`;
+    el.destinationFinalSummary.textContent = summaryText;
+    if (el.destinationHealthSummary) {
+      el.destinationHealthSummary.textContent = summaryText.replace("Backups will be saved to: ", "");
+    }
   } else {
     el.destinationFinalSummary.textContent = "Backups will appear here once a destination is selected.";
+    if (el.destinationHealthSummary) {
+      el.destinationHealthSummary.textContent = "No backup location selected yet.";
+    }
   }
   el.retentionDays.value = retention?.days ?? 1;
   el.retentionMonths.value = retention?.months ?? 0;
@@ -2010,8 +1998,44 @@ async function invokeAction(path, options = {}) {
       await saveConfig(false);
     }
     const payload = await request(path, {
-      method: "POST"
+      method: "POST",
+      body: options.body ? JSON.stringify(options.body) : undefined
     });
+
+    if (path === "/api/run-backup" && payload.requiresConfirmation) {
+      stopBackupProgressTimer();
+      state.backupProgress = null;
+      state.backupTiming = null;
+      state.status = normalizeStatus({
+        ...state.status,
+        destinationStatus: "Destination Not Recognized",
+        lastBackupMessage: payload.message
+      });
+      renderStatus();
+      showResultModal({
+        title: "Check Backup Drive",
+        message: payload.message,
+        list: [
+          "If this is the correct backup drive and you intentionally want to start a new backup set, continue.",
+          "If not, cancel and reconnect the original drive before backing up."
+        ],
+        secondaryAction: {
+          label: "Continue Anyway",
+          onClick: async () => {
+            closeResultModal();
+            await invokeAction("/api/run-backup", {
+              skipSave: true,
+              body: {
+                forceNewDestination: true
+              }
+            });
+          }
+        },
+        closeLabel: "Cancel"
+      });
+      return;
+    }
+
     if (path === "/api/install-automation" && payload.ok === false) {
       throw new Error(payload.message || "The Windows tasks could not be installed.");
     }
@@ -2070,7 +2094,6 @@ async function invokeAction(path, options = {}) {
     el.backupStatusCard.classList.add("status-error");
     el.protectionState.textContent = "Action Failed";
     el.protectionMessage.textContent = error.message;
-    el.lastBackupMessage.textContent = error.message;
 
     if (path === "/api/check-cloud") {
       el.cloudSummary.textContent = error.message;

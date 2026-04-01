@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.44 - 2026-03-31
+
+- Streamlined the main dashboard so the health card focuses on the key trust signals instead of repeating snapshot history and extra backup-detail copy.
+- Simplified the destination area wording and fixed the duplicate destination summary target in the UI.
+- Added a backup-drive continuity check so the app warns before creating a new backup set on a different USB drive that happens to reuse the same drive letter.
+
 ## 1.0.10-beta.43 - 2026-03-30
 
 - Added a new `Backup Email Data` picker that scans for supported email data like Thunderbird profiles and classic Outlook PST/signature/template data.

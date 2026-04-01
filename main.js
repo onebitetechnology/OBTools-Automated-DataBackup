@@ -1,4 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -25,6 +26,7 @@ const RESOURCE_ROOT = app.isPackaged ? process.resourcesPath : APP_ROOT;
 const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
 const WINDOWS_DIR = path.join(RESOURCE_ROOT, "windows");
 const SHELL_WORK_DIR = RESOURCE_ROOT;
+const DESTINATION_MARKER_FILE = ".datasafe-backup.json";
 let currentUpdateChannel = null;
 let updateStatus = {
   supported: app.isPackaged && process.platform === "win32",
@@ -168,6 +170,7 @@ function normalizeConfigForMain(config) {
 
   return {
     ...config,
+    installId: config?.installId || crypto.randomUUID(),
     businessName: config?.businessName || "One Bite Technology",
     destination: {
       ...existingDestination,
@@ -508,6 +511,76 @@ function inspectSnapshots(config) {
       snapshots: []
     };
   }
+}
+
+function destinationMarkerPath(config) {
+  const baseRoot = resolveDestinationBasePath(config?.destination);
+  return baseRoot ? path.join(baseRoot, DESTINATION_MARKER_FILE) : null;
+}
+
+function readDestinationMarker(config) {
+  const markerPath = destinationMarkerPath(config);
+  if (!markerPath || !fs.existsSync(markerPath)) {
+    return null;
+  }
+
+  try {
+    return readJson(markerPath);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function hasPreviousBackupHistory(status = {}) {
+  return Boolean(status?.lastBackupAt || (status?.recentSnapshots || []).length);
+}
+
+function checkDestinationContinuity(config, status, forceNewDestination = false) {
+  if (forceNewDestination) {
+    return { ok: true };
+  }
+
+  const baseRoot = resolveDestinationBasePath(config?.destination);
+  if (!baseRoot) {
+    return { ok: true };
+  }
+
+  if (!hasPreviousBackupHistory(status)) {
+    return { ok: true };
+  }
+
+  const marker = readDestinationMarker(config);
+  const snapshotInfo = inspectSnapshots(config);
+
+  if (marker?.installId && config?.installId && marker.installId === config.installId) {
+    return { ok: true };
+  }
+
+  if (marker?.installId && config?.installId && marker.installId !== config.installId) {
+    return {
+      ok: false,
+      requiresConfirmation: true,
+      message: "The selected drive already contains a DataSafe backup set, but it appears to belong to a different install. Double-check that the correct backup drive is connected before continuing."
+    };
+  }
+
+  if ((snapshotInfo.snapshots || []).length > 0) {
+    return { ok: true };
+  }
+
+  if (fs.existsSync(baseRoot)) {
+    return {
+      ok: false,
+      requiresConfirmation: true,
+      message: "DataSafe could not find the backup history it expected on the selected drive. This may be the wrong USB drive, or the DataSafe Backup folder may have been erased. If you continue, the app will create a new backup set on this drive."
+    };
+  }
+
+  return {
+    ok: false,
+    requiresConfirmation: true,
+    message: "The selected drive is connected, but the previous DataSafe Backup folder was not found. This may be a different drive using the same letter. If you continue, the app will create a new backup set on this drive."
+  };
 }
 
 function listRecentSnapshots(config) {
@@ -1720,9 +1793,23 @@ ipcMain.handle("restore:run", async (_event, payload = {}) => {
   };
 });
 
-ipcMain.handle("backup:run", async () => {
+ipcMain.handle("backup:run", async (_event, options = {}) => {
   writeLauncherLog("IPC backup:run received.");
   writeRuntimeLog("Backup run requested.");
+  const { configPath, statusPath } = dataPaths();
+  const config = readJson(configPath);
+  const currentStatus = readJson(statusPath);
+  const continuityCheck = checkDestinationContinuity(config, currentStatus, Boolean(options?.forceNewDestination));
+
+  if (!continuityCheck.ok && continuityCheck.requiresConfirmation) {
+    writeRuntimeLog(`Backup run paused for destination confirmation. ${continuityCheck.message}`);
+    return {
+      requiresConfirmation: true,
+      message: continuityCheck.message,
+      meta: appMeta()
+    };
+  }
+
   publishBackupProgress({
     phase: "starting",
     jobName: "",
@@ -1731,8 +1818,6 @@ ipcMain.handle("backup:run", async () => {
     percent: 2,
     detail: "Starting the backup process."
   });
-  const { configPath } = dataPaths();
-  const config = readJson(configPath);
   const result = await runPowerShell("backup-engine.ps1");
   const snapshotInfo = inspectSnapshots(config);
   const recentSnapshots = snapshotInfo.snapshots.map((entry) => entry.name);

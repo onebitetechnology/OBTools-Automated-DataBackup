@@ -36,8 +36,8 @@
         <section class="hero-copy card">
           <div class="hero-copy-inner">
             <p class="status-label">Back Up This PC</p>
-            <h1 class="hero-primary-title">Keep important files safe.</h1>
-            <p class="hero-primary-copy">Run a backup now or confirm cloud sync health. DataSafe keeps the setup simple for everyday users.</p>
+            <h1 class="hero-primary-title">Run backups with confidence.</h1>
+            <p class="hero-primary-copy">Use DataSafe to protect important folders, browser data, and supported email data without digging through technical settings.</p>
             <div class="hero-copy-actions">
               <button id="run-backup" class="primary">Run Backup Now</button>
               <button id="run-cloud-check" class="secondary">Check Cloud Sync</button>
@@ -77,18 +77,10 @@
           </div>
           <article class="status-insight-card destination-health-card">
             <p class="metric-label">Backup destination</p>
-            <p id="destination-final-summary" class="summary-value">Backups will appear here once a destination is selected.</p>
+            <p id="destination-health-summary" class="summary-value">Backups will appear here once a destination is selected.</p>
           </article>
-          <div class="hero-status-details single-column">
-            <article class="status-insight-card">
-              <p class="metric-label">Recent snapshots</p>
-              <ul id="snapshot-list" class="snapshot-list"></ul>
-            </article>
-          </div>
           <p id="cloud-summary" class="metric-note">Cloud check has not been run yet.</p>
-          <ul id="cloud-recommendations" class="recommendations inline-recommendations"></ul>
           <span id="last-backup-detail" hidden>Never</span>
-          <p id="last-backup-message" class="metric-note">No backup has been completed yet.</p>
         </section>
       </header>
 
@@ -113,13 +105,12 @@
           <div class="panel-head">
             <div>
               <h3>Choose a backup destination</h3>
-              <p class="section-note">Choose the external drive where backups should live. The app will automatically create and use a <strong>DataSafe Backup</strong> folder on that drive.</p>
+              <p class="section-note">Choose the external drive where backups should live. DataSafe will create and use a <strong>DataSafe Backup</strong> folder on that drive.</p>
             </div>
           </div>
           <div class="panel-actions-underhead">
             <button id="browse-destination" class="secondary" type="button">Choose Backup Location</button>
           </div>
-          <p class="section-note compact-note">Browse to the external USB or hard drive you want to use. Once selected, the app will create the backup folder for you automatically.</p>
           <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
           <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
           <div class="storage-analysis-grid">
@@ -132,8 +123,8 @@
               <p id="destination-free-space" class="summary-value">Waiting for analysis</p>
             </article>
           </div>
-          <p id="retention-behavior-summary" class="hint">The app keeps recent daily, monthly, and yearly snapshots according to your retention plan and removes older history outside that plan.</p>
-          <p id="destination-mode-summary" class="hint">The app will create and maintain a DataSafe Backup folder on the selected drive.</p>
+          <p id="retention-behavior-summary" class="hint">Older snapshots outside your retention plan are removed automatically after successful backups.</p>
+          <p id="destination-mode-summary" class="hint">DataSafe checks for your existing backup set before starting a new one on this drive.</p>
           <input id="destination-mode" type="hidden" value="driveLetter">
           <input id="destination-base-folder" type="hidden">
           <input id="destination-drive-letter" type="hidden">

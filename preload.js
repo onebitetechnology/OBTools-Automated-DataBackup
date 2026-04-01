@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("onebiteDesktop", {
   getState: () => ipcRenderer.invoke("state:get"),
   saveConfig: (config) => ipcRenderer.invoke("config:save", config),
-  runBackup: () => ipcRenderer.invoke("backup:run"),
+  runBackup: (options) => ipcRenderer.invoke("backup:run", options),
   checkCloud: () => ipcRenderer.invoke("cloud:check"),
   openOneDrive: () => ipcRenderer.invoke("cloud:open-onedrive"),
   installAutomation: () => ipcRenderer.invoke("automation:install"),
