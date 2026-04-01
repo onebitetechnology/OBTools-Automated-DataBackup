@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.45 - 2026-04-01
+
+- Reworked the Settings modal into a left navigation / right content layout to match the Ticket Listing Build more closely.
+- Kept the existing DataSafe settings fields and behavior intact while simplifying section browsing into a clearer “Control Room” navigation model.
+- Preserved the footer `Close` and `Save Settings` actions while making the settings shell feel more consistent with the other One Bite desktop apps.
+
 ## 1.0.10-beta.44 - 2026-03-31
 
 - Streamlined the main dashboard so the health card focuses on the key trust signals instead of repeating snapshot history and extra backup-detail copy.

@@ -171,315 +171,281 @@
           </div>
         </div>
         <div class="settings-modal-body">
+          <div class="settings-layout">
+            <div class="settings-nav" id="settings-nav"></div>
+            <div class="settings-panel-stage" id="settings-panel-stage">
 
-        <section class="settings-section collapsed">
-          <button class="settings-section-toggle" type="button" aria-expanded="false">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Appearance</span>
-              <span class="settings-section-copy">Customize the corner branding shown in the app while keeping the main title centered.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Show Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="settings-subsections">
-              <section class="settings-subsection">
-                <div class="settings-subsection-title">Branding</div>
-                <div class="settings-subsection-copy">Upload an optional logo for the upper-left corner of this deployed copy of the app.</div>
-                <div class="grid two">
-                  <div class="appearance-logo-card">
-                    <span>Corner Logo Preview</span>
-                    <div id="appearance-logo-preview-shell" class="appearance-logo-preview is-empty">
-                      <img id="appearance-logo-preview" src="" alt="Selected logo preview" hidden>
-                      <p id="appearance-logo-empty">No custom logo selected.</p>
-                    </div>
-                    <p class="hint">Transparent PNG or SVG logos tend to look best here.</p>
-                  </div>
-                  <div class="appearance-actions-card">
-                    <span>Logo Controls</span>
-                    <div class="appearance-actions">
-                      <button id="appearance-upload-logo" class="secondary" type="button">Upload Logo</button>
-                      <button id="appearance-clear-logo" class="ghost" type="button">Remove Logo</button>
-                    </div>
-                    <p class="hint">This only affects the branding for this deployed copy of the app.</p>
+              <section class="settings-section settings-stage-panel" id="appearance-section" data-nav-label="Appearance" data-nav-copy="Corner branding and app visuals for this deployed copy.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Appearance</span>
+                  <h3>Appearance</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Customize the corner branding shown in the app while keeping the main title centered.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="settings-subsections">
+                    <section class="settings-subsection">
+                      <div class="settings-subsection-title">Branding</div>
+                      <div class="settings-subsection-copy">Upload an optional logo for the upper-left corner of this deployed copy of the app.</div>
+                      <div class="grid two">
+                        <div class="appearance-logo-card">
+                          <span>Corner Logo Preview</span>
+                          <div id="appearance-logo-preview-shell" class="appearance-logo-preview is-empty">
+                            <img id="appearance-logo-preview" src="" alt="Selected logo preview" hidden>
+                            <p id="appearance-logo-empty">No custom logo selected.</p>
+                          </div>
+                          <p class="hint">Transparent PNG or SVG logos tend to look best here.</p>
+                        </div>
+                        <div class="appearance-actions-card">
+                          <span>Logo Controls</span>
+                          <div class="appearance-actions">
+                            <button id="appearance-upload-logo" class="secondary" type="button">Upload Logo</button>
+                            <button id="appearance-clear-logo" class="ghost" type="button">Remove Logo</button>
+                          </div>
+                          <p class="hint">This only affects the branding for this deployed copy of the app.</p>
+                        </div>
+                      </div>
+                    </section>
                   </div>
                 </div>
               </section>
-            </div>
-          </div>
-        </section>
 
-        <section class="settings-section collapsed">
-          <button class="settings-section-toggle" type="button" aria-expanded="false">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Retention</span>
-              <span class="settings-section-copy">Choose how many recent daily, monthly, and yearly snapshots to keep automatically.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Show Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="grid three">
-              <label>
-                <span>Recent Days</span>
-                <input id="retention-days" type="number" min="0" max="365">
-              </label>
-              <label>
-                <span>Recent Months</span>
-                <input id="retention-months" type="number" min="0" max="120">
-              </label>
-              <label>
-                <span>Recent Years</span>
-                <input id="retention-years" type="number" min="0" max="50">
-              </label>
-            </div>
-            <p class="hint">Example: 3 recent days keeps today, yesterday, and the day before. Monthly retention keeps one snapshot per month. Yearly retention keeps one snapshot per year.</p>
-          </div>
-        </section>
-
-        <section class="settings-section settings-section-open">
-          <button class="settings-section-toggle" type="button" aria-expanded="true">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Automation</span>
-              <span class="settings-section-copy">Set the backup schedule, stale-backup reminders, and cloud health checks.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Hide Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="settings-inline-actions">
-              <button id="install-automation" class="secondary" type="button">Install Windows Tasks</button>
-            </div>
-            <p class="hint">This creates Windows Scheduled Tasks so the PC can run backups automatically and remind the user when backups have gone stale. Manual backups still work even if you do not install the tasks.</p>
-            <div class="grid three">
-              <label class="checkbox">
-                <input id="schedule-enabled" type="checkbox">
-                <span>Enable scheduled backups</span>
-              </label>
-              <label>
-                <span>Frequency</span>
-                <select id="schedule-frequency">
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                </select>
-              </label>
-              <label>
-                <span>Time</span>
-                <input id="schedule-time" type="time">
-              </label>
-              <label>
-                <span>Time Display</span>
-                <select id="time-format">
-                  <option value="12h">12-hour</option>
-                  <option value="24h">24-hour</option>
-                </select>
-              </label>
-              <label class="checkbox">
-                <input id="reminders-enabled" type="checkbox">
-                <span>Enable stale backup reminders</span>
-              </label>
-              <label>
-                <span>Warn After</span>
-                <input id="reminder-days" type="number" min="1" max="90">
-              </label>
-              <label class="checkbox">
-                <input id="cloud-check-enabled" type="checkbox">
-                <span>Include cloud health checks</span>
-              </label>
-            </div>
-          </div>
-        </section>
-
-        <section class="settings-section collapsed">
-          <button class="settings-section-toggle" type="button" aria-expanded="false">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Support Contact</span>
-              <span class="settings-section-copy">Tell users exactly who to contact when reminders, alerts, or support actions point them back to the shop.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Show Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="grid two">
-              <label>
-                <span>Store or Support Name</span>
-                <input id="support-name" type="text" placeholder="One Bite Technology">
-              </label>
-              <label>
-                <span>Phone Number</span>
-                <input id="support-phone" type="text" placeholder="780-555-1234">
-              </label>
-              <label>
-                <span>Support Email</span>
-                <input id="support-email" type="email" placeholder="support@example.com">
-              </label>
-              <label>
-                <span>Contact Page or Support Link</span>
-                <input id="support-url" type="url" placeholder="https://example.com/contact">
-              </label>
-            </div>
-            <p class="hint">If a contact page is entered, notifications can send users there. If not, the app falls back to the support email address when possible.</p>
-          </div>
-        </section>
-
-        <section class="settings-section collapsed">
-          <button class="settings-section-toggle" type="button" aria-expanded="false">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Annual Licensing</span>
-              <span class="settings-section-copy">Prepare the app for a future one-license-per-install subscription service without enabling enforcement yet.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Show Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="grid two">
-              <label>
-                <span>Licensing Service URL</span>
-                <input id="licensing-service-url" type="url" placeholder="https://licensing.onebitetechnology.ca">
-              </label>
-              <label>
-                <span>Customer or Subscription Reference</span>
-                <input id="licensing-customer-ref" type="text" placeholder="Customer account or subscription ID">
-              </label>
-              <label>
-                <span>Renewal Warning Days</span>
-                <input id="licensing-warning-days" type="number" min="1" max="365">
-              </label>
-              <label>
-                <span>Grace Period Days</span>
-                <input id="licensing-grace-days" type="number" min="1" max="90">
-              </label>
-            </div>
-            <p id="licensing-status-copy" class="settings-meta-value">Licensing is disabled while backup testing continues.</p>
-            <p class="hint">Recommended plan: one annual license per customer install, with renewal warnings and a grace period before any future enforcement.</p>
-          </div>
-        </section>
-
-        <section class="settings-section settings-section-open">
-          <button class="settings-section-toggle" type="button" aria-expanded="true">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">App Updates</span>
-              <span class="settings-section-copy">Choose whether this PC should receive stable releases only or internal beta builds too.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Hide Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="updates-card">
-              <label class="checkbox">
-                <input id="receive-beta-updates" type="checkbox">
-                <span>Receive beta and test builds</span>
-              </label>
-              <div class="updates-meta-row">
-                <span class="updates-meta-label">Current Version:</span>
-                <span id="app-version" class="updates-meta-value">Loading...</span>
-              </div>
-              <div class="updates-meta-row">
-                <span class="updates-meta-label">Latest Version:</span>
-                <span id="update-latest-version" class="updates-meta-value">Not checked yet</span>
-              </div>
-              <p id="update-status" class="settings-meta-value">Checking update support...</p>
-              <div id="update-progress-shell" class="update-progress-shell" hidden>
-                <div class="update-progress-track">
-                  <div id="update-progress-bar" class="update-progress-bar"></div>
+              <section class="settings-section settings-stage-panel" id="retention-section" data-nav-label="Retention" data-nav-copy="Daily, monthly, and yearly snapshot history rules.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Retention</span>
+                  <h3>Retention</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Choose how many recent daily, monthly, and yearly snapshots to keep automatically.</div>
                 </div>
-                <div id="update-progress-label" class="update-progress-label">0%</div>
-              </div>
-              <p class="hint">Turn beta updates off to stay on final releases only. Turn it on to receive internal test builds as they are published.</p>
-              <div class="updates-actions">
-                <button id="check-updates" class="primary" type="button">Check for Updates</button>
-                <button id="download-update" class="secondary" type="button" disabled>Download Update</button>
-                <button id="install-update" class="primary" type="button" disabled>Install Update Now</button>
-              </div>
-              <div class="maintenance-tools-card">
-                <div class="maintenance-tools-label">Maintenance Tools</div>
-                <div class="maintenance-tool-grid">
-                  <div class="maintenance-tool">
-                    <button id="report-issue" class="ghost" type="button">Feature Request / Report Bug</button>
-                    <p class="hint">Create a support-ready email and open the logs folder so the user can attach diagnostic files.</p>
+                <div class="settings-panel-body">
+                  <div class="grid three">
+                    <label>
+                      <span>Recent Days</span>
+                      <input id="retention-days" type="number" min="0" max="365">
+                    </label>
+                    <label>
+                      <span>Recent Months</span>
+                      <input id="retention-months" type="number" min="0" max="120">
+                    </label>
+                    <label>
+                      <span>Recent Years</span>
+                      <input id="retention-years" type="number" min="0" max="50">
+                    </label>
+                  </div>
+                  <p class="hint">Example: 3 recent days keeps today, yesterday, and the day before. Monthly retention keeps one snapshot per month. Yearly retention keeps one snapshot per year.</p>
+                </div>
+              </section>
+
+              <section class="settings-section settings-stage-panel" id="automation-section" data-nav-label="Automation" data-nav-copy="Scheduled backups, reminder timing, and cloud health checks.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Automation</span>
+                  <h3>Automation</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Set the backup schedule, stale-backup reminders, and cloud health checks.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="settings-inline-actions">
+                    <button id="install-automation" class="secondary" type="button">Install Windows Tasks</button>
+                  </div>
+                  <p class="hint">This creates Windows Scheduled Tasks so the PC can run backups automatically and remind the user when backups have gone stale. Manual backups still work even if you do not install the tasks.</p>
+                  <div class="grid three">
+                    <label class="checkbox">
+                      <input id="schedule-enabled" type="checkbox">
+                      <span>Enable scheduled backups</span>
+                    </label>
+                    <label>
+                      <span>Frequency</span>
+                      <select id="schedule-frequency">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Time</span>
+                      <input id="schedule-time" type="time">
+                    </label>
+                    <label>
+                      <span>Time Display</span>
+                      <select id="time-format">
+                        <option value="12h">12-hour</option>
+                        <option value="24h">24-hour</option>
+                      </select>
+                    </label>
+                    <label class="checkbox">
+                      <input id="reminders-enabled" type="checkbox">
+                      <span>Enable stale backup reminders</span>
+                    </label>
+                    <label>
+                      <span>Warn After</span>
+                      <input id="reminder-days" type="number" min="1" max="90">
+                    </label>
+                    <label class="checkbox">
+                      <input id="cloud-check-enabled" type="checkbox">
+                      <span>Include cloud health checks</span>
+                    </label>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
+              </section>
 
-        <section class="settings-section collapsed">
-          <button class="settings-section-toggle" type="button" aria-expanded="false">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Restore</span>
-              <span class="settings-section-copy">Restore files, browser data, or supported email data from a saved snapshot back to the PC.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Show Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="grid two">
-              <label>
-                <span>Snapshot to Restore</span>
-                <select id="restore-snapshot-select"></select>
-              </label>
-              <label>
-                <span>Backup Item</span>
-                <select id="restore-job-select"></select>
-              </label>
-            </div>
-            <p id="restore-support-note" class="settings-meta-value">Choose a snapshot and backup item to review restore support notes.</p>
-            <div class="grid two">
-              <label>
-                <span>Restore Mode</span>
-                <select id="restore-mode-select">
-                  <option value="original">Restore to original location</option>
-                  <option value="alternate">Restore to another folder</option>
-                </select>
-              </label>
-              <div class="restore-target-card">
-                <span>Alternate Restore Folder</span>
-                <div class="settings-inline-actions">
-                  <button id="restore-pick-target" class="secondary" type="button">Choose Restore Folder</button>
+              <section class="settings-section settings-stage-panel" id="support-section" data-nav-label="Support Contact" data-nav-copy="Who customers should contact when DataSafe needs attention.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Support Contact</span>
+                  <h3>Support Contact</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Tell users exactly who to contact when reminders, alerts, or support actions point them back to the shop.</div>
                 </div>
-                <p id="restore-target-summary" class="hint">Original location will be used unless you choose another folder.</p>
-              </div>
-            </div>
-            <div class="settings-inline-actions">
-              <button id="run-restore" class="primary" type="button">Restore Selected Snapshot</button>
-            </div>
-            <p class="hint">For browser and email restores, close the related app first. Fresh installs are usually safest after launching the app once before restoring its data.</p>
-          </div>
-        </section>
+                <div class="settings-panel-body">
+                  <div class="grid two">
+                    <label>
+                      <span>Store or Support Name</span>
+                      <input id="support-name" type="text" placeholder="One Bite Technology">
+                    </label>
+                    <label>
+                      <span>Phone Number</span>
+                      <input id="support-phone" type="text" placeholder="780-555-1234">
+                    </label>
+                    <label>
+                      <span>Support Email</span>
+                      <input id="support-email" type="email" placeholder="support@example.com">
+                    </label>
+                    <label>
+                      <span>Contact Page or Support Link</span>
+                      <input id="support-url" type="url" placeholder="https://example.com/contact">
+                    </label>
+                  </div>
+                  <p class="hint">If a contact page is entered, notifications can send users there. If not, the app falls back to the support email address when possible.</p>
+                </div>
+              </section>
 
-        <section class="settings-section collapsed">
-          <button class="settings-section-toggle" type="button" aria-expanded="false">
-            <span class="settings-section-toggle-copy">
-              <span class="settings-section-title">Support Logs</span>
-              <span class="settings-section-copy">Open the local app-data folder to review runtime and launcher logs when something behaves unexpectedly.</span>
-            </span>
-            <span class="settings-section-toggle-label">
-              <span class="settings-section-toggle-text">Show Details</span>
-              <span class="settings-section-caret">▾</span>
-            </span>
-          </button>
-          <div class="settings-section-body">
-            <div class="settings-inline-actions">
-              <button id="open-logs-folder" class="secondary" type="button">Open Logs Folder</button>
+              <section class="settings-section settings-stage-panel" id="licensing-section" data-nav-label="Annual Licensing" data-nav-copy="Future subscription scaffolding, still disabled during testing.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Annual Licensing</span>
+                  <h3>Annual Licensing</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Prepare the app for a future one-license-per-install subscription service without enabling enforcement yet.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="grid two">
+                    <label>
+                      <span>Licensing Service URL</span>
+                      <input id="licensing-service-url" type="url" placeholder="https://licensing.onebitetechnology.ca">
+                    </label>
+                    <label>
+                      <span>Customer or Subscription Reference</span>
+                      <input id="licensing-customer-ref" type="text" placeholder="Customer account or subscription ID">
+                    </label>
+                    <label>
+                      <span>Renewal Warning Days</span>
+                      <input id="licensing-warning-days" type="number" min="1" max="365">
+                    </label>
+                    <label>
+                      <span>Grace Period Days</span>
+                      <input id="licensing-grace-days" type="number" min="1" max="90">
+                    </label>
+                  </div>
+                  <p id="licensing-status-copy" class="settings-meta-value">Licensing is disabled while backup testing continues.</p>
+                  <p class="hint">Recommended plan: one annual license per customer install, with renewal warnings and a grace period before any future enforcement.</p>
+                </div>
+              </section>
+
+              <section class="settings-section settings-stage-panel" id="updates-section" data-nav-label="App Updates" data-nav-copy="Stable vs beta channel choice, updater actions, and maintenance tools.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">App Updates</span>
+                  <h3>App Updates</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Choose whether this PC should receive stable releases only or internal beta builds too.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="updates-card">
+                    <label class="checkbox">
+                      <input id="receive-beta-updates" type="checkbox">
+                      <span>Receive beta and test builds</span>
+                    </label>
+                    <div class="updates-meta-row">
+                      <span class="updates-meta-label">Current Version:</span>
+                      <span id="app-version" class="updates-meta-value">Loading...</span>
+                    </div>
+                    <div class="updates-meta-row">
+                      <span class="updates-meta-label">Latest Version:</span>
+                      <span id="update-latest-version" class="updates-meta-value">Not checked yet</span>
+                    </div>
+                    <p id="update-status" class="settings-meta-value">Checking update support...</p>
+                    <div id="update-progress-shell" class="update-progress-shell" hidden>
+                      <div class="update-progress-track">
+                        <div id="update-progress-bar" class="update-progress-bar"></div>
+                      </div>
+                      <div id="update-progress-label" class="update-progress-label">0%</div>
+                    </div>
+                    <p class="hint">Turn beta updates off to stay on final releases only. Turn it on to receive internal test builds as they are published.</p>
+                    <div class="updates-actions">
+                      <button id="check-updates" class="primary" type="button">Check for Updates</button>
+                      <button id="download-update" class="secondary" type="button" disabled>Download Update</button>
+                      <button id="install-update" class="primary" type="button" disabled>Install Update Now</button>
+                    </div>
+                    <div class="maintenance-tools-card">
+                      <div class="maintenance-tools-label">Maintenance Tools</div>
+                      <div class="maintenance-tool-grid">
+                        <div class="maintenance-tool">
+                          <button id="report-issue" class="ghost" type="button">Feature Request / Report Bug</button>
+                          <p class="hint">Create a support-ready email and open the logs folder so the user can attach diagnostic files.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="settings-section settings-stage-panel" id="restore-section" data-nav-label="Restore" data-nav-copy="Recover files, browser data, or supported email data from a saved snapshot.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Restore</span>
+                  <h3>Restore</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Restore files, browser data, or supported email data from a saved snapshot back to the PC.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="grid two">
+                    <label>
+                      <span>Snapshot to Restore</span>
+                      <select id="restore-snapshot-select"></select>
+                    </label>
+                    <label>
+                      <span>Backup Item</span>
+                      <select id="restore-job-select"></select>
+                    </label>
+                  </div>
+                  <p id="restore-support-note" class="settings-meta-value">Choose a snapshot and backup item to review restore support notes.</p>
+                  <div class="grid two">
+                    <label>
+                      <span>Restore Mode</span>
+                      <select id="restore-mode-select">
+                        <option value="original">Restore to original location</option>
+                        <option value="alternate">Restore to another folder</option>
+                      </select>
+                    </label>
+                    <div class="restore-target-card">
+                      <span>Alternate Restore Folder</span>
+                      <div class="settings-inline-actions">
+                        <button id="restore-pick-target" class="secondary" type="button">Choose Restore Folder</button>
+                      </div>
+                      <p id="restore-target-summary" class="hint">Original location will be used unless you choose another folder.</p>
+                    </div>
+                  </div>
+                  <div class="settings-inline-actions">
+                    <button id="run-restore" class="primary" type="button">Restore Selected Snapshot</button>
+                  </div>
+                  <p class="hint">For browser and email restores, close the related app first. Fresh installs are usually safest after launching the app once before restoring its data.</p>
+                </div>
+              </section>
+
+              <section class="settings-section settings-stage-panel" id="logs-section" data-nav-label="Support Logs" data-nav-copy="Open the local log folder when something behaves unexpectedly.">
+                <div class="settings-panel-hero">
+                  <span class="settings-panel-kicker">Support Logs</span>
+                  <h3>Support Logs</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Open the local app-data folder to review runtime and launcher logs when something behaves unexpectedly.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <div class="settings-inline-actions">
+                    <button id="open-logs-folder" class="secondary" type="button">Open Logs Folder</button>
+                  </div>
+                  <p class="settings-meta-value">Look for <strong>`obtools-runtime.log`</strong> and <strong>`obtools-launcher.log`</strong>.</p>
+                </div>
+              </section>
+
             </div>
-            <p class="settings-meta-value">Look for <strong>`obtools-runtime.log`</strong> and <strong>`obtools-launcher.log`</strong>.</p>
           </div>
-        </section>
         </div>
 
         <div class="settings-modal-footer">

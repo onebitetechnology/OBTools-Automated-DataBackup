@@ -9,6 +9,7 @@ const state = {
   pendingUpdateVersion: null,
   updateChannelDraft: null,
   appearanceDraftLogoDataUrl: null,
+  settingsActivePanelId: "automation-section",
   actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: [],
@@ -81,6 +82,8 @@ const el = {
   openSettings: document.getElementById("open-settings"),
   closeSettings: document.getElementById("close-settings"),
   settingsDrawer: document.getElementById("settings-drawer"),
+  settingsNav: document.getElementById("settings-nav"),
+  settingsPanelStage: document.getElementById("settings-panel-stage"),
   settingsRetentionSummary: document.getElementById("settings-retention-summary"),
   settingsScheduleSummary: document.getElementById("settings-schedule-summary"),
   appVersion: document.getElementById("app-version"),
@@ -1436,6 +1439,7 @@ function renderStatus() {
 }
 
 function openSettingsDrawer() {
+  setActiveSettingsPanel(state.settingsActivePanelId || "automation-section");
   el.settingsDrawer.hidden = false;
   document.body.classList.add("settings-open");
 }
@@ -1449,34 +1453,68 @@ function closeSettingsDrawer() {
   document.body.classList.remove("settings-open");
 }
 
-function initializeSettingsSections() {
-  document.querySelectorAll(".settings-section").forEach((section) => {
-    const toggle = section.querySelector(":scope > .settings-section-toggle");
-    const toggleText = section.querySelector(":scope > .settings-section-toggle .settings-section-toggle-text");
+function setActiveSettingsPanel(nextPanelId) {
+  const panelStage = el.settingsPanelStage;
+  if (!panelStage) {
+    return;
+  }
 
-    if (!toggle || !toggleText) {
-      return;
-    }
+  const panels = [...panelStage.querySelectorAll(".settings-stage-panel")];
+  if (!panels.length) {
+    return;
+  }
 
-    const syncSectionState = () => {
-      const expanded = !section.classList.contains("collapsed");
-      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-      toggleText.textContent = expanded ? "Hide Details" : "Show Details";
-    };
+  const resolvedPanelId = panels.some((panel) => panel.id === nextPanelId)
+    ? nextPanelId
+    : panels[0].id;
 
-    if (section.classList.contains("settings-section-open")) {
-      section.classList.remove("collapsed");
-    } else if (!section.classList.contains("collapsed")) {
-      section.classList.add("collapsed");
-    }
+  state.settingsActivePanelId = resolvedPanelId;
 
-    syncSectionState();
-
-    toggle.addEventListener("click", () => {
-      section.classList.toggle("collapsed");
-      syncSectionState();
-    });
+  panels.forEach((panel) => {
+    panel.classList.toggle("active", panel.id === resolvedPanelId);
   });
+
+  el.settingsNav?.querySelectorAll(".settings-nav-button").forEach((button) => {
+    button.classList.toggle("active", button.dataset.panelId === resolvedPanelId);
+  });
+
+  panelStage.scrollTop = 0;
+}
+
+function initializeSettingsPanels() {
+  const nav = el.settingsNav;
+  const panelStage = el.settingsPanelStage;
+  if (!nav || !panelStage) {
+    return;
+  }
+
+  const panels = [...panelStage.querySelectorAll(".settings-stage-panel")];
+  nav.innerHTML = `
+    <section class="settings-nav-card">
+      <div class="settings-nav-title">Control Room</div>
+      <div class="settings-nav-list" id="settings-nav-list"></div>
+    </section>
+  `;
+
+  const list = nav.querySelector("#settings-nav-list");
+  panels.forEach((panel) => {
+    const label = panel.dataset.navLabel || panel.querySelector(":scope > h3")?.textContent?.trim() || "Section";
+    const copy = panel.dataset.navCopy || panel.querySelector(":scope > .settings-section-copy")?.textContent?.trim() || "";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "settings-nav-button";
+    button.dataset.panelId = panel.id;
+    button.innerHTML = `
+      <span class="settings-nav-button-label">${escapeHtml(label)}</span>
+      <span class="settings-nav-button-copy">${escapeHtml(copy)}</span>
+    `;
+    button.addEventListener("click", () => {
+      setActiveSettingsPanel(panel.id);
+    });
+    list.appendChild(button);
+  });
+
+  setActiveSettingsPanel(state.settingsActivePanelId || "automation-section");
 }
 
 function renderSettingsSummary() {
@@ -2534,7 +2572,7 @@ el.termsSkip.addEventListener("click", () => {
   renderTermsGate();
 });
 
-initializeSettingsSections();
+initializeSettingsPanels();
 
 load().catch((error) => {
   el.protectionState.textContent = "Unavailable";
