@@ -872,7 +872,7 @@ select:focus {
 
 .settings-panel {
   position: relative;
-  width: min(920px, calc(100vw - 40px));
+  width: min(1120px, calc(100vw - 36px));
   max-height: calc(100vh - 36px);
   padding: 18px;
   overflow: hidden;
@@ -914,17 +914,21 @@ select:focus {
 }
 
 .settings-modal-body {
+  flex: 1 1 auto;
   padding-top: 14px;
   overflow: hidden;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(250px, 290px) minmax(0, 1fr);
+  gap: 18px;
   align-items: start;
   height: 100%;
+  min-height: 0;
 }
 
 .settings-nav {
@@ -1041,6 +1045,14 @@ select:focus {
 
 .settings-page.active,
 .settings-stage-panel.active {
+  display: grid;
+}
+
+.settings-page.settings-section {
+  display: none;
+}
+
+.settings-page.settings-section.active {
   display: grid;
 }
 

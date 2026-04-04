@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.49 - 2026-04-04
+
+- Fixed the settings panel visibility rules so only the selected section shows on the right while the other sections stay hidden.
+- Improved the settings modal scrolling so longer settings sections scroll cleanly inside the modal instead of feeling clipped or wonky.
+- Widened the settings modal so the left navigation and right content area have more breathing room.
+
 ## 1.0.10-beta.48 - 2026-04-04
 
 - Fixed the Settings modal so the background blur no longer opens while hiding the settings content itself.
