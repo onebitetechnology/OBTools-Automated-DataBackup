@@ -1610,7 +1610,7 @@ function setActiveSettingsPanel(nextPanelId) {
     return;
   }
 
-  const panels = [...panelStage.querySelectorAll(".settings-panel")];
+  const panels = [...panelStage.querySelectorAll(".settings-page")];
   if (!panels.length) {
     return;
   }
@@ -1641,7 +1641,7 @@ function initializeSettingsPanels() {
     return;
   }
 
-  const panels = [...panelStage.querySelectorAll(".settings-panel")];
+  const panels = [...panelStage.querySelectorAll(".settings-page")];
   const buttons = [...nav.querySelectorAll(".settings-nav-button")];
   if (!panels.length || !buttons.length) {
     return;

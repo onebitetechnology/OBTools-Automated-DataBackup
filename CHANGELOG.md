@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.48 - 2026-04-04
+
+- Fixed the Settings modal so the background blur no longer opens while hiding the settings content itself.
+- Separated the outer modal container from the inner right-side settings pages so only the selected settings section is toggled on the right.
+- Kept the Ticket Listing-style left navigation behavior while fixing the class collision that was preventing the settings UI from rendering.
+
 ## 1.0.10-beta.47 - 2026-04-01
 
 - Reworked the Settings navigation so the left rail now uses an explicit Ticket Listing-style section list instead of relying on a generated placeholder shell.
