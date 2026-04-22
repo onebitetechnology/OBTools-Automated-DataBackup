@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.52 - 2026-04-22
+
+- Removed the extra retention-history sentence from the `Choose a backup destination` panel to keep that card focused on destination selection.
+- Let the main setup explainer copy use the full width of its panel instead of wrapping early inside an artificial narrower text column.
+- Improved the main panel header layout so explanatory text stays on one line when there is room and only wraps responsively when the app window narrows.
+
 ## 1.0.10-beta.51 - 2026-04-22
 
 - Replaced the DataSafe app icon and in-app brand icon with the latest DataSafe artwork.

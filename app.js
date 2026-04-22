@@ -47,7 +47,6 @@ const el = {
   headerCustomerLogo: document.getElementById("header-customer-logo"),
   backupSizeEstimate: document.getElementById("backup-size-estimate"),
   destinationFreeSpace: document.getElementById("destination-free-space"),
-  retentionBehaviorSummary: document.getElementById("retention-behavior-summary"),
   destinationModeSummary: document.getElementById("destination-mode-summary"),
   retentionDays: document.getElementById("retention-days"),
   retentionMonths: document.getElementById("retention-months"),
@@ -1756,13 +1755,11 @@ function renderStorageAnalysis() {
   if (!state.storage) {
     el.backupSizeEstimate.textContent = "Waiting for analysis";
     el.destinationFreeSpace.textContent = "Waiting for analysis";
-    el.retentionBehaviorSummary.textContent = "Daily, monthly, and yearly snapshots are kept according to your retention plan. Older snapshots outside that plan are removed automatically.";
     return;
   }
 
   el.backupSizeEstimate.textContent = formatBytes(state.storage.estimatedBytes);
   el.destinationFreeSpace.textContent = state.storage.freeBytes == null ? "Unavailable" : formatBytes(state.storage.freeBytes);
-  el.retentionBehaviorSummary.textContent = `The app keeps ${retentionSummary(state.storage.retention)} of history. Daily, monthly, and yearly snapshots outside that plan are removed automatically.`;
 }
 
 async function refreshStorageAnalysis() {

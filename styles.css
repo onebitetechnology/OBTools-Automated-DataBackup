@@ -469,6 +469,11 @@ label span {
   margin-bottom: 14px;
 }
 
+.panel-head > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -791,7 +796,7 @@ button:disabled {
 
 .section-note {
   margin: 6px 0 0;
-  max-width: 52ch;
+  max-width: none;
   color: var(--muted);
   line-height: 1.45;
   font-size: 0.94rem;
