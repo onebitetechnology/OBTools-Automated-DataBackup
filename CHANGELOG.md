@@ -2,6 +2,11 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.51 - 2026-04-22
+
+- Replaced the DataSafe app icon and in-app brand icon with the latest DataSafe artwork.
+- Kept the existing icon wiring intact so the new asset is used in the header branding, Electron window icon, and Windows packaged app icon source.
+
 ## 1.0.10-beta.50 - 2026-04-22
 
 - Reworked the main setup area so `Choose a backup destination` and `Choose what gets backed up` are now full-width stacked panels instead of side-by-side cards.
