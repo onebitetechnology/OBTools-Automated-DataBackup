@@ -88,22 +88,6 @@
         <section class="card panel">
           <div class="panel-head">
             <div>
-              <h3>Choose what gets backed up</h3>
-              <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
-            </div>
-          </div>
-          <div class="panel-actions-underhead">
-            <button id="detect-user-folders" class="secondary" type="button">Choose User Folders</button>
-            <button id="detect-browsers" class="secondary" type="button">Choose Browser Data</button>
-            <button id="detect-email-data" class="secondary" type="button">Backup Email Data</button>
-            <button id="add-job" class="ghost">Add Item</button>
-          </div>
-          <div id="jobs-list" class="jobs-list"></div>
-        </section>
-
-        <section class="card panel">
-          <div class="panel-head">
-            <div>
               <h3>Choose a backup destination</h3>
               <p class="section-note">Choose the external drive where backups should live. DataSafe will create and use a <strong>DataSafe Backup</strong> folder on that drive.</p>
             </div>
@@ -129,6 +113,22 @@
           <input id="destination-base-folder" type="hidden">
           <input id="destination-drive-letter" type="hidden">
           <input id="destination-label" type="hidden">
+        </section>
+
+        <section class="card panel">
+          <div class="panel-head">
+            <div>
+              <h3>Choose what gets backed up</h3>
+              <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
+            </div>
+          </div>
+          <div class="panel-actions-underhead">
+            <button id="detect-user-folders" class="secondary" type="button">Choose User Folders</button>
+            <button id="detect-browsers" class="secondary" type="button">Choose Browser Data</button>
+            <button id="detect-email-data" class="secondary" type="button">Backup Email Data</button>
+            <button id="add-job" class="ghost">Add Item</button>
+          </div>
+          <div id="jobs-list" class="jobs-list"></div>
         </section>
 
       </main>

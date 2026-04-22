@@ -2,6 +2,12 @@
 
 All notable changes to `OBTools Automated Backups` should be recorded in this file.
 
+## 1.0.10-beta.50 - 2026-04-22
+
+- Reworked the main setup area so `Choose a backup destination` and `Choose what gets backed up` are now full-width stacked panels instead of side-by-side cards.
+- Moved the backup destination panel above the backup-items panel so the setup flow reads more naturally from destination first to contents second.
+- Kept the existing DataSafe visual theme while giving the main setup path more breathing room for longer copy and larger backup item lists.
+
 ## 1.0.10-beta.49 - 2026-04-04
 
 - Fixed the settings panel visibility rules so only the selected section shows on the right while the other sections stay hidden.
