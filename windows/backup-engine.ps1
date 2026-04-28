@@ -18,6 +18,173 @@ function Write-Json([string]$Path, $Value) {
   [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
+function New-DefaultStatus {
+  [PSCustomObject]@{
+    lastBackupAt = $null
+    lastBackupResult = $null
+    lastBackupMessage = "No backups have been run yet."
+    destinationStatus = "Unknown"
+    recentSnapshots = @()
+    cloud = [PSCustomObject]@{
+      checkedAt = $null
+      summary = "Cloud check has not been run yet."
+      level = "info"
+      recommendations = @()
+    }
+    automation = [PSCustomObject]@{
+      installedAt = $null
+      message = "Windows automation has not been installed yet."
+    }
+    licensing = [PSCustomObject]@{
+      enabled = $false
+      state = "disabled"
+      message = "Licensing is disabled while backup testing continues."
+      renewalDate = $null
+      lastCheckedAt = $null
+    }
+  }
+}
+
+function Get-SupportContact($Config) {
+  $support = $null
+  if ($Config -and $null -ne $Config.PSObject.Properties["support"]) {
+    $support = $Config.support
+  }
+  $businessName = if ($Config -and $null -ne $Config.PSObject.Properties["businessName"]) { [string]$Config.businessName } else { "One Bite Technology" }
+  return [PSCustomObject]@{
+    name = if ($support -and $support.name) { [string]$support.name } elseif ($businessName) { $businessName } else { "One Bite Technology" }
+    phone = if ($support -and $support.phone) { [string]$support.phone } else { "" }
+    email = if ($support -and $support.email) { [string]$support.email } else { "jeff@onebitetechnology.ca" }
+    contactUrl = if ($support -and $support.contactUrl) { [string]$support.contactUrl } else { "" }
+  }
+}
+
+function Get-ContactTarget($Support) {
+  if ($Support.contactUrl) {
+    return $Support.contactUrl
+  }
+  if ($Support.email) {
+    return "mailto:$($Support.email)"
+  }
+  return $null
+}
+
+function Get-ContactLine($Support) {
+  $parts = New-Object System.Collections.Generic.List[string]
+  if ($Support.name) {
+    $parts.Add($Support.name)
+  }
+  if ($Support.phone) {
+    $parts.Add($Support.phone)
+  }
+  if ($Support.email) {
+    $parts.Add($Support.email)
+  }
+
+  if ($parts.Count -eq 0) {
+    return ""
+  }
+
+  return "Contact: $($parts -join ' | ')"
+}
+
+function Show-BackupNotification(
+  [string]$Title,
+  [string]$Message,
+  [ValidateSet("Info", "Warning", "Error")]
+  [string]$Level,
+  [string]$ClickTarget
+) {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $notify = New-Object System.Windows.Forms.NotifyIcon
+    $notify.Visible = $true
+    $notify.Icon = switch ($Level) {
+      "Error" { [System.Drawing.SystemIcons]::Error }
+      "Warning" { [System.Drawing.SystemIcons]::Warning }
+      default { [System.Drawing.SystemIcons]::Information }
+    }
+    $notify.BalloonTipTitle = $Title
+    $notify.BalloonTipText = $Message
+
+    $subscription = $null
+    if ($ClickTarget) {
+      $subscription = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked -Action {
+        Start-Process $using:ClickTarget | Out-Null
+      }
+    }
+
+    $notify.ShowBalloonTip(15000)
+    Start-Sleep -Seconds 16
+
+    if ($subscription) {
+      Unregister-Event -SourceIdentifier $subscription.Name -ErrorAction SilentlyContinue
+      Remove-Job -Id $subscription.Id -Force -ErrorAction SilentlyContinue
+    }
+
+    $notify.Dispose()
+    return
+  } catch {
+    # Fall back to a traditional popup if the tray balloon cannot be shown.
+  }
+
+  $shell = New-Object -ComObject WScript.Shell
+  $iconCode = if ($Level -eq "Error") { 16 } elseif ($Level -eq "Warning") { 48 } else { 64 }
+  $shell.Popup($Message, 20, $Title, $iconCode) | Out-Null
+}
+
+function Acquire-BackupLock([string]$LockPath) {
+  if (Test-Path -LiteralPath $LockPath) {
+    $existing = Get-Item -LiteralPath $LockPath -ErrorAction SilentlyContinue
+    $ageHours = if ($existing) { ((Get-Date) - $existing.LastWriteTime).TotalHours } else { 0 }
+    if ($ageHours -lt 12) {
+      throw "A DataSafe backup is already running. Wait for it to finish before starting another backup."
+    }
+
+    Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+  }
+
+  try {
+    $handle = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes("pid=$PID`nstartedAt=$((Get-Date).ToString('o'))`n")
+    $handle.Write($bytes, 0, $bytes.Length)
+    $handle.Flush()
+    $handle.Position = 0
+    return $handle
+  } catch {
+    throw "A DataSafe backup is already running. Wait for it to finish before starting another backup."
+  }
+}
+
+function Release-BackupLock($Handle, [string]$LockPath) {
+  if ($Handle) {
+    $Handle.Dispose()
+  }
+
+  Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+}
+
+function Write-FailedBackupStatus([string]$Path, [string]$Message) {
+  try {
+    $status = Read-Json $Path
+  } catch {
+    $status = New-DefaultStatus
+  }
+
+  $status.lastBackupAt = (Get-Date).ToString("o")
+  $status.lastBackupResult = "error"
+  $status.lastBackupMessage = $Message
+  if ($Message -match "Destination drive is not available" -or $Message -match "No destination drive could be resolved") {
+    $status.destinationStatus = "Drive Not Connected"
+  } else {
+    $status.destinationStatus = "Issue Detected"
+  }
+
+  Write-Json $Path $status
+}
+
 function Write-DestinationMarker([string]$BaseRoot, $Config) {
   $markerPath = Join-Path $BaseRoot ".datasafe-backup.json"
   $marker = [ordered]@{
@@ -308,53 +475,89 @@ function Copy-BackupItem($Job, [string]$RootPath) {
   Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
-$config = Read-Json $ConfigPath
-$status = Read-Json $StatusPath
+$lockPath = "$StatusPath.lock"
+$lockHandle = $null
+$configForNotification = $null
 
-$driveRoot = Resolve-Destination $config.destination
-if (-not (Test-Path -LiteralPath $driveRoot)) {
-  throw "Destination drive is not available: $driveRoot"
+try {
+  $lockHandle = Acquire-BackupLock $lockPath
+  $config = Read-Json $ConfigPath
+  $configForNotification = $config
+  $status = Read-Json $StatusPath
+
+  $driveRoot = Resolve-Destination $config.destination
+  if (-not (Test-Path -LiteralPath $driveRoot)) {
+    throw "Destination drive is not available: $driveRoot"
+  }
+
+  $baseRoot = if ([string]::IsNullOrWhiteSpace($config.destination.baseFolder)) {
+    $driveRoot
+  } else {
+    Join-Path $driveRoot $config.destination.baseFolder
+  }
+  $currentRoot = Join-Path $baseRoot "current"
+  $snapshotsRoot = Join-Path $baseRoot "snapshots"
+  $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
+  $snapshotPath = Join-Path $snapshotsRoot $timestamp
+  $retentionPolicy = Get-RetentionPolicy $config
+  $enabledJobs = @($config.jobs | Where-Object { $_.enabled })
+  $totalSteps = [Math]::Max(($enabledJobs.Count * 2) + 1, 1)
+
+  New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
+  New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
+
+  Write-ProgressMarker -Phase "preparing" -JobName "" -Step 1 -TotalSteps $totalSteps -Detail "Preparing the backup destination."
+  [void](Prune-Snapshots $snapshotsRoot $retentionPolicy)
+
+  for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
+    $job = $enabledJobs[$index]
+    $currentStep = 2 + ($index * 2)
+
+    Write-ProgressMarker -Phase "copying-current" -JobName $job.name -Step $currentStep -TotalSteps $totalSteps -Detail "Copying to the current backup set."
+    Copy-BackupItem $job $currentRoot
+
+    Write-ProgressMarker -Phase "copying-snapshot" -JobName $job.name -Step ($currentStep + 1) -TotalSteps $totalSteps -Detail "Creating the dated snapshot copy."
+    Copy-BackupItem $job $snapshotPath
+  }
+
+  $remainingSnapshots = @(Prune-Snapshots $snapshotsRoot $retentionPolicy)
+  $remaining = @($remainingSnapshots | Select-Object -ExpandProperty Name)
+  Write-DestinationMarker $baseRoot $config
+  $status.lastBackupAt = (Get-Date).ToString("o")
+  $status.lastBackupResult = "success"
+  $status.lastBackupMessage = "Backup completed to $baseRoot"
+  $status.destinationStatus = "Connected"
+  $status.recentSnapshots = @($remaining)
+
+  Write-Json $StatusPath $status
+  Write-ProgressMarker -Phase "complete" -JobName "" -Step $totalSteps -TotalSteps $totalSteps -Detail "Backup completed successfully."
+  Write-Output "Backup completed successfully."
+} catch {
+  $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
+  Write-FailedBackupStatus $StatusPath $message
+
+  $notificationConfig = $configForNotification
+  if (-not $notificationConfig) {
+    try {
+      $notificationConfig = Read-Json $ConfigPath
+    } catch {
+      $notificationConfig = $null
+    }
+  }
+
+  $support = Get-SupportContact $notificationConfig
+  $contactLine = Get-ContactLine $support
+  $contactTarget = Get-ContactTarget $support
+  $notificationMessage = "DataSafe could not complete the backup. $message"
+  if ($contactLine) {
+    $notificationMessage = "$notificationMessage`n$contactLine"
+  }
+
+  Show-BackupNotification -Title "DataSafe Backup Failed" -Message $notificationMessage -Level "Error" -ClickTarget $contactTarget
+  Write-Error $message
+  exit 1
+} finally {
+  if ($lockHandle) {
+    Release-BackupLock $lockHandle $lockPath
+  }
 }
-
-$baseRoot = if ([string]::IsNullOrWhiteSpace($config.destination.baseFolder)) {
-  $driveRoot
-} else {
-  Join-Path $driveRoot $config.destination.baseFolder
-}
-$currentRoot = Join-Path $baseRoot "current"
-$snapshotsRoot = Join-Path $baseRoot "snapshots"
-$timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
-$snapshotPath = Join-Path $snapshotsRoot $timestamp
-$retentionPolicy = Get-RetentionPolicy $config
-$enabledJobs = @($config.jobs | Where-Object { $_.enabled })
-$totalSteps = [Math]::Max(($enabledJobs.Count * 2) + 1, 1)
-
-New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
-New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
-
-Write-ProgressMarker -Phase "preparing" -JobName "" -Step 1 -TotalSteps $totalSteps -Detail "Preparing the backup destination."
-[void](Prune-Snapshots $snapshotsRoot $retentionPolicy)
-
-for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
-  $job = $enabledJobs[$index]
-  $currentStep = 2 + ($index * 2)
-
-  Write-ProgressMarker -Phase "copying-current" -JobName $job.name -Step $currentStep -TotalSteps $totalSteps -Detail "Copying to the current backup set."
-  Copy-BackupItem $job $currentRoot
-
-  Write-ProgressMarker -Phase "copying-snapshot" -JobName $job.name -Step ($currentStep + 1) -TotalSteps $totalSteps -Detail "Creating the dated snapshot copy."
-  Copy-BackupItem $job $snapshotPath
-}
-
-$remainingSnapshots = @(Prune-Snapshots $snapshotsRoot $retentionPolicy)
-$remaining = @($remainingSnapshots | Select-Object -ExpandProperty Name)
-Write-DestinationMarker $baseRoot $config
-$status.lastBackupAt = (Get-Date).ToString("o")
-$status.lastBackupResult = "success"
-$status.lastBackupMessage = "Backup completed to $baseRoot"
-$status.destinationStatus = "Connected"
-$status.recentSnapshots = @($remaining)
-
-Write-Json $StatusPath $status
-Write-ProgressMarker -Phase "complete" -JobName "" -Step $totalSteps -TotalSteps $totalSteps -Detail "Backup completed successfully."
-Write-Output "Backup completed successfully."

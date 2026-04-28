@@ -663,6 +663,10 @@ function summarizeActionMessage(message) {
     return "The selected backup drive is not connected. Reconnect it and try again.";
   }
 
+  if (/DataSafe backup is already running/i.test(raw)) {
+    return "A backup is already running. Wait for it to finish before starting another backup.";
+  }
+
   if (/does not look like the backup drive that was used before/i.test(raw) || /previous DataSafe Backup folder was not found/i.test(raw) || /appears to belong to a different install/i.test(raw)) {
     return "The selected drive does not look like the backup drive used before. Confirm the correct backup drive is connected before creating a new backup set.";
   }

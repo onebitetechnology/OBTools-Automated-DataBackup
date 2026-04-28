@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, ipcMain, shell } = require("electron");
 const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
@@ -27,6 +27,10 @@ const DEFAULT_DATA_DIR = path.join(RESOURCE_ROOT, "data");
 const WINDOWS_DIR = path.join(RESOURCE_ROOT, "windows");
 const SHELL_WORK_DIR = RESOURCE_ROOT;
 const DESTINATION_MARKER_FILE = ".datasafe-backup.json";
+let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+let lastTrayNotificationSignature = null;
 let currentUpdateChannel = null;
 let updateStatus = {
   supported: app.isPackaged && process.platform === "win32",
@@ -90,6 +94,23 @@ function writeRuntimeLog(message) {
   } catch (_error) {
     // Logging should never crash the app.
   }
+}
+
+function appIconPath() {
+  return path.join(APP_ROOT, "assets", "datasafe-icon.png");
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+
+  mainWindow.show();
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
 }
 
 function readLogTail(filePath, maxLines = 80) {
@@ -389,6 +410,197 @@ function automationSettingsChanged(previousConfig, nextConfig) {
     previousConfig?.schedule?.time !== nextConfig?.schedule?.time ||
     previousConfig?.reminders?.enabled !== nextConfig?.reminders?.enabled
   );
+}
+
+function summarizeProtectionForTray(config, status) {
+  const staleDays = Math.max(Number(config?.reminders?.staleDays || 7) || 7, 1);
+  const message = String(status?.lastBackupMessage || "").trim();
+
+  if (status?.destinationStatus === "Drive Not Connected") {
+    return {
+      level: "warning",
+      title: "Backup Drive Missing",
+      message: "Reconnect the backup drive so DataSafe can protect this PC."
+    };
+  }
+
+  if (status?.destinationStatus === "Destination Not Recognized") {
+    return {
+      level: "warning",
+      title: "Check Backup Drive",
+      message: "The connected drive does not look like the expected DataSafe backup drive."
+    };
+  }
+
+  if (!status?.lastBackupAt) {
+    return {
+      level: "warning",
+      title: "First Backup Needed",
+      message: "Run the first DataSafe backup to finish protecting this PC."
+    };
+  }
+
+  if (status?.lastBackupResult === "warning") {
+    return {
+      level: "warning",
+      title: "Backup Completed With Warnings",
+      message: message || "Some files may need attention."
+    };
+  }
+
+  if (status?.lastBackupResult && status.lastBackupResult !== "success") {
+    return {
+      level: "error",
+      title: "Backup Failed",
+      message: message || "DataSafe could not complete the latest backup."
+    };
+  }
+
+  const lastBackupTime = new Date(status.lastBackupAt).getTime();
+  const backupAgeDays = Number.isFinite(lastBackupTime)
+    ? (Date.now() - lastBackupTime) / (1000 * 60 * 60 * 24)
+    : staleDays + 1;
+
+  if (backupAgeDays > staleDays) {
+    return {
+      level: "warning",
+      title: "Backup Overdue",
+      message: `The last backup is older than ${staleDays} day${staleDays === 1 ? "" : "s"}.`
+    };
+  }
+
+  return {
+    level: "good",
+    title: "Protected",
+    message: "DataSafe backups look healthy."
+  };
+}
+
+function contactSupportFromTray() {
+  try {
+    const { configPath } = dataPaths();
+    const config = normalizeConfigForMain(readJson(configPath));
+    const support = supportContact(config);
+
+    if (support.contactUrl && /^https:\/\//i.test(support.contactUrl)) {
+      shell.openExternal(support.contactUrl);
+      return;
+    }
+
+    if (support.email) {
+      const subject = encodeURIComponent(`DataSafe Support Request (${app.getVersion()})`);
+      const body = encodeURIComponent([
+        `Hi ${support.name || "Support Team"},`,
+        "",
+        "I need help with DataSafe on this PC.",
+        "",
+        `App version: ${app.getVersion()}`,
+        ""
+      ].join("\n"));
+      shell.openExternal(`mailto:${support.email}?subject=${subject}&body=${body}`);
+      return;
+    }
+  } catch (error) {
+    writeLauncherLog(`Tray support action failed: ${error.message}`);
+  }
+
+  showMainWindow();
+}
+
+function updateTrayStatus({ notify = false } = {}) {
+  if (!tray || !app.isReady()) {
+    return;
+  }
+
+  let config = null;
+  let status = null;
+  let summary = {
+    level: "warning",
+    title: "DataSafe Needs Setup",
+    message: "Open DataSafe to finish backup setup."
+  };
+
+  try {
+    const { configPath, statusPath } = dataPaths();
+    config = normalizeConfigForMain(readJson(configPath));
+    status = readJson(statusPath);
+    summary = summarizeProtectionForTray(config, status);
+  } catch (error) {
+    writeLauncherLog(`Tray status update failed: ${error.message}`);
+  }
+
+  tray.setToolTip(`DataSafe - ${summary.title}\n${summary.message}`);
+  tray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: `${summary.title}: ${summary.message}`,
+      enabled: false
+    },
+    { type: "separator" },
+    {
+      label: "Open DataSafe",
+      click: showMainWindow
+    },
+    {
+      label: "Open to Run Backup",
+      click: showMainWindow
+    },
+    {
+      label: "Contact One Bite",
+      click: contactSupportFromTray
+    },
+    {
+      label: "View Logs",
+      click: async () => {
+        try {
+          const { userDataDir } = dataPaths();
+          await shell.openPath(userDataDir);
+        } catch (error) {
+          writeLauncherLog(`Tray logs action failed: ${error.message}`);
+        }
+      }
+    },
+    { type: "separator" },
+    {
+      label: "Quit DataSafe",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]));
+
+  const signature = `${summary.level}:${summary.title}:${summary.message}`;
+  if (
+    notify &&
+    process.platform === "win32" &&
+    summary.level !== "good" &&
+    signature !== lastTrayNotificationSignature &&
+    Notification.isSupported()
+  ) {
+    lastTrayNotificationSignature = signature;
+    new Notification({
+      title: summary.title,
+      body: `${summary.message} Contact One Bite if you need help.`,
+      icon: appIconPath()
+    }).show();
+  }
+}
+
+function ensureTray() {
+  if (tray || process.platform !== "win32") {
+    return;
+  }
+
+  try {
+    tray = new Tray(appIconPath());
+    if (typeof tray.setTitle === "function") {
+      tray.setTitle("DataSafe");
+    }
+    tray.on("click", showMainWindow);
+    updateTrayStatus({ notify: true });
+  } catch (error) {
+    writeLauncherLog(`Tray initialization failed: ${error.message}`);
+  }
 }
 
 function buildSupportBundle(config, status) {
@@ -1437,7 +1649,6 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
 
 function createWindow() {
   writeLauncherLog("Creating main window.");
-  const appIconPath = path.join(APP_ROOT, "assets", "datasafe-icon.png");
   const window = new BrowserWindow({
     width: 1360,
     height: 920,
@@ -1445,12 +1656,13 @@ function createWindow() {
     minHeight: 760,
     backgroundColor: "#f4efe7",
     title: "DataSafe",
-    icon: appIconPath,
+    icon: appIconPath(),
     show: true,
     webPreferences: {
       preload: path.join(APP_ROOT, "preload.js")
     }
   });
+  mainWindow = window;
 
   const indexPath = path.join(APP_ROOT, "index.html");
   writeLauncherLog(`Window preload path: ${path.join(APP_ROOT, "preload.js")}`);
@@ -1468,6 +1680,17 @@ function createWindow() {
 
   window.on("closed", () => {
     writeLauncherLog("Main window closed.");
+    if (mainWindow === window) {
+      mainWindow = null;
+    }
+  });
+
+  window.on("close", (event) => {
+    if (process.platform === "win32" && tray && !isQuitting) {
+      event.preventDefault();
+      window.hide();
+      updateTrayStatus({ notify: false });
+    }
   });
 
   window.on("unresponsive", () => {
@@ -1517,6 +1740,8 @@ function createWindow() {
     writeLauncherLog(`loadFile failed: ${error.stack || error.message}`);
     dialog.showErrorBox("DataSafe", error.message);
   });
+
+  ensureTray();
 }
 
 function configureAutoUpdates(configOverride = null) {
@@ -1710,6 +1935,10 @@ app.on("child-process-gone", (_event, details) => {
   writeLauncherLog(`Child process gone. type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);
 });
 
+app.on("before-quit", () => {
+  isQuitting = true;
+});
+
 app.whenReady().then(() => {
   writeLauncherLog("App whenReady resolved. Initializing data and window.");
   ensureDataFiles();
@@ -1744,7 +1973,7 @@ process.on("unhandledRejection", (error) => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
+  if (process.platform !== "darwin" && !(process.platform === "win32" && tray)) {
     app.quit();
   }
 });
@@ -1761,6 +1990,7 @@ ipcMain.handle("state:get", () => {
   configureAutoUpdates(config);
   const status = reconcileStatusWithDisk(config, readJson(statusPath));
   writeJson(statusPath, status);
+  updateTrayStatus({ notify: true });
   return {
     config,
     status,
@@ -1805,6 +2035,7 @@ ipcMain.handle("config:save", async (_event, config) => {
     }
   }
 
+  updateTrayStatus({ notify: true });
   return {
     config: normalizedConfig,
     status,
@@ -2053,8 +2284,10 @@ ipcMain.handle("backup:run", async (_event, options = {}) => {
     writeJson(configPath, updatedConfig);
   }
 
+  const status = mergeStatus(statusPatch);
+  updateTrayStatus({ notify: true });
   return {
-    status: mergeStatus(statusPatch),
+    status,
     meta: appMeta(),
     driveInsights: buildDriveInsights(updatedConfig, inspectKnownDestinations(updatedConfig))
   };
@@ -2067,14 +2300,16 @@ ipcMain.handle("cloud:check", async () => {
   writeLauncherLog(`IPC cloud:check completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Cloud sync check completed. ok=${result.ok} message=${result.message}`);
   const { statusPath } = dataPaths();
+  const status = mergeStatus({
+    cloud: {
+      ...readJson(statusPath).cloud,
+      checkedAt: new Date().toISOString(),
+      summary: result.message || "Cloud check completed."
+    }
+  });
+  updateTrayStatus({ notify: true });
   return {
-    status: mergeStatus({
-      cloud: {
-        ...readJson(statusPath).cloud,
-        checkedAt: new Date().toISOString(),
-        summary: result.message || "Cloud check completed."
-      }
-    }),
+    status,
     meta: appMeta()
   };
 });
@@ -2085,15 +2320,17 @@ ipcMain.handle("automation:install", async () => {
   const result = await runPowerShell("install-scheduled-backup.ps1");
   writeLauncherLog(`IPC automation:install completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Automation install completed. ok=${result.ok} message=${result.message}`);
+  const status = mergeStatus({
+    automation: {
+      installedAt: result.ok ? new Date().toISOString() : null,
+      message: result.message
+    }
+  });
+  updateTrayStatus({ notify: true });
   return {
     ok: result.ok,
     message: result.message,
-    status: mergeStatus({
-      automation: {
-        installedAt: result.ok ? new Date().toISOString() : null,
-        message: result.message
-      }
-    }),
+    status,
     meta: appMeta()
   };
 });

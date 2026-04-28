@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to `OBTools Automated Backups` should be recorded in this file.
+All notable changes to `DataSafe` should be recorded in this file.
+
+## 1.0.10-beta.53 - 2026-04-27
+
+- Added a Windows tray presence so DataSafe can stay available after the main window is closed and show backup health, support, and log actions from the tray menu.
+- Added backup-engine failure handling so scheduled backup errors update status, notify the user, and include One Bite support contact details instead of failing silently.
+- Added a backup lock to prevent overlapping manual and scheduled backup runs from colliding.
+- Updated stale-backup reminder wording from the old OBTools name to DataSafe.
 
 ## 1.0.10-beta.52 - 2026-04-22
 

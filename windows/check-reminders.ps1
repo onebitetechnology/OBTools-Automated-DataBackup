@@ -158,7 +158,7 @@ if ($driveRoot) {
 }
 
 if ($driveMissing) {
-  $message = "The configured backup drive is not connected. Reconnect the drive and open OBTools Automated Backups to run your next backup."
+  $message = "The configured backup drive is not connected. Reconnect the drive and open DataSafe to run your next backup."
   if ($contactLine) {
     $message = "$message`n$contactLine"
   }
@@ -168,7 +168,7 @@ if ($driveMissing) {
 }
 
 if (-not $status.lastBackupAt) {
-  $message = "OBTools Automated Backups has not completed its first backup yet. Connect the backup drive and run the app to finish setup."
+  $message = "DataSafe has not completed its first backup yet. Connect the backup drive and run the app to finish setup."
   if ($contactLine) {
     $message = "$message`n$contactLine"
   }
@@ -180,7 +180,7 @@ if (-not $status.lastBackupAt) {
 $last = [DateTime]::Parse($status.lastBackupAt)
 $age = ((Get-Date) - $last).TotalDays
 if ($age -ge [double]$config.reminders.staleDays) {
-  $message = "Your last backup was $([math]::Floor($age)) day(s) ago. Connect the backup drive and open OBTools Automated Backups soon."
+  $message = "Your last backup was $([math]::Floor($age)) day(s) ago. Connect the backup drive and open DataSafe soon."
   if ($contactLine) {
     $message = "$message`n$contactLine"
   }
