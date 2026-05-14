@@ -59,10 +59,9 @@ if ($schedule.frequency -eq "weekly") {
 }
 
 $reminderTrigger = New-ScheduledTaskTrigger -Daily -At 09:00
-$catchUpTriggers = @(
-  New-ScheduledTaskTrigger -AtStartup,
-  New-ScheduledTaskTrigger -AtLogOn
-)
+$catchUpStartupTrigger = New-ScheduledTaskTrigger -AtStartup
+$catchUpLogonTrigger = New-ScheduledTaskTrigger -AtLogOn
+$catchUpTriggers = @($catchUpStartupTrigger, $catchUpLogonTrigger)
 
 $messages = New-Object System.Collections.Generic.List[string]
 
