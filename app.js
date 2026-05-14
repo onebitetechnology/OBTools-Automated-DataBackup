@@ -7,13 +7,13 @@ const state = {
   backupProgress: null,
   backupTiming: null,
   notifiedUpdateVersion: null,
-    pendingUpdateVersion: null,
-    updateChannelDraft: null,
-    appearanceDraftLogoDataUrl: null,
-    settingsActivePanelId: "automation-section",
-    notifiedDriveInsightSignature: null,
-    initialAutomationPromptShown: false,
-    actionInFlight: false,
+  pendingUpdateVersion: null,
+  updateChannelDraft: null,
+  appearanceDraftLogoDataUrl: null,
+  settingsActivePanelId: "automation-section",
+  notifiedDriveInsightSignature: null,
+  initialAutomationPromptShown: false,
+  actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: [],
   detectedEmailData: [],
@@ -53,10 +53,10 @@ const el = {
   retentionDays: document.getElementById("retention-days"),
   retentionMonths: document.getElementById("retention-months"),
   retentionYears: document.getElementById("retention-years"),
-    scheduleEnabled: document.getElementById("schedule-enabled"),
-    scheduleFrequency: document.getElementById("schedule-frequency"),
-    scheduleDayOfWeek: document.getElementById("schedule-day-of-week"),
-    scheduleTime: document.getElementById("schedule-time"),
+  scheduleEnabled: document.getElementById("schedule-enabled"),
+  scheduleFrequency: document.getElementById("schedule-frequency"),
+  scheduleDayOfWeek: document.getElementById("schedule-day-of-week"),
+  scheduleTime: document.getElementById("schedule-time"),
   timeFormat: document.getElementById("time-format"),
   remindersEnabled: document.getElementById("reminders-enabled"),
   reminderDays: document.getElementById("reminder-days"),
@@ -264,16 +264,16 @@ function normalizeConfig(config) {
     headerLogoDataUrl: String(config.appearance?.headerLogoDataUrl || "").trim()
   };
 
-    const normalizedLicensing = {
+  const normalizedLicensing = {
     enabled: false,
     planName: String(config.licensing?.planName || "Annual License").trim(),
     serviceUrl: String(config.licensing?.serviceUrl || "").trim(),
     customerReference: String(config.licensing?.customerReference || "").trim(),
     renewalWarningDays: Math.max(Number(config.licensing?.renewalWarningDays ?? 30) || 30, 1),
     graceDays: Math.max(Number(config.licensing?.graceDays ?? 14) || 14, 1)
-    };
+  };
 
-    return {
+  return {
     ...config,
     businessName: config.businessName || "One Bite Technology",
     destination: normalizedDestination,
@@ -297,13 +297,13 @@ function normalizeConfig(config) {
       enabled: true,
       ...(config.cloudCheck || {})
     },
-      schedule: {
-        enabled: true,
-        frequency: "weekly",
-        time: "18:30",
-        ...(config.schedule || {}),
-        dayOfWeek: normalizeDayOfWeek(config.schedule?.dayOfWeek)
-      },
+    schedule: {
+      enabled: true,
+      frequency: "weekly",
+      time: "18:30",
+      ...(config.schedule || {}),
+      dayOfWeek: normalizeDayOfWeek(config.schedule?.dayOfWeek)
+    },
     reminders: {
       enabled: true,
       staleDays: 7,
@@ -369,8 +369,8 @@ function normalizeStatus(status) {
       lastCheckedAt: null,
       ...(shouldResetPreviewStatus ? {} : status.licensing || {})
     }
-    };
-  }
+  };
+}
 
 function normalizeDayOfWeek(value) {
   return DAY_NAMES.includes(value) ? value : "Monday";
@@ -848,13 +848,13 @@ function showResultModal({ title, message, list = [], secondaryAction = null, hi
 }
 
 function closeResultModal() {
-    el.resultModal.hidden = true;
-    renderResultProgress(null);
-    setTimeout(() => {
-      maybeShowDriveInsightPrompt();
-      maybeShowInitialAutomationPrompt();
-    }, 0);
-  }
+  el.resultModal.hidden = true;
+  renderResultProgress(null);
+  setTimeout(() => {
+    maybeShowDriveInsightPrompt();
+    maybeShowInitialAutomationPrompt();
+  }, 0);
+}
 
 function findKnownDestination(destinationId) {
   if (!destinationId) {
@@ -1638,8 +1638,7 @@ function renderStatus() {
   const summary = protectionSummary(state.status);
   const cloudLevel = state.status.cloud?.level || "info";
   const cloudChecked = Boolean(state.status.cloud?.checkedAt);
-  const cloudSummary = state.status.cloud?.summary || "";
-  const cloudHealthy = cloudLevel === "success" || (cloudChecked && cloudLevel === "info" && /OneDrive is installed/i.test(cloudSummary) && /running/i.test(cloudSummary));
+  const cloudHealthy = cloudChecked && cloudLevel === "success";
   const cloudProblem = cloudChecked && (cloudLevel === "warning" || cloudLevel === "error");
 
   el.backupStatusCard.classList.remove("status-good", "status-warning", "status-error");
@@ -1756,19 +1755,19 @@ function initializeSettingsPanels() {
 }
 
 function renderSettingsSummary() {
-    const { retention, schedule, preferences } = state.config;
-    el.settingsRetentionSummary.textContent = retentionSummary(retention);
+  const { retention, schedule, preferences } = state.config;
+  el.settingsRetentionSummary.textContent = retentionSummary(retention);
 
   if (!schedule.enabled) {
     el.settingsScheduleSummary.textContent = "Manual only";
     return;
   }
 
-    const scheduleTime = formatTimeOfDay(schedule.time, preferences?.timeFormat);
-    el.settingsScheduleSummary.textContent = schedule.frequency === "weekly"
-      ? `Weekly on ${normalizeDayOfWeek(schedule.dayOfWeek)} at ${scheduleTime}`
-      : `Daily at ${scheduleTime}`;
-  }
+  const scheduleTime = formatTimeOfDay(schedule.time, preferences?.timeFormat);
+  el.settingsScheduleSummary.textContent = schedule.frequency === "weekly"
+    ? `Weekly on ${normalizeDayOfWeek(schedule.dayOfWeek)} at ${scheduleTime}`
+    : `Daily at ${scheduleTime}`;
+}
 
 function renderScheduleControls() {
   if (!el.scheduleDayOfWeek || !el.scheduleFrequency) {
@@ -2161,29 +2160,29 @@ async function load() {
 }
 
 function buildAutomationPrompt(config) {
-    const parts = [];
-    if (config?.schedule?.enabled) {
-      const cadence = config.schedule.frequency === "weekly"
-        ? `weekly backups on ${normalizeDayOfWeek(config.schedule.dayOfWeek)}`
-        : "daily backups";
-      parts.push(cadence);
-    }
-    if (config?.reminders?.enabled) {
-      parts.push(`backup reminders after ${config.reminders.staleDays} day${Number(config.reminders.staleDays) === 1 ? "" : "s"}`);
-    }
+  const parts = [];
+  if (config?.schedule?.enabled) {
+    const cadence = config.schedule.frequency === "weekly"
+      ? `weekly backups on ${normalizeDayOfWeek(config.schedule.dayOfWeek)}`
+      : "daily backups";
+    parts.push(cadence);
+  }
+  if (config?.reminders?.enabled) {
+    parts.push(`backup reminders after ${config.reminders.staleDays} day${Number(config.reminders.staleDays) === 1 ? "" : "s"}`);
+  }
 
   const summary = parts.length
     ? `Install Windows Tasks so this PC can run ${parts.join(" and ")} automatically.`
     : "Install Windows Tasks so this PC can run backups and reminders automatically.";
 
-    return {
-      title: "Install Windows Tasks And Notifications?",
-      message: summary,
-      list: [
-        "Manual backups work without Windows Tasks.",
-        "Windows Tasks are needed for scheduled backups and reminder notifications.",
-        "DataSafe will also catch missed backups after the PC starts or the user signs in."
-      ],
+  return {
+    title: "Install Windows Tasks And Notifications?",
+    message: summary,
+    list: [
+      "Manual backups work without Windows Tasks.",
+      "Windows Tasks are needed for scheduled backups and reminder notifications.",
+      "DataSafe will also catch missed backups after the PC starts or the user signs in."
+    ],
     secondaryAction: {
       label: "Install Now",
       onClick: async () => {
@@ -2192,8 +2191,8 @@ function buildAutomationPrompt(config) {
       }
     },
     closeLabel: "Later"
-    };
-  }
+  };
+}
 
 function shouldOfferAutomationInstall() {
   return Boolean(
@@ -2400,7 +2399,7 @@ async function invokeAction(path, options = {}) {
 
     if (path === "/api/check-cloud") {
       showResultModal({
-        title: state.status.cloud?.level === "warning" ? "Cloud Sync Needs Attention" : "Cloud Sync Review",
+        title: state.status.cloud?.level === "success" ? "Cloud Sync Looks Healthy" : "Cloud Sync Needs Attention",
         message: summarizeActionMessage(state.status.cloud?.summary || "Cloud check completed."),
         list: state.status.cloud?.recommendations || [],
         secondaryAction: window.onebiteDesktop?.openOneDrive

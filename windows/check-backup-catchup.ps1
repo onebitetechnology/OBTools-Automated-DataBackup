@@ -16,7 +16,7 @@ function Read-Json([string]$Path) {
 
 function Get-NormalizedDayOfWeek($Schedule) {
   $validDays = @("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-  if ($Schedule -and $null -ne $Schedule.PSObject.Properties["dayOfWeek"] -and $validDays -contains [string]$Schedule.dayOfWeek) {
+  if ($Schedule -and $null -ne $Schedule.PSObject.Properties["dayOfWeek"] -and ($validDays -contains [string]$Schedule.dayOfWeek)) {
     return [string]$Schedule.dayOfWeek
   }
 

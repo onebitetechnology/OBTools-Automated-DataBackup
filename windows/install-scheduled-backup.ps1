@@ -23,7 +23,7 @@ function Remove-TaskIfExists([string]$TaskName) {
 
 function Get-NormalizedDayOfWeek($Schedule) {
   $validDays = @("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-  if ($Schedule -and $null -ne $Schedule.PSObject.Properties["dayOfWeek"] -and $validDays -contains [string]$Schedule.dayOfWeek) {
+  if ($Schedule -and $null -ne $Schedule.PSObject.Properties["dayOfWeek"] -and ($validDays -contains [string]$Schedule.dayOfWeek)) {
     return [string]$Schedule.dayOfWeek
   }
 
@@ -49,7 +49,8 @@ $backupDay = Get-NormalizedDayOfWeek $schedule
 $backupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$backupScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
 $reminderAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$reminderScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
 $catchUpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$catchUpScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`" -ScriptRoot `"$ScriptRoot`""
-$taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 12)
+$taskExecutionLimit = New-TimeSpan -Hours 12
+$taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit $taskExecutionLimit
 
 if ($schedule.frequency -eq "weekly") {
   $backupTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $backupDay -At $time
