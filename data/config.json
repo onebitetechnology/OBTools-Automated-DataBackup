@@ -16,6 +16,7 @@
   "schedule": {
     "enabled": true,
     "frequency": "weekly",
+    "dayOfWeek": "Monday",
     "time": "18:30"
   },
   "reminders": {

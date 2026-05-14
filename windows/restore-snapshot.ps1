@@ -39,24 +39,61 @@ function Resolve-Destination($Destination) {
   throw "No destination drive could be resolved."
 }
 
-function Get-BackupItemRoot($Job, [string]$SnapshotRoot) {
-  $destination = $null
+function Assert-SafeSnapshotName([string]$Value) {
+  if ($Value -notmatch '^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$') {
+    throw "The selected snapshot name is not valid."
+  }
+}
+
+function Assert-SafeRestoreTarget([string]$DestinationPath, $Job) {
+  if ([string]::IsNullOrWhiteSpace($DestinationPath)) {
+    throw "DataSafe could not resolve a restore location for this backup item."
+  }
+
+  $fullPath = [System.IO.Path]::GetFullPath($DestinationPath)
+  $rootPath = [System.IO.Path]::GetPathRoot($fullPath)
+  $normalizedFullPath = $fullPath -replace '\\+$', ''
+  $normalizedRootPath = $rootPath -replace '\\+$', ''
+  if ($Job.type -eq "folder" -and $normalizedFullPath -eq $normalizedRootPath) {
+    throw "DataSafe will not restore a folder directly onto the root of a drive. Choose another restore folder."
+  }
+}
+
+function Get-SafeBackupSegment([string]$Value, [string]$Fallback = "Item") {
+  $segment = if ([string]::IsNullOrWhiteSpace($Value)) { $Fallback } else { $Value }
+  $segment = ($segment -replace '\.[^./\\]+$', '')
+  $segment = ($segment -replace '[^a-zA-Z0-9 _-]', '-').Trim()
+  if ([string]::IsNullOrWhiteSpace($segment)) {
+    return $Fallback
+  }
+
+  return $segment
+}
+
+function Get-BackupDestinationSegments($Job) {
   if ($null -ne $Job.PSObject.Properties["relativeDestination"] -and $Job.relativeDestination) {
     $segments = @($Job.relativeDestination | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") } | ForEach-Object {
-      (("$_") -replace '[^a-zA-Z0-9 _-]', '-').Trim()
+      Get-SafeBackupSegment "$_"
     })
 
     if ($segments.Count -gt 0) {
-      $destination = $SnapshotRoot
-      foreach ($segment in $segments) {
-        $destination = Join-Path $destination $segment
-      }
+      return @($segments)
     }
   }
 
-  if (-not $destination) {
-    $safeName = ($Job.name -replace '[^a-zA-Z0-9_-]', '-').Trim('-')
-    $destination = Join-Path $SnapshotRoot $safeName
+  if ($null -ne $Job.PSObject.Properties["backupDestinationKey"] -and -not [string]::IsNullOrWhiteSpace($Job.backupDestinationKey)) {
+    return @(Get-SafeBackupSegment "$($Job.backupDestinationKey)")
+  }
+
+  $name = if ($null -ne $Job.PSObject.Properties["name"]) { "$($Job.name)" } else { "" }
+  $id = if ($null -ne $Job.PSObject.Properties["id"]) { "$($Job.id)" } else { "" }
+  return @(Get-SafeBackupSegment $name (Get-SafeBackupSegment $id "Item"))
+}
+
+function Get-BackupItemRoot($Job, [string]$SnapshotRoot) {
+  $destination = $SnapshotRoot
+  foreach ($segment in @(Get-BackupDestinationSegments $Job)) {
+    $destination = Join-Path $destination $segment
   }
 
   return $destination
@@ -139,6 +176,7 @@ function Copy-RestoreFile([string]$SourceRoot, [string]$DestinationPath) {
 }
 
 $config = Read-Json $ConfigPath
+Assert-SafeSnapshotName $SnapshotName
 $job = @($config.jobs | Where-Object { $_.id -eq $JobId } | Select-Object -First 1)
 if ($job.Count -eq 0) {
   throw "The selected backup item could not be found in this app configuration."
@@ -165,6 +203,7 @@ if (-not (Test-Path -LiteralPath $backupItemRoot)) {
 }
 
 $restoreTarget = Get-RestoreTarget $activeJob $RestoreMode $TargetPath
+Assert-SafeRestoreTarget $restoreTarget $activeJob
 
 if ($activeJob.type -eq "folder") {
   Copy-RestoreFolder $backupItemRoot $restoreTarget

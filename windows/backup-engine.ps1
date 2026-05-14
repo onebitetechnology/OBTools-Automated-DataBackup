@@ -328,6 +328,75 @@ function Get-RobocopyExcludedDirectories([string]$Source) {
   return @($excluded)
 }
 
+function Get-SafeBackupSegment([string]$Value, [string]$Fallback = "Item") {
+  $segment = if ([string]::IsNullOrWhiteSpace($Value)) { $Fallback } else { $Value }
+  $segment = ($segment -replace '\.[^./\\]+$', '')
+  $segment = ($segment -replace '[^a-zA-Z0-9 _-]', '-').Trim()
+  if ([string]::IsNullOrWhiteSpace($segment)) {
+    return $Fallback
+  }
+
+  return $segment
+}
+
+function Get-BackupDestinationSegments($Job) {
+  if ($null -ne $Job.PSObject.Properties["relativeDestination"] -and $Job.relativeDestination) {
+    $segments = @($Job.relativeDestination | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") } | ForEach-Object {
+      Get-SafeBackupSegment "$_"
+    })
+
+    if ($segments.Count -gt 0) {
+      return @($segments)
+    }
+  }
+
+  if ($null -ne $Job.PSObject.Properties["backupDestinationKey"] -and -not [string]::IsNullOrWhiteSpace($Job.backupDestinationKey)) {
+    return @(Get-SafeBackupSegment "$($Job.backupDestinationKey)")
+  }
+
+  $name = if ($null -ne $Job.PSObject.Properties["name"]) { "$($Job.name)" } else { "" }
+  $id = if ($null -ne $Job.PSObject.Properties["id"]) { "$($Job.id)" } else { "" }
+  return @(Get-SafeBackupSegment $name (Get-SafeBackupSegment $id "Item"))
+}
+
+function Get-BackupItemTargetPath($Job, [string]$RootPath) {
+  $destination = $RootPath
+  foreach ($segment in @(Get-BackupDestinationSegments $Job)) {
+    $destination = Join-Path $destination $segment
+  }
+
+  return $destination
+}
+
+function Test-BackupJobPlan($Jobs) {
+  $sourceOwners = @{}
+  $destinationOwners = @{}
+  if (@($Jobs).Count -eq 0) {
+    throw "Turn on at least one backup item before running a backup."
+  }
+
+  foreach ($job in @($Jobs)) {
+    $name = if ($job.name) { "$($job.name)" } else { "Unnamed backup item" }
+    $rawPath = if ($null -ne $job.PSObject.Properties["path"]) { "$($job.path)" } else { "" }
+    if ([string]::IsNullOrWhiteSpace($rawPath)) {
+      throw "$name needs a Windows path before it can be backed up."
+    }
+
+    $source = Expand-WindowsPath $rawPath
+    $sourceKey = ($source -replace '\\+$', '').ToLowerInvariant()
+    if ($sourceOwners.ContainsKey($sourceKey)) {
+      throw "$name points to the same source as $($sourceOwners[$sourceKey]). Remove the duplicate or choose a different path."
+    }
+    $sourceOwners[$sourceKey] = $name
+
+    $destinationKey = (@(Get-BackupDestinationSegments $job) -join '\').ToLowerInvariant()
+    if ($destinationOwners.ContainsKey($destinationKey)) {
+      throw "$name would write to the same backup folder as $($destinationOwners[$destinationKey]). Rename one item or remove the duplicate before running backup."
+    }
+    $destinationOwners[$destinationKey] = $name
+  }
+}
+
 function Parse-SnapshotTimestamp([string]$SnapshotName) {
   try {
     return [datetime]::ParseExact($SnapshotName, "yyyy-MM-dd_HH-mm-ss", [System.Globalization.CultureInfo]::InvariantCulture)
@@ -416,24 +485,7 @@ function Copy-BackupItem($Job, [string]$RootPath) {
     throw "Backup source missing: $source"
   }
 
-  $destination = $null
-  if ($null -ne $Job.PSObject.Properties["relativeDestination"] -and $Job.relativeDestination) {
-    $segments = @($Job.relativeDestination | Where-Object { -not [string]::IsNullOrWhiteSpace("$_") } | ForEach-Object {
-      (("$_") -replace '[^a-zA-Z0-9 _-]', '-').Trim()
-    })
-
-    if ($segments.Count -gt 0) {
-      $destination = $RootPath
-      foreach ($segment in $segments) {
-        $destination = Join-Path $destination $segment
-      }
-    }
-  }
-
-  if (-not $destination) {
-    $safeName = ($Job.name -replace '[^a-zA-Z0-9_-]', '-').Trim('-')
-    $destination = Join-Path $RootPath $safeName
-  }
+  $destination = Get-BackupItemTargetPath $Job $RootPath
 
   if ($Job.type -eq "folder") {
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
@@ -502,6 +554,7 @@ try {
   $retentionPolicy = Get-RetentionPolicy $config
   $enabledJobs = @($config.jobs | Where-Object { $_.enabled })
   $totalSteps = [Math]::Max(($enabledJobs.Count * 2) + 1, 1)
+  Test-BackupJobPlan $enabledJobs
 
   New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
   New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
@@ -531,6 +584,7 @@ try {
 
   Write-Json $StatusPath $status
   Write-ProgressMarker -Phase "complete" -JobName "" -Step $totalSteps -TotalSteps $totalSteps -Detail "Backup completed successfully."
+  Show-BackupNotification -Title "DataSafe Backup Complete" -Message "Backup completed successfully to $baseRoot." -Level "Info" -ClickTarget $null
   Write-Output "Backup completed successfully."
 } catch {
   $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }

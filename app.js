@@ -7,12 +7,13 @@ const state = {
   backupProgress: null,
   backupTiming: null,
   notifiedUpdateVersion: null,
-  pendingUpdateVersion: null,
-  updateChannelDraft: null,
-  appearanceDraftLogoDataUrl: null,
-  settingsActivePanelId: "automation-section",
-  notifiedDriveInsightSignature: null,
-  actionInFlight: false,
+    pendingUpdateVersion: null,
+    updateChannelDraft: null,
+    appearanceDraftLogoDataUrl: null,
+    settingsActivePanelId: "automation-section",
+    notifiedDriveInsightSignature: null,
+    initialAutomationPromptShown: false,
+    actionInFlight: false,
   termsBypassedForSession: false,
   detectedBrowsers: [],
   detectedEmailData: [],
@@ -22,6 +23,7 @@ const state = {
 };
 
 let backupProgressTimer = null;
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 const el = {
   backupStatusCard: document.getElementById("backup-status-card"),
@@ -51,9 +53,10 @@ const el = {
   retentionDays: document.getElementById("retention-days"),
   retentionMonths: document.getElementById("retention-months"),
   retentionYears: document.getElementById("retention-years"),
-  scheduleEnabled: document.getElementById("schedule-enabled"),
-  scheduleFrequency: document.getElementById("schedule-frequency"),
-  scheduleTime: document.getElementById("schedule-time"),
+    scheduleEnabled: document.getElementById("schedule-enabled"),
+    scheduleFrequency: document.getElementById("schedule-frequency"),
+    scheduleDayOfWeek: document.getElementById("schedule-day-of-week"),
+    scheduleTime: document.getElementById("schedule-time"),
   timeFormat: document.getElementById("time-format"),
   remindersEnabled: document.getElementById("reminders-enabled"),
   reminderDays: document.getElementById("reminder-days"),
@@ -261,16 +264,16 @@ function normalizeConfig(config) {
     headerLogoDataUrl: String(config.appearance?.headerLogoDataUrl || "").trim()
   };
 
-  const normalizedLicensing = {
+    const normalizedLicensing = {
     enabled: false,
     planName: String(config.licensing?.planName || "Annual License").trim(),
     serviceUrl: String(config.licensing?.serviceUrl || "").trim(),
     customerReference: String(config.licensing?.customerReference || "").trim(),
     renewalWarningDays: Math.max(Number(config.licensing?.renewalWarningDays ?? 30) || 30, 1),
     graceDays: Math.max(Number(config.licensing?.graceDays ?? 14) || 14, 1)
-  };
+    };
 
-  return {
+    return {
     ...config,
     businessName: config.businessName || "One Bite Technology",
     destination: normalizedDestination,
@@ -294,12 +297,13 @@ function normalizeConfig(config) {
       enabled: true,
       ...(config.cloudCheck || {})
     },
-    schedule: {
-      enabled: true,
-      frequency: "weekly",
-      time: "18:30",
-      ...(config.schedule || {})
-    },
+      schedule: {
+        enabled: true,
+        frequency: "weekly",
+        time: "18:30",
+        ...(config.schedule || {}),
+        dayOfWeek: normalizeDayOfWeek(config.schedule?.dayOfWeek)
+      },
     reminders: {
       enabled: true,
       staleDays: 7,
@@ -365,7 +369,11 @@ function normalizeStatus(status) {
       lastCheckedAt: null,
       ...(shouldResetPreviewStatus ? {} : status.licensing || {})
     }
-  };
+    };
+  }
+
+function normalizeDayOfWeek(value) {
+  return DAY_NAMES.includes(value) ? value : "Monday";
 }
 
 function formatDate(value) {
@@ -537,6 +545,89 @@ function formatBytes(bytes) {
 
   const rounded = value >= 10 || index === 0 ? value.toFixed(0) : value.toFixed(1);
   return `${rounded} ${units[index]}`;
+}
+
+function sanitizeBackupSegment(value, fallback = "Item") {
+  return String(value || fallback)
+    .replace(/\.[^./\\]+$/, "")
+    .replace(/[^a-zA-Z0-9 _-]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim() || fallback;
+}
+
+function backupDestinationSegments(job) {
+  if (Array.isArray(job.relativeDestination) && job.relativeDestination.length) {
+    const segments = job.relativeDestination
+      .map((segment) => sanitizeBackupSegment(segment, "Item"))
+      .filter(Boolean);
+    if (segments.length) {
+      return segments;
+    }
+  }
+
+  if (job.backupDestinationKey) {
+    return [sanitizeBackupSegment(job.backupDestinationKey, "Item")];
+  }
+
+  return [sanitizeBackupSegment(job.name || job.id, "Item")];
+}
+
+function backupDestinationKey(job) {
+  return backupDestinationSegments(job).join("\\").toLowerCase();
+}
+
+function normalizePathKey(value) {
+  return String(value || "").trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+}
+
+function validateBackupPlan(config, { requireDestination = false } = {}) {
+  const issues = [];
+  const enabledJobs = (config.jobs || []).filter((job) => job.enabled);
+  const destinations = new Map();
+  const paths = new Map();
+
+  if (requireDestination && !config.destination?.driveLetter) {
+    issues.push("Choose a backup location before running a backup.");
+  }
+
+  if (!enabledJobs.length) {
+    issues.push("Turn on at least one backup item before running a backup.");
+  }
+
+  enabledJobs.forEach((job) => {
+    const name = job.name || "Unnamed backup item";
+    const rawPath = String(job.path || "").trim();
+
+    if (!rawPath) {
+      issues.push(`${name} needs a Windows path before it can be backed up.`);
+      return;
+    }
+
+    const pathKey = normalizePathKey(rawPath);
+    if (paths.has(pathKey)) {
+      issues.push(`${name} points to the same source as ${paths.get(pathKey)}. Remove the duplicate or choose a different path.`);
+    } else {
+      paths.set(pathKey, name);
+    }
+
+    const destinationKey = backupDestinationKey(job);
+    if (destinations.has(destinationKey)) {
+      issues.push(`${name} would write to the same backup folder as ${destinations.get(destinationKey)}. Rename one item or remove the duplicate before saving.`);
+    } else {
+      destinations.set(destinationKey, name);
+    }
+  });
+
+  return issues;
+}
+
+function showBackupPlanIssues(issues) {
+  showResultModal({
+    title: "Backup Setup Needs Attention",
+    message: "DataSafe stopped before saving because two backup items could overwrite each other or an enabled item is incomplete.",
+    list: issues,
+    closeLabel: "Review Backup Items"
+  });
 }
 
 function retentionSummary(retention = state.config?.retention || { days: 1, months: 0, years: 0 }) {
@@ -757,12 +848,13 @@ function showResultModal({ title, message, list = [], secondaryAction = null, hi
 }
 
 function closeResultModal() {
-  el.resultModal.hidden = true;
-  renderResultProgress(null);
-  setTimeout(() => {
-    maybeShowDriveInsightPrompt();
-  }, 0);
-}
+    el.resultModal.hidden = true;
+    renderResultProgress(null);
+    setTimeout(() => {
+      maybeShowDriveInsightPrompt();
+      maybeShowInitialAutomationPrompt();
+    }, 0);
+  }
 
 function findKnownDestination(destinationId) {
   if (!destinationId) {
@@ -1175,11 +1267,15 @@ function addSelectedItemFromModal() {
     return;
   }
 
+  const jobId = `job-${Date.now()}`;
+  const safeName = sanitizeBackupSegment(state.pendingAddItem.name || "New Backup Item", "New Backup Item");
+
   state.config.jobs.push({
-    id: `job-${Date.now()}`,
+    id: jobId,
     name: state.pendingAddItem.name || "New Backup Item",
     path: state.pendingAddItem.path,
     type: state.pendingAddItem.type || "folder",
+    relativeDestination: ["Manual Items", `${safeName}-${jobId}`],
     enabled: true
   });
 
@@ -1660,15 +1756,28 @@ function initializeSettingsPanels() {
 }
 
 function renderSettingsSummary() {
-  const { retention, schedule, preferences } = state.config;
-  el.settingsRetentionSummary.textContent = retentionSummary(retention);
+    const { retention, schedule, preferences } = state.config;
+    el.settingsRetentionSummary.textContent = retentionSummary(retention);
 
   if (!schedule.enabled) {
     el.settingsScheduleSummary.textContent = "Manual only";
     return;
   }
 
-  el.settingsScheduleSummary.textContent = `${schedule.frequency} at ${formatTimeOfDay(schedule.time, preferences?.timeFormat)}`;
+    const scheduleTime = formatTimeOfDay(schedule.time, preferences?.timeFormat);
+    el.settingsScheduleSummary.textContent = schedule.frequency === "weekly"
+      ? `Weekly on ${normalizeDayOfWeek(schedule.dayOfWeek)} at ${scheduleTime}`
+      : `Daily at ${scheduleTime}`;
+  }
+
+function renderScheduleControls() {
+  if (!el.scheduleDayOfWeek || !el.scheduleFrequency) {
+    return;
+  }
+
+  const weekly = el.scheduleFrequency.value === "weekly";
+  el.scheduleDayOfWeek.disabled = !weekly;
+  el.scheduleDayOfWeek.closest("label")?.classList.toggle("disabled-field", !weekly);
 }
 
 function restoreSupportNote(job) {
@@ -1868,10 +1977,14 @@ function renderConfig() {
   }
   el.retentionDays.value = retention?.days ?? 1;
   el.retentionMonths.value = retention?.months ?? 0;
-  el.retentionYears.value = retention?.years ?? 0;
-  el.scheduleEnabled.checked = Boolean(schedule.enabled);
-  el.scheduleFrequency.value = schedule.frequency;
-  el.scheduleTime.value = schedule.time;
+    el.retentionYears.value = retention?.years ?? 0;
+    el.scheduleEnabled.checked = Boolean(schedule.enabled);
+    el.scheduleFrequency.value = schedule.frequency;
+    if (el.scheduleDayOfWeek) {
+      el.scheduleDayOfWeek.value = normalizeDayOfWeek(schedule.dayOfWeek);
+    }
+    el.scheduleTime.value = schedule.time;
+    renderScheduleControls();
   if (el.timeFormat) {
     el.timeFormat.value = preferences?.timeFormat || "12h";
   }
@@ -1938,11 +2051,12 @@ function collectConfig() {
         : { days: 1, months: 0, years: 0 };
     })(),
     retentionCount: undefined,
-    schedule: {
-      enabled: el.scheduleEnabled.checked,
-      frequency: el.scheduleFrequency.value,
-      time: el.scheduleTime.value
-    },
+      schedule: {
+        enabled: el.scheduleEnabled.checked,
+        frequency: el.scheduleFrequency.value,
+        dayOfWeek: normalizeDayOfWeek(el.scheduleDayOfWeek?.value),
+        time: el.scheduleTime.value
+      },
     preferences: {
       ...(state.config.preferences || {}),
       timeFormat: el.timeFormat?.value || "12h"
@@ -2022,13 +2136,16 @@ async function load() {
       refreshBackupProgressModal();
     });
   }
-  renderConfig();
-  renderStatus();
-  refreshStorageAnalysis().catch(() => {
-    state.storage = null;
-    renderStorageAnalysis();
-  });
-  maybeShowDriveInsightPrompt(true);
+    renderConfig();
+    renderStatus();
+    refreshStorageAnalysis().catch(() => {
+      state.storage = null;
+      renderStorageAnalysis();
+    });
+    maybeShowDriveInsightPrompt(true);
+    setTimeout(() => {
+      maybeShowInitialAutomationPrompt();
+    }, 0);
 
   if (window.onebiteDesktop?.checkForUpdates) {
     setTimeout(() => {
@@ -2044,26 +2161,29 @@ async function load() {
 }
 
 function buildAutomationPrompt(config) {
-  const parts = [];
-  if (config?.schedule?.enabled) {
-    const cadence = config.schedule.frequency === "weekly" ? "weekly backups" : "daily backups";
-    parts.push(cadence);
-  }
-  if (config?.reminders?.enabled) {
-    parts.push(`backup reminders after ${config.reminders.staleDays} day(s)`);
-  }
+    const parts = [];
+    if (config?.schedule?.enabled) {
+      const cadence = config.schedule.frequency === "weekly"
+        ? `weekly backups on ${normalizeDayOfWeek(config.schedule.dayOfWeek)}`
+        : "daily backups";
+      parts.push(cadence);
+    }
+    if (config?.reminders?.enabled) {
+      parts.push(`backup reminders after ${config.reminders.staleDays} day${Number(config.reminders.staleDays) === 1 ? "" : "s"}`);
+    }
 
   const summary = parts.length
     ? `Install Windows Tasks so this PC can run ${parts.join(" and ")} automatically.`
     : "Install Windows Tasks so this PC can run backups and reminders automatically.";
 
-  return {
-    title: "Install Windows Tasks?",
-    message: summary,
-    list: [
-      "Manual backups work without Windows Tasks.",
-      "Windows Tasks are needed for scheduled backups and reminder notifications."
-    ],
+    return {
+      title: "Install Windows Tasks And Notifications?",
+      message: summary,
+      list: [
+        "Manual backups work without Windows Tasks.",
+        "Windows Tasks are needed for scheduled backups and reminder notifications.",
+        "DataSafe will also catch missed backups after the PC starts or the user signs in."
+      ],
     secondaryAction: {
       label: "Install Now",
       onClick: async () => {
@@ -2072,7 +2192,31 @@ function buildAutomationPrompt(config) {
       }
     },
     closeLabel: "Later"
-  };
+    };
+  }
+
+function shouldOfferAutomationInstall() {
+  return Boolean(
+    window.onebiteDesktop &&
+    state.config &&
+    state.status &&
+    !state.status.automation?.installedAt &&
+    (state.config.schedule?.enabled || state.config.reminders?.enabled)
+  );
+}
+
+function maybeShowInitialAutomationPrompt() {
+  if (
+    state.initialAutomationPromptShown ||
+    !shouldOfferAutomationInstall() ||
+    !el.termsGate.hidden ||
+    !el.resultModal.hidden
+  ) {
+    return;
+  }
+
+  state.initialAutomationPromptShown = true;
+  showResultModal(buildAutomationPrompt(state.config));
 }
 
 function maybeHandleAutomationSaveResult(payload, showAutomationPrompt = true) {
@@ -2104,6 +2248,14 @@ function maybeHandleAutomationSaveResult(payload, showAutomationPrompt = true) {
 
 async function saveConfig(showAutomationPrompt = true, options = {}) {
   state.config = collectConfig();
+  const issues = validateBackupPlan(state.config, {
+    requireDestination: false
+  });
+  if (issues.length) {
+    showBackupPlanIssues(issues);
+    throw new Error("Backup setup needs attention.");
+  }
+
   const payload = await request("/api/config", {
     method: "POST",
     body: JSON.stringify(state.config)
@@ -2139,16 +2291,33 @@ async function acceptTerms() {
     method: "POST",
     body: JSON.stringify(state.config)
   });
-  state.config = normalizeConfig(payload.config);
-  state.status = normalizeStatus(payload.status);
-  state.meta = payload.meta || state.meta;
-  renderConfig();
-  renderStatus();
-}
+    state.config = normalizeConfig(payload.config);
+    state.status = normalizeStatus(payload.status);
+    state.meta = payload.meta || state.meta;
+    renderConfig();
+    renderStatus();
+    setTimeout(() => {
+      maybeShowInitialAutomationPrompt();
+    }, 0);
+  }
 
 async function invokeAction(path, options = {}) {
   if (state.actionInFlight) {
     return;
+  }
+
+  if (path === "/api/run-backup" && !options.skipSave) {
+    const nextConfig = collectConfig();
+    const issues = validateBackupPlan(nextConfig, {
+      requireDestination: true
+    });
+    if (issues.length) {
+      state.config = nextConfig;
+      renderConfig();
+      renderStatus();
+      showBackupPlanIssues(issues);
+      return;
+    }
   }
 
   const originalTitle = el.protectionState.textContent;
@@ -2433,7 +2602,7 @@ async function chooseRestoreTargetFolder() {
 async function performRestore() {
   const snapshotName = el.restoreSnapshotSelect?.value || "";
   const jobId = el.restoreJobSelect?.value || "";
-  const mode = el.restoreModeSelect?.value || "original";
+  const mode = el.restoreModeSelect?.value || "alternate";
 
   if (!snapshotName || !jobId) {
     showResultModal({
@@ -2490,9 +2659,42 @@ async function performRestore() {
 
 async function runRestore() {
   const selectedJob = (state.config?.jobs || []).find((job) => job.id === (el.restoreJobSelect?.value || ""));
-  const destinationCopy = el.restoreModeSelect?.value === "alternate"
+  const restoreMode = el.restoreModeSelect?.value || "alternate";
+  const destinationCopy = restoreMode === "alternate"
     ? (state.restoreTargetPath || "the selected restore folder")
     : (selectedJob?.path || "the original location");
+
+  if (restoreMode === "original") {
+    showResultModal({
+      title: "Replace Current Files?",
+      message: `Restore ${selectedJob?.name || "the selected backup item"} to its original location? Current files at ${destinationCopy} may be replaced.`,
+      list: [
+        "Close the related browser or email app first.",
+        "This action copies the snapshot back over the live location.",
+        "Restore to another folder first if you want to compare files before replacing anything."
+      ],
+      secondaryAction: {
+        label: "I Understand",
+        onClick: async () => {
+          showResultModal({
+            title: "Final Restore Confirmation",
+            message: `DataSafe is about to restore ${selectedJob?.name || "this backup item"} to the original location. Current files may be replaced.`,
+            list: [
+              "Only continue if you are sure this is the snapshot you want.",
+              "Use Cancel and switch to another folder if you want a safer review copy."
+            ],
+            secondaryAction: {
+              label: "Restore To Original Location",
+              onClick: performRestore
+            },
+            closeLabel: "Cancel"
+          });
+        }
+      },
+      closeLabel: "Cancel"
+    });
+    return;
+  }
 
   showResultModal({
     title: "Restore This Snapshot?",
@@ -2553,10 +2755,21 @@ el.installAutomation.addEventListener("click", () => {
   });
 });
 el.checkUpdates.addEventListener("click", () => {
-  checkForUpdates().catch((error) => {
-    el.updateStatus.textContent = error.message;
+    checkForUpdates().catch((error) => {
+      el.updateStatus.textContent = error.message;
+    });
   });
+el.scheduleFrequency.addEventListener("change", () => {
+  renderScheduleControls();
+  state.config = collectConfig();
+  renderSettingsSummary();
 });
+if (el.scheduleDayOfWeek) {
+  el.scheduleDayOfWeek.addEventListener("change", () => {
+    state.config = collectConfig();
+    renderSettingsSummary();
+  });
+}
 if (el.receiveBetaUpdates) {
   el.receiveBetaUpdates.addEventListener("change", () => {
     const desiredChannel = el.receiveBetaUpdates.checked ? "beta" : "latest";

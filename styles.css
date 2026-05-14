@@ -1208,7 +1208,12 @@ select:focus {
 
 .settings-page .checkbox span,
 .settings-stage-panel .checkbox span {
-  font-size: 0.88rem;
+    font-size: 0.88rem;
+  }
+
+.settings-page .disabled-field,
+.settings-stage-panel .disabled-field {
+  opacity: 0.58;
 }
 
 .settings-page .hint,

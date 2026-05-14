@@ -231,16 +231,16 @@ function normalizeConfigForMain(config) {
     contactUrl: String(config?.support?.contactUrl || "").trim()
   };
 
-  const normalizedLicensing = {
+    const normalizedLicensing = {
     enabled: false,
     planName: String(config?.licensing?.planName || "Annual License").trim(),
     serviceUrl: String(config?.licensing?.serviceUrl || "").trim(),
     customerReference: String(config?.licensing?.customerReference || "").trim(),
     renewalWarningDays: Math.max(Number(config?.licensing?.renewalWarningDays ?? 30) || 30, 1),
     graceDays: Math.max(Number(config?.licensing?.graceDays ?? 14) || 14, 1)
-  };
+    };
 
-  return {
+    return {
     ...config,
     installId,
     businessName: config?.businessName || "One Bite Technology",
@@ -250,12 +250,13 @@ function normalizeConfigForMain(config) {
       folderMode: "managed",
       baseFolder: normalizedBaseFolder
     }, normalizedBaseFolder, installId),
-    schedule: {
-      enabled: true,
-      frequency: "weekly",
-      time: "18:30",
-      ...(config?.schedule || {})
-    },
+      schedule: {
+        enabled: true,
+        frequency: "weekly",
+        time: "18:30",
+        ...(config?.schedule || {}),
+        dayOfWeek: normalizeDayOfWeek(config?.schedule?.dayOfWeek)
+      },
     reminders: {
       enabled: true,
       staleDays: 7,
@@ -298,7 +299,12 @@ function retentionSummary(retention = { days: 1, months: 0, years: 0 }) {
     parts.push(`${retention.years} ${retention.years === 1 ? "year" : "years"}`);
   }
 
-  return parts.length ? parts.join(" / ") : "1 day";
+    return parts.length ? parts.join(" / ") : "1 day";
+  }
+
+function normalizeDayOfWeek(value) {
+  const validDays = new Set(["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]);
+  return validDays.has(value) ? value : "Monday";
 }
 
 function summarizeUpdateError(error, channel = currentUpdateChannel || "beta") {
@@ -404,13 +410,14 @@ function supportContact(config = null) {
 }
 
 function automationSettingsChanged(previousConfig, nextConfig) {
-  return Boolean(
-    previousConfig?.schedule?.enabled !== nextConfig?.schedule?.enabled ||
-    previousConfig?.schedule?.frequency !== nextConfig?.schedule?.frequency ||
-    previousConfig?.schedule?.time !== nextConfig?.schedule?.time ||
-    previousConfig?.reminders?.enabled !== nextConfig?.reminders?.enabled
-  );
-}
+    return Boolean(
+      previousConfig?.schedule?.enabled !== nextConfig?.schedule?.enabled ||
+      previousConfig?.schedule?.frequency !== nextConfig?.schedule?.frequency ||
+      previousConfig?.schedule?.dayOfWeek !== nextConfig?.schedule?.dayOfWeek ||
+      previousConfig?.schedule?.time !== nextConfig?.schedule?.time ||
+      previousConfig?.reminders?.enabled !== nextConfig?.reminders?.enabled
+    );
+  }
 
 function summarizeProtectionForTray(config, status) {
   const staleDays = Math.max(Number(config?.reminders?.staleDays || 7) || 7, 1);
