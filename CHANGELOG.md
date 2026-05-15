@@ -2,6 +2,13 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.54 - 2026-05-15
+
+- Fixed scheduled Windows task installation for the missed-backup catch-up task.
+- Registered scheduled backup, catch-up, and reminder tasks as the current interactive Windows user so notifications can appear in the signed-in session.
+- Added tray/app status watching so DataSafe notices background scheduled-task failures and refreshes the UI plus Windows notification state.
+- Improved OneDrive cloud health checks so a local OneDrive folder is not treated as proof of active cloud backup.
+
 ## 1.0.10-beta.53 - 2026-04-27
 
 - Added a Windows tray presence so DataSafe can stay available after the main window is closed and show backup health, support, and log actions from the tray menu.

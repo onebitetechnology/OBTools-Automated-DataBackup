@@ -2135,16 +2135,24 @@ async function load() {
       refreshBackupProgressModal();
     });
   }
-    renderConfig();
-    renderStatus();
-    refreshStorageAnalysis().catch(() => {
-      state.storage = null;
-      renderStorageAnalysis();
+  if (window.onebiteDesktop?.onStatusChanged) {
+    window.onebiteDesktop.onStatusChanged((payload) => {
+      state.status = normalizeStatus(payload?.status || {});
+      state.meta = payload?.meta || state.meta;
+      renderStatus();
+      renderMeta();
     });
-    maybeShowDriveInsightPrompt(true);
-    setTimeout(() => {
-      maybeShowInitialAutomationPrompt();
-    }, 0);
+  }
+  renderConfig();
+  renderStatus();
+  refreshStorageAnalysis().catch(() => {
+    state.storage = null;
+    renderStorageAnalysis();
+  });
+  maybeShowDriveInsightPrompt(true);
+  setTimeout(() => {
+    maybeShowInitialAutomationPrompt();
+  }, 0);
 
   if (window.onebiteDesktop?.checkForUpdates) {
     setTimeout(() => {

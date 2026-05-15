@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
     ipcRenderer.on("backup:progress", listener);
     return () => ipcRenderer.removeListener("backup:progress", listener);
   },
+  onStatusChanged: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("status:changed", listener);
+    return () => ipcRenderer.removeListener("status:changed", listener);
+  },
   detectBrowsers: () => ipcRenderer.invoke("browsers:detect"),
   detectEmailData: () => ipcRenderer.invoke("email:detect"),
   detectUserFolders: () => ipcRenderer.invoke("folders:detect-user-folders"),

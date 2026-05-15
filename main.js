@@ -31,6 +31,8 @@ let mainWindow = null;
 let tray = null;
 let isQuitting = false;
 let lastTrayNotificationSignature = null;
+let lastExternalStatusSignature = null;
+let statusWatchTimer = null;
 let currentUpdateChannel = null;
 let updateStatus = {
   supported: app.isPackaged && process.platform === "win32",
@@ -47,6 +49,10 @@ let updateStatus = {
 };
 let autoUpdater = null;
 let autoUpdaterConfigured = false;
+
+if (process.platform === "win32") {
+  app.setAppUserModelId("ca.onebitetechnology.backupcompanion");
+}
 
 function publishUpdateStatus() {
   for (const window of BrowserWindow.getAllWindows()) {
@@ -389,7 +395,91 @@ function mergeStatus(patch) {
     ...patch
   };
   writeJson(statusPath, next);
+  lastExternalStatusSignature = statusSignature(next);
   return next;
+}
+
+function statusSignature(status) {
+  try {
+    return JSON.stringify(status || {});
+  } catch (_error) {
+    return "";
+  }
+}
+
+function publishStatusChanged(status) {
+  const payload = {
+    status,
+    meta: appMeta()
+  };
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send("status:changed", payload);
+    }
+  }
+}
+
+function readReconciledState({ writeChanges = false } = {}) {
+  const { configPath, statusPath } = dataPaths();
+  const rawConfig = readJson(configPath);
+  let config = normalizeConfigForMain(rawConfig);
+  const syncedDestinations = syncKnownDestinationsInConfig(config);
+  config = syncedDestinations.config;
+
+  if (writeChanges && JSON.stringify(rawConfig) !== JSON.stringify(config)) {
+    writeJson(configPath, config);
+  }
+
+  const rawStatus = readJson(statusPath);
+  const status = reconcileStatusWithDisk(config, rawStatus);
+  if (writeChanges && JSON.stringify(rawStatus) !== JSON.stringify(status)) {
+    writeJson(statusPath, status);
+  }
+
+  return {
+    config,
+    status,
+    inspectedDestinations: syncedDestinations.inspected
+  };
+}
+
+function syncExternalStatus({ notify = false, publish = false } = {}) {
+  if (!app.isReady()) {
+    return null;
+  }
+
+  try {
+    const { status } = readReconciledState();
+    const signature = statusSignature(status);
+    if (signature === lastExternalStatusSignature) {
+      return status;
+    }
+
+    lastExternalStatusSignature = signature;
+    updateTrayStatus({ notify });
+    if (publish) {
+      publishStatusChanged(status);
+    }
+    return status;
+  } catch (error) {
+    writeLauncherLog(`Status watcher failed: ${error.message}`);
+    return null;
+  }
+}
+
+function startStatusWatcher() {
+  if (statusWatchTimer || process.platform !== "win32") {
+    return;
+  }
+
+  statusWatchTimer = setInterval(() => {
+    syncExternalStatus({ notify: true, publish: true });
+  }, 30000);
+
+  if (typeof statusWatchTimer.unref === "function") {
+    statusWatchTimer.unref();
+  }
 }
 
 function appMeta() {
@@ -1950,6 +2040,7 @@ app.whenReady().then(() => {
   writeLauncherLog("App whenReady resolved. Initializing data and window.");
   ensureDataFiles();
   createWindow();
+  startStatusWatcher();
 
   app.on("activate", () => {
     writeLauncherLog("App activate event fired.");
@@ -1986,23 +2077,15 @@ app.on("window-all-closed", () => {
 });
 
 ipcMain.handle("state:get", () => {
-  const { configPath, statusPath } = dataPaths();
-  const rawConfig = readJson(configPath);
-  let config = normalizeConfigForMain(rawConfig);
-  const syncedDestinations = syncKnownDestinationsInConfig(config);
-  config = syncedDestinations.config;
-  if (JSON.stringify(rawConfig) !== JSON.stringify(config)) {
-    writeJson(configPath, config);
-  }
+  const { config, status, inspectedDestinations } = readReconciledState({ writeChanges: true });
   configureAutoUpdates(config);
-  const status = reconcileStatusWithDisk(config, readJson(statusPath));
-  writeJson(statusPath, status);
+  lastExternalStatusSignature = statusSignature(status);
   updateTrayStatus({ notify: true });
   return {
     config,
     status,
     meta: appMeta(),
-    driveInsights: buildDriveInsights(config, syncedDestinations.inspected)
+    driveInsights: buildDriveInsights(config, inspectedDestinations)
   };
 });
 

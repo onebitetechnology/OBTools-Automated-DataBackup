@@ -46,11 +46,13 @@ $catchUpScript = Join-Path $ScriptRoot "check-backup-catchup.ps1"
 $time = [DateTime]::ParseExact($schedule.time, "HH:mm", $null)
 $backupDay = Get-NormalizedDayOfWeek $schedule
 
-$backupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$backupScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
-$reminderAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$reminderScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
-$catchUpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$catchUpScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`" -ScriptRoot `"$ScriptRoot`""
+$backupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$backupScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
+$reminderAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$reminderScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
+$catchUpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$catchUpScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`" -ScriptRoot `"$ScriptRoot`""
 $taskExecutionLimit = New-TimeSpan -Hours 12
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit $taskExecutionLimit
+$taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel LeastPrivilege
 
 if ($schedule.frequency -eq "weekly") {
   $backupTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $backupDay -At $time
@@ -66,8 +68,8 @@ $catchUpTriggers = @($catchUpStartupTrigger, $catchUpLogonTrigger)
 $messages = New-Object System.Collections.Generic.List[string]
 
 if ($schedule.enabled) {
-  Register-ScheduledTask -TaskName "OneBiteBackupRun" -Action $backupAction -Trigger $backupTrigger -Settings $taskSettings -Force | Out-Null
-  Register-ScheduledTask -TaskName "OneBiteBackupCatchUp" -Action $catchUpAction -Trigger $catchUpTriggers -Settings $taskSettings -Force | Out-Null
+  Register-ScheduledTask -TaskName "OneBiteBackupRun" -Action $backupAction -Trigger $backupTrigger -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
+  Register-ScheduledTask -TaskName "OneBiteBackupCatchUp" -Action $catchUpAction -Trigger $catchUpTriggers -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
   $scheduleLabel = if ($schedule.frequency -eq "weekly") { "weekly on $backupDay" } else { "daily" }
   $messages.Add("Scheduled backup task installed or updated for $scheduleLabel at $($schedule.time).")
   $messages.Add("Missed-backup catch-up task installed or updated for startup and sign-in.")
@@ -79,7 +81,7 @@ if ($schedule.enabled) {
 }
 
 if ($reminders.enabled) {
-  Register-ScheduledTask -TaskName "OneBiteBackupReminder" -Action $reminderAction -Trigger $reminderTrigger -Settings $taskSettings -Force | Out-Null
+  Register-ScheduledTask -TaskName "OneBiteBackupReminder" -Action $reminderAction -Trigger $reminderTrigger -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
   $messages.Add("Reminder notification task installed or updated.")
 } else {
   Remove-TaskIfExists "OneBiteBackupReminder"

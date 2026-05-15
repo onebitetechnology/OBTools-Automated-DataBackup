@@ -82,5 +82,5 @@ if (-not (Test-BackupIsDue $schedule $status)) {
 
 $backupScript = Join-Path $ScriptRoot "backup-engine.ps1"
 Write-Output "A scheduled DataSafe backup was missed. Running catch-up backup now."
-& powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File $backupScript -ConfigPath $ConfigPath -StatusPath $StatusPath
+& powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File $backupScript -ConfigPath $ConfigPath -StatusPath $StatusPath
 exit $LASTEXITCODE
