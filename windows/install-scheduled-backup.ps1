@@ -52,7 +52,7 @@ $catchUpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-N
 $taskExecutionLimit = New-TimeSpan -Hours 12
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit $taskExecutionLimit
 $taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel LeastPrivilege
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $taskUser -LogonType Interactive -RunLevel Limited
 
 if ($schedule.frequency -eq "weekly") {
   $backupTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $backupDay -At $time

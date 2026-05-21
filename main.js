@@ -2102,27 +2102,20 @@ ipcMain.handle("config:save", async (_event, config) => {
   let automation = null;
 
   if (automationSettingsChanged(previousConfig, normalizedConfig)) {
-    const shouldOfferInstall = !previousStatus?.automation?.installedAt &&
-      (normalizedConfig?.schedule?.enabled || normalizedConfig?.reminders?.enabled);
-
-    if (previousStatus?.automation?.installedAt) {
-      const result = await runPowerShell("install-scheduled-backup.ps1");
-      status = mergeStatus({
-        automation: {
-          installedAt: result.ok ? new Date().toISOString() : previousStatus?.automation?.installedAt || null,
-          message: result.message
-        }
-      });
-      automation = {
-        type: result.ok ? "updated" : "failed",
+    const automationEnabled = Boolean(normalizedConfig?.schedule?.enabled || normalizedConfig?.reminders?.enabled);
+    const result = await runPowerShell("install-scheduled-backup.ps1");
+    status = mergeStatus({
+      automation: {
+        installedAt: result.ok
+          ? (automationEnabled ? new Date().toISOString() : null)
+          : previousStatus?.automation?.installedAt || null,
         message: result.message
-      };
-    } else if (shouldOfferInstall) {
-      automation = {
-        type: "offer-install",
-        message: "Install Windows Tasks to enable scheduled backups and reminders."
-      };
-    }
+      }
+    });
+    automation = {
+      type: result.ok ? "updated" : "failed",
+      message: result.message
+    };
   }
 
   updateTrayStatus({ notify: true });

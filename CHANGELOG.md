@@ -2,6 +2,11 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.55 - 2026-05-21
+
+- Fixed the scheduled-task principal run level so Windows accepts task installation on beta55 test machines.
+- Refreshed Windows scheduled tasks every time schedule/reminder settings change so an old task time cannot stay behind in Task Scheduler.
+
 ## 1.0.10-beta.54 - 2026-05-15
 
 - Fixed scheduled Windows task installation for the missed-backup catch-up task.
