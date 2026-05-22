@@ -2,6 +2,11 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.57 - 2026-05-22
+
+- Fixed non-admin Windows Task Scheduler installs by registering the missed-backup catch-up task at sign-in, and only adding the startup trigger when Windows allows the current elevated user to create it.
+- Updated the Windows Tasks prompt so it no longer promises startup catch-up on machines where Windows only permits sign-in catch-up.
+
 ## 1.0.10-beta.56 - 2026-05-22
 
 - Refreshed Windows scheduled tasks when the backup reminder day threshold changes, matching the existing schedule and reminder enabled/disabled refresh behavior.

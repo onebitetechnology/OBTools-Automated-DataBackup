@@ -2189,7 +2189,7 @@ function buildAutomationPrompt(config) {
     list: [
       "Manual backups work without Windows Tasks.",
       "Windows Tasks are needed for scheduled backups and reminder notifications.",
-      "DataSafe will also catch missed backups after the PC starts or the user signs in."
+      "DataSafe will also catch missed backups after the user signs in, and after the PC starts when Windows allows it."
     ],
     secondaryAction: {
       label: "Install Now",

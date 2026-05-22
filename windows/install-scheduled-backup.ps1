@@ -30,6 +30,12 @@ function Get-NormalizedDayOfWeek($Schedule) {
   return "Monday"
 }
 
+function Test-IsAdministrator {
+  $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object System.Security.Principal.WindowsPrincipal($identity)
+  return $principal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 $config = Read-Json $ConfigPath
 $schedule = if ($config.schedule) { $config.schedule } else { [PSCustomObject]@{
   enabled = $true
@@ -61,9 +67,13 @@ if ($schedule.frequency -eq "weekly") {
 }
 
 $reminderTrigger = New-ScheduledTaskTrigger -Daily -At 09:00
-$catchUpStartupTrigger = New-ScheduledTaskTrigger -AtStartup
 $catchUpLogonTrigger = New-ScheduledTaskTrigger -AtLogOn
-$catchUpTriggers = @($catchUpStartupTrigger, $catchUpLogonTrigger)
+$includeStartupCatchUp = Test-IsAdministrator
+$catchUpTriggers = @($catchUpLogonTrigger)
+if ($includeStartupCatchUp) {
+  $catchUpStartupTrigger = New-ScheduledTaskTrigger -AtStartup
+  $catchUpTriggers = @($catchUpStartupTrigger, $catchUpLogonTrigger)
+}
 
 $messages = New-Object System.Collections.Generic.List[string]
 
@@ -72,7 +82,11 @@ if ($schedule.enabled) {
   Register-ScheduledTask -TaskName "OneBiteBackupCatchUp" -Action $catchUpAction -Trigger $catchUpTriggers -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
   $scheduleLabel = if ($schedule.frequency -eq "weekly") { "weekly on $backupDay" } else { "daily" }
   $messages.Add("Scheduled backup task installed or updated for $scheduleLabel at $($schedule.time).")
-  $messages.Add("Missed-backup catch-up task installed or updated for startup and sign-in.")
+  if ($includeStartupCatchUp) {
+    $messages.Add("Missed-backup catch-up task installed or updated for startup and sign-in.")
+  } else {
+    $messages.Add("Missed-backup catch-up task installed or updated for sign-in.")
+  }
 } else {
   Remove-TaskIfExists "OneBiteBackupRun"
   Remove-TaskIfExists "OneBiteBackupCatchUp"
