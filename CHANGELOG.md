@@ -2,6 +2,10 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.56 - 2026-05-22
+
+- Refreshed Windows scheduled tasks when the backup reminder day threshold changes, matching the existing schedule and reminder enabled/disabled refresh behavior.
+
 ## 1.0.10-beta.55 - 2026-05-21
 
 - Fixed the scheduled-task principal run level so Windows accepts task installation on beta55 test machines.

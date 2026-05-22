@@ -505,7 +505,8 @@ function automationSettingsChanged(previousConfig, nextConfig) {
     previousConfig?.schedule?.frequency !== nextConfig?.schedule?.frequency ||
     previousConfig?.schedule?.dayOfWeek !== nextConfig?.schedule?.dayOfWeek ||
     previousConfig?.schedule?.time !== nextConfig?.schedule?.time ||
-    previousConfig?.reminders?.enabled !== nextConfig?.reminders?.enabled
+    previousConfig?.reminders?.enabled !== nextConfig?.reminders?.enabled ||
+    previousConfig?.reminders?.staleDays !== nextConfig?.reminders?.staleDays
   );
 }
 
