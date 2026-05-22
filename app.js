@@ -23,7 +23,9 @@ const state = {
 };
 
 let backupProgressTimer = null;
+let updateCheckTimer = null;
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 const el = {
   backupStatusCard: document.getElementById("backup-status-card"),
@@ -853,6 +855,9 @@ function closeResultModal() {
   setTimeout(() => {
     maybeShowDriveInsightPrompt();
     maybeShowInitialAutomationPrompt();
+    if (state.pendingUpdateVersion) {
+      maybeShowAutoUpdatePrompt();
+    }
   }, 0);
 }
 
@@ -1482,10 +1487,54 @@ function maybeShowAutoUpdatePrompt() {
   const availableVersion = updateInfo.availableVersion || null;
 
   if (!availableVersion || !updateInfo.updateAvailable || updateInfo.downloaded) {
+    if (!updateInfo.updateAvailable) {
+      state.pendingUpdateVersion = null;
+    }
+    return;
+  }
+
+  if (state.notifiedUpdateVersion === availableVersion) {
+    state.pendingUpdateVersion = null;
+    return;
+  }
+
+  if (state.actionInFlight || !el.resultModal.hidden) {
+    state.pendingUpdateVersion = availableVersion;
     return;
   }
 
   state.notifiedUpdateVersion = availableVersion;
+  state.pendingUpdateVersion = null;
+  showResultModal({
+    title: "Update Available",
+    message: `DataSafe ${availableVersion} is available to download.`,
+    list: [
+      `Current version: ${state.meta?.version || "Unknown"}`,
+      "Download now to keep this PC on the newest DataSafe build.",
+      "You can also install it later from Settings."
+    ],
+    secondaryAction: updateModalSecondaryAction(),
+    closeLabel: "Later"
+  });
+}
+
+function runBackgroundUpdateCheck() {
+  if (!window.onebiteDesktop?.checkForUpdates || state.actionInFlight) {
+    return;
+  }
+
+  window.onebiteDesktop.checkForUpdates().catch(() => {
+    // Silent background check; Settings still exposes manual retry details.
+  });
+}
+
+function startBackgroundUpdateChecks() {
+  if (!window.onebiteDesktop?.checkForUpdates || updateCheckTimer) {
+    return;
+  }
+
+  setTimeout(runBackgroundUpdateCheck, 4000);
+  updateCheckTimer = setInterval(runBackgroundUpdateCheck, UPDATE_CHECK_INTERVAL_MS);
 }
 
 function setActionButtonsDisabled(disabled) {
@@ -2154,17 +2203,7 @@ async function load() {
     maybeShowInitialAutomationPrompt();
   }, 0);
 
-  if (window.onebiteDesktop?.checkForUpdates) {
-    setTimeout(() => {
-      if (state.actionInFlight) {
-        return;
-      }
-
-      window.onebiteDesktop.checkForUpdates().catch(() => {
-        // Silent background check; the Settings UI still exposes manual retry.
-      });
-    }, 4000);
-  }
+  startBackgroundUpdateChecks();
 }
 
 function buildAutomationPrompt(config) {

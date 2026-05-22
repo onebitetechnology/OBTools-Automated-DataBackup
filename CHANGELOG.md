@@ -2,6 +2,11 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.58 - 2026-05-22
+
+- Added an in-app update notification prompt when a newer build is found, with a direct `Download Update` action and a `Later` option.
+- Added background update checks every 6 hours while the app is running, in addition to the existing startup and manual Settings checks.
+
 ## 1.0.10-beta.57 - 2026-05-22
 
 - Fixed non-admin Windows Task Scheduler installs by registering the missed-backup catch-up task at sign-in, and only adding the startup trigger when Windows allows the current elevated user to create it.
