@@ -212,43 +212,98 @@ function normalizeKnownDestinations(entries = [], currentDestination = null, ins
   return records;
 }
 
-function isDesktopBackupJob(job = {}) {
+function commonFolderNameForJob(job = {}) {
   const normalizedPath = String(job.path || "").trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
-  const normalizedName = String(job.name || "").trim().toLowerCase();
-  return normalizedName === "desktop" || normalizedPath.endsWith("\\desktop") || normalizedPath === "%userprofile%\\desktop";
+  const currentProfile = normalizePathKey(process.env.USERPROFILE || "");
+  const isCurrentProfilePath = currentProfile && normalizedPath.startsWith(`${currentProfile}\\`);
+
+  if (normalizedPath === "%userprofile%\\desktop" || (isCurrentProfilePath && normalizedPath.endsWith("\\desktop"))) {
+    return "Desktop";
+  }
+
+  if (normalizedPath === "%userprofile%\\documents" || (isCurrentProfilePath && normalizedPath.endsWith("\\documents"))) {
+    return "Documents";
+  }
+
+  if (normalizedPath === "%userprofile%\\pictures" || (isCurrentProfilePath && normalizedPath.endsWith("\\pictures"))) {
+    return "Pictures";
+  }
+
+  return null;
+}
+
+function knownFolderNameForCommonFolder(folderName) {
+  switch (folderName) {
+    case "Desktop":
+      return "Desktop";
+    case "Documents":
+      return "MyDocuments";
+    case "Pictures":
+      return "MyPictures";
+    default:
+      return null;
+  }
 }
 
 function normalizeBackupJobs(jobs = []) {
   return jobs.map((job) => {
-    if (!isDesktopBackupJob(job)) {
+    const commonFolderName = commonFolderNameForJob(job);
+    if (!commonFolderName) {
       return job;
     }
 
+    const knownFolderName = knownFolderNameForCommonFolder(commonFolderName);
     return {
       ...job,
-      includePublicDesktop: job.includePublicDesktop !== false
+      windowsKnownFolder: job.windowsKnownFolder || knownFolderName || undefined,
+      includePublicFolder: job.includePublicFolder || commonFolderName,
+      includePublicDesktop: commonFolderName === "Desktop" ? job.includePublicDesktop !== false : undefined
     };
   });
 }
 
-function publicDesktopPath() {
+function publicFolderPath(folderName) {
   const publicRoot = process.env.PUBLIC || path.join(process.env.SystemDrive || "C:", "Users", "Public");
-  return path.join(publicRoot, "Desktop");
+  return path.join(publicRoot, folderName);
 }
 
 function normalizePathKey(value) {
   return String(value || "").trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
 }
 
+function knownFolderPath(job = {}, fallbackPath = "") {
+  const knownFolder = String(job.windowsKnownFolder || "").trim();
+  if (!knownFolder) {
+    return fallbackPath;
+  }
+
+  const electronPathName = {
+    Desktop: "desktop",
+    MyDocuments: "documents",
+    MyPictures: "pictures"
+  }[knownFolder];
+
+  if (!electronPathName) {
+    return fallbackPath;
+  }
+
+  try {
+    return app.getPath(electronPathName) || fallbackPath;
+  } catch (_error) {
+    return fallbackPath;
+  }
+}
+
 function additionalBackupJobPaths(job = {}, primaryPath = "") {
-  if (!job.includePublicDesktop) {
+  const publicFolderName = job.includePublicFolder || (job.includePublicDesktop ? "Desktop" : "");
+  if (!publicFolderName) {
     return [];
   }
 
-  const publicDesktop = publicDesktopPath();
+  const publicPath = publicFolderPath(publicFolderName);
   const primaryKey = normalizePathKey(primaryPath || job.path);
-  const publicKey = normalizePathKey(publicDesktop);
-  return publicKey && publicKey !== primaryKey ? [publicDesktop] : [];
+  const publicKey = normalizePathKey(publicPath);
+  return publicKey && publicKey !== primaryKey ? [publicPath] : [];
 }
 
 function normalizeConfigForMain(config) {
@@ -1225,9 +1280,10 @@ function analyzeStorage(config) {
   let estimatedBytes = 0;
 
   for (const job of enabledJobs) {
-    const resolvedPath = expandEnvironmentVariables(job.path);
+    const fallbackPath = expandEnvironmentVariables(job.path);
+    const resolvedPath = knownFolderPath(job, fallbackPath);
     if (!resolvedPath || !fs.existsSync(resolvedPath)) {
-      missingPaths.push(resolvedPath || job.path || "(empty path)");
+      missingPaths.push(resolvedPath || fallbackPath || job.path || "(empty path)");
       continue;
     }
     estimatedBytes += calculatePathSize(resolvedPath);
@@ -1348,6 +1404,7 @@ function detectUserFolders() {
 
   return userDirectories.flatMap((userDir) => {
     const userRoot = path.join(usersRoot, userDir.name);
+    const isCurrentUser = normalizePathKey(userRoot) === normalizePathKey(process.env.USERPROFILE || "");
     return folderChecks
       .map(([id, name, detail]) => ({
         id: `${userDir.name.toLowerCase()}-${id}`,
@@ -1355,6 +1412,7 @@ function detectUserFolders() {
         userName: userDir.name,
         path: path.join(userRoot, name),
         detail,
+        isCurrentUser,
         type: "folder"
       }))
       .filter((entry) => entry.path && fs.existsSync(entry.path));

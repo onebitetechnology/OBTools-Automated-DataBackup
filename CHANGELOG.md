@@ -2,6 +2,11 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.60 - 2026-05-22
+
+- Extended common user-folder backups so Desktop, Documents, and Pictures resolve through Windows known-folder paths before copying, covering OneDrive or Windows folder redirection.
+- Added shared Public folder coverage for Documents and Pictures, matching the shared Desktop shortcut coverage added in beta59.
+
 ## 1.0.10-beta.59 - 2026-05-22
 
 - Fixed Desktop backups so they include the shared Public Desktop overlay that Windows shows alongside the signed-in user's Desktop folder.

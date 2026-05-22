@@ -29,6 +29,8 @@
       "name": "Documents",
       "path": "%USERPROFILE%\\Documents",
       "type": "folder",
+      "windowsKnownFolder": "MyDocuments",
+      "includePublicFolder": "Documents",
       "enabled": true
     },
     {
@@ -36,6 +38,8 @@
       "name": "Desktop",
       "path": "%USERPROFILE%\\Desktop",
       "type": "folder",
+      "windowsKnownFolder": "Desktop",
+      "includePublicFolder": "Desktop",
       "includePublicDesktop": true,
       "enabled": true
     },

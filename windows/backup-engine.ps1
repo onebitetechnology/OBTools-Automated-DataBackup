@@ -341,7 +341,35 @@ function Test-TruthyJobProperty($Job, [string]$PropertyName) {
   return "$value".ToLowerInvariant() -eq "true"
 }
 
-function Resolve-PublicDesktopPath {
+function Resolve-KnownFolderPath($Job, [string]$FallbackPath) {
+  if ($null -eq $Job.PSObject.Properties["windowsKnownFolder"] -or [string]::IsNullOrWhiteSpace("$($Job.windowsKnownFolder)")) {
+    return $FallbackPath
+  }
+
+  $knownFolder = "$($Job.windowsKnownFolder)"
+  try {
+    switch ($knownFolder) {
+      "Desktop" { return [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::DesktopDirectory) }
+      "MyDocuments" { return [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments) }
+      "MyPictures" { return [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyPictures) }
+      default { return $FallbackPath }
+    }
+  } catch {
+    return $FallbackPath
+  }
+}
+
+function Resolve-JobSourcePath($Job) {
+  $fallbackPath = Expand-WindowsPath $Job.path
+  $resolvedPath = Resolve-KnownFolderPath $Job $fallbackPath
+  if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+    return $fallbackPath
+  }
+
+  return $resolvedPath
+}
+
+function Resolve-PublicFolderPath([string]$FolderName) {
   $publicRoot = [Environment]::GetEnvironmentVariable("PUBLIC")
   if ([string]::IsNullOrWhiteSpace($publicRoot)) {
     $systemDrive = if ([string]::IsNullOrWhiteSpace($env:SystemDrive)) { "C:" } else { $env:SystemDrive }
@@ -349,17 +377,24 @@ function Resolve-PublicDesktopPath {
     $publicRoot = Join-Path $driveRoot "Users\Public"
   }
 
-  return Join-Path $publicRoot "Desktop"
+  return Join-Path $publicRoot $FolderName
 }
 
 function Get-AdditionalBackupSources($Job, [string]$PrimarySource) {
   $sources = New-Object System.Collections.Generic.List[string]
-  if (Test-TruthyJobProperty $Job "includePublicDesktop") {
-    $publicDesktop = Resolve-PublicDesktopPath
+  $publicFolderName = ""
+  if ($null -ne $Job.PSObject.Properties["includePublicFolder"] -and -not [string]::IsNullOrWhiteSpace("$($Job.includePublicFolder)")) {
+    $publicFolderName = "$($Job.includePublicFolder)"
+  } elseif (Test-TruthyJobProperty $Job "includePublicDesktop") {
+    $publicFolderName = "Desktop"
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($publicFolderName)) {
+    $publicPath = Resolve-PublicFolderPath $publicFolderName
     $primaryKey = ($PrimarySource -replace '\\+$', '').ToLowerInvariant()
-    $publicKey = ($publicDesktop -replace '\\+$', '').ToLowerInvariant()
-    if ($publicKey -ne $primaryKey -and (Test-Path -LiteralPath $publicDesktop)) {
-      $sources.Add($publicDesktop)
+    $publicKey = ($publicPath -replace '\\+$', '').ToLowerInvariant()
+    if ($publicKey -ne $primaryKey -and (Test-Path -LiteralPath $publicPath)) {
+      $sources.Add($publicPath)
     }
   }
 
@@ -477,7 +512,7 @@ function Test-BackupJobPlan($Jobs) {
       throw "$name needs a Windows path before it can be backed up."
     }
 
-    $source = Expand-WindowsPath $rawPath
+    $source = Resolve-JobSourcePath $job
     $sourceKey = ($source -replace '\\+$', '').ToLowerInvariant()
     if ($sourceOwners.ContainsKey($sourceKey)) {
       throw "$name points to the same source as $($sourceOwners[$sourceKey]). Remove the duplicate or choose a different path."
@@ -575,7 +610,7 @@ function Prune-Snapshots([string]$SnapshotsRoot, $RetentionPolicy) {
 }
 
 function Copy-BackupItem($Job, [string]$RootPath) {
-  $source = Expand-WindowsPath $Job.path
+  $source = Resolve-JobSourcePath $Job
   if (-not (Test-Path -LiteralPath $source)) {
     throw "Backup source missing: $source"
   }

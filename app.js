@@ -1340,12 +1340,18 @@ function addDetectedUserFolderJobs() {
 
   const existingPaths = new Set(state.config.jobs.map((job) => String(job.path || "").toLowerCase()));
   const toAdd = state.detectedUserFolders.filter((folder) => selectedIds.includes(folder.id));
+  const knownFolderByName = {
+    Desktop: "Desktop",
+    Documents: "MyDocuments",
+    Pictures: "MyPictures"
+  };
 
   toAdd.forEach((folder) => {
     if (existingPaths.has(folder.path.toLowerCase())) {
       return;
     }
 
+    const knownFolder = folder.isCurrentUser ? knownFolderByName[folder.name] : undefined;
     state.config.jobs.push({
       id: `job-${Date.now()}-${folder.id}`,
       name: folder.userName ? `${folder.userName} ${folder.name}` : folder.name,
@@ -1353,7 +1359,9 @@ function addDetectedUserFolderJobs() {
       type: "folder",
       sourceKind: "user-folder",
       userName: folder.userName || "",
-      includePublicDesktop: folder.name === "Desktop",
+      windowsKnownFolder: knownFolder || undefined,
+      includePublicFolder: knownFolder ? folder.name : undefined,
+      includePublicDesktop: knownFolder && folder.name === "Desktop",
       relativeDestination: ["Users", folder.userName || "Current User", folder.name],
       enabled: true
     });
