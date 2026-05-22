@@ -2,6 +2,11 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.59 - 2026-05-22
+
+- Fixed Desktop backups so they include the shared Public Desktop overlay that Windows shows alongside the signed-in user's Desktop folder.
+- Updated default and detected Desktop jobs to preserve that shared-shortcut coverage in future backups and storage estimates.
+
 ## 1.0.10-beta.58 - 2026-05-22
 
 - Added an in-app update notification prompt when a newer build is found, with a direct `Download Update` action and a `Later` option.

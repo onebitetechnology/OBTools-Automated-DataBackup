@@ -1353,6 +1353,7 @@ function addDetectedUserFolderJobs() {
       type: "folder",
       sourceKind: "user-folder",
       userName: folder.userName || "",
+      includePublicDesktop: folder.name === "Desktop",
       relativeDestination: ["Users", folder.userName || "Current User", folder.name],
       enabled: true
     });

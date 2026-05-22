@@ -212,6 +212,45 @@ function normalizeKnownDestinations(entries = [], currentDestination = null, ins
   return records;
 }
 
+function isDesktopBackupJob(job = {}) {
+  const normalizedPath = String(job.path || "").trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  const normalizedName = String(job.name || "").trim().toLowerCase();
+  return normalizedName === "desktop" || normalizedPath.endsWith("\\desktop") || normalizedPath === "%userprofile%\\desktop";
+}
+
+function normalizeBackupJobs(jobs = []) {
+  return jobs.map((job) => {
+    if (!isDesktopBackupJob(job)) {
+      return job;
+    }
+
+    return {
+      ...job,
+      includePublicDesktop: job.includePublicDesktop !== false
+    };
+  });
+}
+
+function publicDesktopPath() {
+  const publicRoot = process.env.PUBLIC || path.join(process.env.SystemDrive || "C:", "Users", "Public");
+  return path.join(publicRoot, "Desktop");
+}
+
+function normalizePathKey(value) {
+  return String(value || "").trim().replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+}
+
+function additionalBackupJobPaths(job = {}, primaryPath = "") {
+  if (!job.includePublicDesktop) {
+    return [];
+  }
+
+  const publicDesktop = publicDesktopPath();
+  const primaryKey = normalizePathKey(primaryPath || job.path);
+  const publicKey = normalizePathKey(publicDesktop);
+  return publicKey && publicKey !== primaryKey ? [publicDesktop] : [];
+}
+
 function normalizeConfigForMain(config) {
   const existingDestination = config?.destination || {};
   const normalizedBaseFolder = existingDestination.baseFolder === "One Bite Backups" || existingDestination.baseFolder === "OB Tools Backup" || !existingDestination.baseFolder
@@ -282,6 +321,7 @@ function normalizeConfigForMain(config) {
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
     },
+    jobs: normalizeBackupJobs(config?.jobs || []),
     knownDestinations: normalizeKnownDestinations(config?.knownDestinations || [], {
       ...existingDestination,
       id: existingDestination.id || crypto.randomUUID(),
@@ -1191,6 +1231,11 @@ function analyzeStorage(config) {
       continue;
     }
     estimatedBytes += calculatePathSize(resolvedPath);
+    for (const additionalPath of additionalBackupJobPaths(job, resolvedPath)) {
+      if (additionalPath && fs.existsSync(additionalPath)) {
+        estimatedBytes += calculatePathSize(additionalPath);
+      }
+    }
   }
 
   let freeBytes = null;
@@ -1283,7 +1328,7 @@ function detectUserFolders() {
   ]);
 
   const folderChecks = [
-    ["desktop", "Desktop", "Files and shortcuts currently kept on the desktop"],
+    ["desktop", "Desktop", "Files and shortcuts currently shown on the desktop, including shared app shortcuts"],
     ["documents", "Documents", "Documents, saved work files, and common exported files"],
     ["downloads", "Downloads", "Items downloaded from browsers, email, and other apps"],
     ["pictures", "Pictures", "Photos, screenshots, and saved images"],

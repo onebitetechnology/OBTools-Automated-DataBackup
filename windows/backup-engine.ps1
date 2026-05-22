@@ -328,6 +328,101 @@ function Get-RobocopyExcludedDirectories([string]$Source) {
   return @($excluded)
 }
 
+function Test-TruthyJobProperty($Job, [string]$PropertyName) {
+  if ($null -eq $Job.PSObject.Properties[$PropertyName]) {
+    return $false
+  }
+
+  $value = $Job.$PropertyName
+  if ($value -is [bool]) {
+    return $value
+  }
+
+  return "$value".ToLowerInvariant() -eq "true"
+}
+
+function Resolve-PublicDesktopPath {
+  $publicRoot = [Environment]::GetEnvironmentVariable("PUBLIC")
+  if ([string]::IsNullOrWhiteSpace($publicRoot)) {
+    $systemDrive = if ([string]::IsNullOrWhiteSpace($env:SystemDrive)) { "C:" } else { $env:SystemDrive }
+    $driveRoot = if ($systemDrive.EndsWith("\")) { $systemDrive } else { "$systemDrive\" }
+    $publicRoot = Join-Path $driveRoot "Users\Public"
+  }
+
+  return Join-Path $publicRoot "Desktop"
+}
+
+function Get-AdditionalBackupSources($Job, [string]$PrimarySource) {
+  $sources = New-Object System.Collections.Generic.List[string]
+  if (Test-TruthyJobProperty $Job "includePublicDesktop") {
+    $publicDesktop = Resolve-PublicDesktopPath
+    $primaryKey = ($PrimarySource -replace '\\+$', '').ToLowerInvariant()
+    $publicKey = ($publicDesktop -replace '\\+$', '').ToLowerInvariant()
+    if ($publicKey -ne $primaryKey -and (Test-Path -LiteralPath $publicDesktop)) {
+      $sources.Add($publicDesktop)
+    }
+  }
+
+  return @($sources)
+}
+
+function Invoke-CheckedRobocopy($RobocopyArgs, [string]$Source) {
+  $robocopyOutput = @(robocopy @RobocopyArgs 2>&1)
+  if ($LASTEXITCODE -lt 8) {
+    return
+  }
+
+  if ($robocopyOutput -match 'ERROR 112' -or $robocopyOutput -match 'not enough space on the disk') {
+    throw "The backup drive ran out of space while copying files from $Source. Free up space or use a larger drive, then try again."
+  }
+
+  $detail = $robocopyOutput |
+    ForEach-Object { "$_".Trim() } |
+    Where-Object {
+      $_ -and (
+        $_ -match 'ERROR' -or
+        $_ -match 'Access is denied' -or
+        $_ -match 'cannot access the file' -or
+        $_ -match 'used by another process' -or
+        $_ -match 'mismatch'
+      )
+    } |
+    Select-Object -First 1
+
+  if ($detail) {
+    throw "Some files in $Source could not be copied. $detail"
+  }
+
+  throw "Some files in $Source could not be copied. Close open files or cloud-sync apps, then try the backup again."
+}
+
+function Copy-FolderToPath([string]$Source, [string]$Destination, [bool]$Mirror) {
+  New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+  $copyMode = if ($Mirror) { "/MIR" } else { "/E" }
+  $robocopyArgs = @($Source, $Destination, $copyMode, "/FFT", "/R:1", "/W:1", "/XJ")
+  $excludedDirectories = Get-RobocopyExcludedDirectories $Source
+  if ($excludedDirectories.Count -gt 0) {
+    $robocopyArgs += "/XD"
+    $robocopyArgs += $excludedDirectories
+  }
+
+  Invoke-CheckedRobocopy $robocopyArgs $Source
+}
+
+function Copy-MergedFolderSources($Sources, [string]$Destination) {
+  $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) "DataSafe-merged-folder-$([guid]::NewGuid().ToString('N'))"
+  try {
+    New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
+    foreach ($source in @($Sources)) {
+      Copy-FolderToPath $source $stagingRoot $false
+    }
+
+    Copy-FolderToPath $stagingRoot $Destination $true
+  } finally {
+    Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Get-SafeBackupSegment([string]$Value, [string]$Fallback = "Item") {
   $segment = if ([string]::IsNullOrWhiteSpace($Value)) { $Fallback } else { $Value }
   $segment = ($segment -replace '\.[^./\\]+$', '')
@@ -488,37 +583,11 @@ function Copy-BackupItem($Job, [string]$RootPath) {
   $destination = Get-BackupItemTargetPath $Job $RootPath
 
   if ($Job.type -eq "folder") {
-    New-Item -ItemType Directory -Force -Path $destination | Out-Null
-    $robocopyArgs = @($source, $destination, "/MIR", "/FFT", "/R:1", "/W:1", "/XJ")
-    $excludedDirectories = Get-RobocopyExcludedDirectories $source
-    if ($excludedDirectories.Count -gt 0) {
-      $robocopyArgs += "/XD"
-      $robocopyArgs += $excludedDirectories
-    }
-    $robocopyOutput = @(robocopy @robocopyArgs 2>&1)
-    if ($LASTEXITCODE -ge 8) {
-      if ($robocopyOutput -match 'ERROR 112' -or $robocopyOutput -match 'not enough space on the disk') {
-        throw "The backup drive ran out of space while copying files from $source. Free up space or use a larger drive, then try again."
-      }
-
-      $detail = $robocopyOutput |
-        ForEach-Object { "$_".Trim() } |
-        Where-Object {
-          $_ -and (
-            $_ -match 'ERROR' -or
-            $_ -match 'Access is denied' -or
-            $_ -match 'cannot access the file' -or
-            $_ -match 'used by another process' -or
-            $_ -match 'mismatch'
-          )
-        } |
-        Select-Object -First 1
-
-      if ($detail) {
-        throw "Some files in $source could not be copied. $detail"
-      }
-
-      throw "Some files in $source could not be copied. Close open files or cloud-sync apps, then try the backup again."
+    $additionalSources = @(Get-AdditionalBackupSources $Job $source)
+    if ($additionalSources.Count -gt 0) {
+      Copy-MergedFolderSources -Sources @($additionalSources + $source) -Destination $destination
+    } else {
+      Copy-FolderToPath $source $destination $true
     }
     return
   }

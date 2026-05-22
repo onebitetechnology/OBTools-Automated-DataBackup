@@ -36,6 +36,7 @@
       "name": "Desktop",
       "path": "%USERPROFILE%\\Desktop",
       "type": "folder",
+      "includePublicDesktop": true,
       "enabled": true
     },
     {
