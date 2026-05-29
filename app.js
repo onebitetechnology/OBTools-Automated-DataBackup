@@ -757,7 +757,19 @@ function summarizeActionMessage(message) {
   }
 
   if (/DataSafe backup is already running/i.test(raw)) {
-    return "A backup is already running. Wait for it to finish before starting another backup.";
+    return "DataSafe is already backing up this PC. Leave it open and wait for the backup to finish. If nothing appears to be happening after a few minutes, close and reopen DataSafe, then contact One Bite Technology if the warning comes back.";
+  }
+
+  if (/backup files were copied.*could not update its backup status/i.test(raw) || /WriteAllText/i.test(raw)) {
+    return "DataSafe copied the backup files, but it could not update its status screen. Close DataSafe completely, reopen it, and run the backup again. If this keeps happening, contact One Bite Technology.";
+  }
+
+  if (/Scheduled backup task installed/i.test(raw) && /Windows would not allow DataSafe to update/i.test(raw)) {
+    return "Scheduled backups are set up, but Windows blocked one helper task used for reminders or missed-backup catch-up. Manual backups and the saved backup schedule can still be used. If this message comes back, contact One Bite Technology.";
+  }
+
+  if (/Register-ScheduledTask|Windows would not allow DataSafe to update|Access is denied|PermissionDenied/i.test(raw)) {
+    return "Windows would not allow DataSafe to update one of its automatic task settings. Manual backups still work. Try closing and reopening DataSafe, then install Windows Tasks again. If the message comes back, contact One Bite Technology.";
   }
 
   if (/does not look like the backup drive that was used before/i.test(raw) || /previous DataSafe Backup folder was not found/i.test(raw) || /appears to belong to a different install/i.test(raw)) {
@@ -2286,9 +2298,10 @@ function maybeHandleAutomationSaveResult(payload, showAutomationPrompt = true) {
   }
 
   if (automation.type === "updated") {
+    const hasTaskWarning = /would not allow|could not update|contact One Bite Technology/i.test(automation.message || "");
     showResultModal({
-      title: "Windows Tasks Updated",
-      message: automation.message || "Windows Tasks were refreshed to match the new schedule settings."
+      title: hasTaskWarning ? "Windows Tasks Updated With Notes" : "Windows Tasks Updated",
+      message: summarizeActionMessage(automation.message || "Windows Tasks were refreshed to match the new schedule settings.")
     });
     return;
   }
@@ -2296,7 +2309,7 @@ function maybeHandleAutomationSaveResult(payload, showAutomationPrompt = true) {
   if (automation.type === "failed") {
     showResultModal({
       title: "Windows Tasks Need Attention",
-      message: automation.message || "The saved schedule changed, but Windows Tasks could not be updated automatically."
+      message: summarizeActionMessage(automation.message || "The saved schedule changed, but Windows Tasks could not be updated automatically.")
     });
   }
 }
@@ -2475,12 +2488,16 @@ async function invokeAction(path, options = {}) {
     }
 
     if (path === "/api/install-automation") {
+      const automationMessage = summarizeActionMessage(state.status.automation?.message || "Windows scheduled tasks were installed successfully.");
+      const hasTaskWarning = /would not allow|could not update|contact One Bite Technology/i.test(state.status.automation?.message || "");
       showResultModal({
-        title: "Windows Tasks Ready",
-        message: state.status.automation?.message || "Windows scheduled tasks were installed successfully.",
+        title: hasTaskWarning ? "Windows Tasks Installed With Notes" : "Windows Tasks Ready",
+        message: automationMessage,
         list: [
           "Scheduled backups can now run automatically using the saved schedule.",
-          "Backup reminder checks can notify the user when backups have not run recently."
+          hasTaskWarning
+            ? "Some helper reminders or catch-up checks may need One Bite Technology to reset the Windows task."
+            : "Backup reminder checks can notify the user when backups have not run recently."
         ]
       });
       maybeShowDriveInsightPrompt();
@@ -2492,8 +2509,9 @@ async function invokeAction(path, options = {}) {
       state.backupProgress = null;
       state.backupTiming = null;
       const success = state.status.lastBackupResult === "success";
+      const warning = state.status.lastBackupResult === "warning";
       showResultModal({
-        title: success ? "Backup Complete" : "Backup Needs Attention",
+        title: success ? "Backup Complete" : warning ? "Backup Completed With Warnings" : "Backup Needs Attention",
         message: summarizeActionMessage(state.status.lastBackupMessage || "Backup finished."),
         list: (state.status.recentSnapshots || []).slice(0, 5).map((snapshot) => `Snapshot: ${snapshot}`)
       });

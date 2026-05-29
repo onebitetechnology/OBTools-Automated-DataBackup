@@ -182,7 +182,11 @@ function Write-FailedBackupStatus([string]$Path, [string]$Message) {
     $status.destinationStatus = "Issue Detected"
   }
 
-  Write-Json $Path $status
+  try {
+    Write-Json $Path $status
+  } catch {
+    # Preserve the original backup error; the app will still show it from stderr/stdout.
+  }
 }
 
 function Write-DestinationMarker([string]$BaseRoot, $Config) {
@@ -686,7 +690,11 @@ try {
   $status.destinationStatus = "Connected"
   $status.recentSnapshots = @($remaining)
 
-  Write-Json $StatusPath $status
+  try {
+    Write-Json $StatusPath $status
+  } catch {
+    throw "The backup files were copied, but DataSafe could not update its backup status. Close DataSafe completely, reopen it, and run the backup again. If this keeps happening, contact One Bite Technology."
+  }
   Write-ProgressMarker -Phase "complete" -JobName "" -Step $totalSteps -TotalSteps $totalSteps -Detail "Backup completed successfully."
   Show-BackupNotification -Title "DataSafe Backup Complete" -Message "Backup completed successfully to $baseRoot." -Level "Info" -ClickTarget $null
   Write-Output "Backup completed successfully."

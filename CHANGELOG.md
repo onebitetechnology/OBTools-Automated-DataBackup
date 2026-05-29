@@ -2,6 +2,12 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.61 - 2026-05-28
+
+- Reworded Task Scheduler permission, backup status-write, and overlapping-backup failures into customer-friendly guidance that explains whether to wait, retry, or contact One Bite Technology.
+- Made missed-backup catch-up and reminder task registration best-effort so Windows permission issues do not hide successful scheduled-backup setup.
+- Updated backup result popups so partial backups with retained snapshots are shown as warnings instead of generic failures.
+
 ## 1.0.10-beta.60 - 2026-05-22
 
 - Extended common user-folder backups so Desktop, Documents, and Pictures resolve through Windows known-folder paths before copying, covering OneDrive or Windows folder redirection.

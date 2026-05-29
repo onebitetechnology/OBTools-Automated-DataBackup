@@ -21,6 +21,36 @@ function Remove-TaskIfExists([string]$TaskName) {
   }
 }
 
+function Get-FriendlyTaskError([string]$TaskName, $ErrorRecord) {
+  $raw = if ($ErrorRecord -and $ErrorRecord.Exception -and $ErrorRecord.Exception.Message) { $ErrorRecord.Exception.Message } else { "$ErrorRecord" }
+  if ($raw -match "Access is denied" -or $raw -match "PermissionDenied") {
+    return "Windows would not allow DataSafe to update $TaskName for this user. Scheduled backups may still work, but if this message keeps appearing, contact One Bite Technology so we can reset the Windows task."
+  }
+
+  return "Windows could not update $TaskName. If this message keeps appearing, contact One Bite Technology. $raw"
+}
+
+function Register-TaskWithMessage(
+  [string]$TaskName,
+  $Action,
+  $Trigger,
+  $Settings,
+  $Principal,
+  [bool]$Required
+) {
+  try {
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Principal $Principal -Force | Out-Null
+    return $null
+  } catch {
+    $friendly = Get-FriendlyTaskError $TaskName $_
+    if ($Required) {
+      throw $friendly
+    }
+
+    return $friendly
+  }
+}
+
 function Get-NormalizedDayOfWeek($Schedule) {
   $validDays = @("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
   if ($Schedule -and $null -ne $Schedule.PSObject.Properties["dayOfWeek"] -and ($validDays -contains [string]$Schedule.dayOfWeek)) {
@@ -78,14 +108,18 @@ if ($includeStartupCatchUp) {
 $messages = New-Object System.Collections.Generic.List[string]
 
 if ($schedule.enabled) {
-  Register-ScheduledTask -TaskName "OneBiteBackupRun" -Action $backupAction -Trigger $backupTrigger -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
-  Register-ScheduledTask -TaskName "OneBiteBackupCatchUp" -Action $catchUpAction -Trigger $catchUpTriggers -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
+  Register-TaskWithMessage -TaskName "OneBiteBackupRun" -Action $backupAction -Trigger $backupTrigger -Settings $taskSettings -Principal $taskPrincipal -Required $true | Out-Null
+  $catchUpWarning = Register-TaskWithMessage -TaskName "OneBiteBackupCatchUp" -Action $catchUpAction -Trigger $catchUpTriggers -Settings $taskSettings -Principal $taskPrincipal -Required $false
   $scheduleLabel = if ($schedule.frequency -eq "weekly") { "weekly on $backupDay" } else { "daily" }
   $messages.Add("Scheduled backup task installed or updated for $scheduleLabel at $($schedule.time).")
-  if ($includeStartupCatchUp) {
-    $messages.Add("Missed-backup catch-up task installed or updated for startup and sign-in.")
+  if ($catchUpWarning) {
+    $messages.Add($catchUpWarning)
   } else {
-    $messages.Add("Missed-backup catch-up task installed or updated for sign-in.")
+    if ($includeStartupCatchUp) {
+      $messages.Add("Missed-backup catch-up task installed or updated for startup and sign-in.")
+    } else {
+      $messages.Add("Missed-backup catch-up task installed or updated for sign-in.")
+    }
   }
 } else {
   Remove-TaskIfExists "OneBiteBackupRun"
@@ -95,8 +129,12 @@ if ($schedule.enabled) {
 }
 
 if ($reminders.enabled) {
-  Register-ScheduledTask -TaskName "OneBiteBackupReminder" -Action $reminderAction -Trigger $reminderTrigger -Settings $taskSettings -Principal $taskPrincipal -Force | Out-Null
-  $messages.Add("Reminder notification task installed or updated.")
+  $reminderWarning = Register-TaskWithMessage -TaskName "OneBiteBackupReminder" -Action $reminderAction -Trigger $reminderTrigger -Settings $taskSettings -Principal $taskPrincipal -Required $false
+  if ($reminderWarning) {
+    $messages.Add($reminderWarning)
+  } else {
+    $messages.Add("Reminder notification task installed or updated.")
+  }
 } else {
   Remove-TaskIfExists "OneBiteBackupReminder"
   $messages.Add("Reminder notification task removed because reminders are disabled.")
