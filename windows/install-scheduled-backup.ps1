@@ -79,12 +79,14 @@ $reminders = if ($config.reminders) { $config.reminders } else { [PSCustomObject
 $backupScript = Join-Path $ScriptRoot "backup-engine.ps1"
 $reminderScript = Join-Path $ScriptRoot "check-reminders.ps1"
 $catchUpScript = Join-Path $ScriptRoot "check-backup-catchup.ps1"
+$integrityScript = Join-Path $ScriptRoot "verify-backup-integrity.ps1"
 $time = [DateTime]::ParseExact($schedule.time, "HH:mm", $null)
 $backupDay = Get-NormalizedDayOfWeek $schedule
 
 $backupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$backupScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
 $reminderAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$reminderScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
 $catchUpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$catchUpScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`" -ScriptRoot `"$ScriptRoot`""
+$integrityAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$integrityScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
 $taskExecutionLimit = New-TimeSpan -Hours 12
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit $taskExecutionLimit
 $taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -97,6 +99,7 @@ if ($schedule.frequency -eq "weekly") {
 }
 
 $reminderTrigger = New-ScheduledTaskTrigger -Daily -At 09:00
+$integrityTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 11:00
 $catchUpLogonTrigger = New-ScheduledTaskTrigger -AtLogOn
 $includeStartupCatchUp = Test-IsAdministrator
 $catchUpTriggers = @($catchUpLogonTrigger)
@@ -110,6 +113,7 @@ $messages = New-Object System.Collections.Generic.List[string]
 if ($schedule.enabled) {
   Register-TaskWithMessage -TaskName "OneBiteBackupRun" -Action $backupAction -Trigger $backupTrigger -Settings $taskSettings -Principal $taskPrincipal -Required $true | Out-Null
   $catchUpWarning = Register-TaskWithMessage -TaskName "OneBiteBackupCatchUp" -Action $catchUpAction -Trigger $catchUpTriggers -Settings $taskSettings -Principal $taskPrincipal -Required $false
+  $integrityWarning = Register-TaskWithMessage -TaskName "OneBiteBackupIntegrity" -Action $integrityAction -Trigger $integrityTrigger -Settings $taskSettings -Principal $taskPrincipal -Required $false
   $scheduleLabel = if ($schedule.frequency -eq "weekly") { "weekly on $backupDay" } else { "daily" }
   $messages.Add("Scheduled backup task installed or updated for $scheduleLabel at $($schedule.time).")
   if ($catchUpWarning) {
@@ -121,11 +125,18 @@ if ($schedule.enabled) {
       $messages.Add("Missed-backup catch-up task installed or updated for sign-in.")
     }
   }
+  if ($integrityWarning) {
+    $messages.Add($integrityWarning)
+  } else {
+    $messages.Add("Weekly checksum verification task installed or updated for Sunday at 11:00.")
+  }
 } else {
   Remove-TaskIfExists "OneBiteBackupRun"
   Remove-TaskIfExists "OneBiteBackupCatchUp"
+  Remove-TaskIfExists "OneBiteBackupIntegrity"
   $messages.Add("Scheduled backup task removed because automatic backups are disabled.")
   $messages.Add("Missed-backup catch-up task removed because automatic backups are disabled.")
+  $messages.Add("Weekly checksum verification task removed because automatic backups are disabled.")
 }
 
 if ($reminders.enabled) {

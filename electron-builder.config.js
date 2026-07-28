@@ -11,11 +11,13 @@ module.exports = {
   files: [
     "app.js",
     "assets/**/*",
+    "backup-safety.js",
     "index.html",
     "main.js",
     "preload.js",
     "server.js",
-    "styles.css"
+    "styles.css",
+    "professional.css"
   ],
   extraResources: [
     {
@@ -29,7 +31,7 @@ module.exports = {
   ],
   asar: true,
   win: {
-    icon: "assets/datasafe-icon.png",
+    icon: "assets/datasafe-mark.png",
     target: [
       {
         target: "nsis",

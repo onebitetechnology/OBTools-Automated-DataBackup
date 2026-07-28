@@ -4,6 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
+const { inspectSnapshotsAtBaseRoot } = require("./backup-safety");
 
 function mimeTypeForExtension(extension) {
   switch (String(extension || "").toLowerCase()) {
@@ -103,7 +104,7 @@ function writeRuntimeLog(message) {
 }
 
 function appIconPath() {
-  return path.join(APP_ROOT, "assets", "datasafe-icon.png");
+  return path.join(APP_ROOT, "assets", "datasafe-mark.png");
 }
 
 function showMainWindow() {
@@ -431,6 +432,13 @@ function defaultStatus() {
     lastBackupMessage: "No backups have been run yet.",
     destinationStatus: "Unknown",
     recentSnapshots: [],
+    integrity: {
+      checkedAt: null,
+      level: "info",
+      summary: "Backup integrity has not been verified yet.",
+      snapshotName: null,
+      filesChecked: 0
+    },
     cloud: {
       checkedAt: null,
       summary: "Cloud check has not been run yet.",
@@ -580,6 +588,7 @@ function startStatusWatcher() {
 function appMeta() {
   return {
     version: app.getVersion(),
+    isPackaged: app.isPackaged,
     updateStatus
   };
 }
@@ -622,6 +631,22 @@ function summarizeProtectionForTray(config, status) {
       level: "warning",
       title: "Check Backup Drive",
       message: "The connected drive does not look like the expected DataSafe backup drive."
+    };
+  }
+
+  if (status?.integrity?.level === "error") {
+    return {
+      level: "error",
+      title: "Backup Verification Failed",
+      message: status.integrity.summary || "A saved snapshot failed its checksum verification."
+    };
+  }
+
+  if (status?.integrity?.level === "warning") {
+    return {
+      level: "warning",
+      title: "Backup Verification Needs Attention",
+      message: status.integrity.summary || "The latest backup integrity check needs review."
     };
   }
 
@@ -884,6 +909,10 @@ function deriveDestinationStatus(message, ok) {
     return "Drive Not Connected";
   }
 
+  if (/does not match this DataSafe installation/i.test(message) || /identity marker/i.test(message)) {
+    return "Destination Not Recognized";
+  }
+
   return "Issue Detected";
 }
 
@@ -935,50 +964,7 @@ function resolveDestinationBasePath(destination) {
 
 function inspectSnapshots(config) {
   const baseRoot = resolveDestinationBasePath(config);
-  if (!baseRoot) {
-    return {
-      baseRoot: null,
-      snapshots: []
-    };
-  }
-
-  const snapshotsRoot = path.join(baseRoot, "snapshots");
-  if (!fs.existsSync(snapshotsRoot)) {
-    return {
-      baseRoot,
-      snapshots: []
-    };
-  }
-
-  try {
-    const snapshots = fs.readdirSync(snapshotsRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        const fullPath = path.join(snapshotsRoot, entry.name);
-        let createdAt = 0;
-        try {
-          createdAt = fs.statSync(fullPath).birthtimeMs || fs.statSync(fullPath).ctimeMs || 0;
-        } catch (_error) {
-          createdAt = 0;
-        }
-
-        return {
-          name: entry.name,
-          createdAt
-        };
-      })
-      .sort((left, right) => right.createdAt - left.createdAt);
-
-    return {
-      baseRoot,
-      snapshots
-    };
-  } catch (_error) {
-    return {
-      baseRoot,
-      snapshots: []
-    };
-  }
+  return inspectSnapshotsAtBaseRoot(baseRoot);
 }
 
 function destinationDisplayLabel(destination) {
@@ -993,7 +979,7 @@ function destinationDisplayLabel(destination) {
 }
 
 function destinationMarkerPath(config) {
-  const baseRoot = resolveDestinationBasePath(config?.destination);
+  const baseRoot = resolveDestinationBasePath(config?.destination || config);
   return baseRoot ? path.join(baseRoot, DESTINATION_MARKER_FILE) : null;
 }
 
@@ -1190,6 +1176,10 @@ function reconcileStatusWithDisk(config, status) {
       ...baseStatus.cloud,
       ...(status?.cloud || {})
     },
+    integrity: {
+      ...baseStatus.integrity,
+      ...(status?.integrity || {})
+    },
     automation: {
       ...baseStatus.automation,
       ...(status?.automation || {})
@@ -1222,6 +1212,21 @@ function reconcileStatusWithDisk(config, status) {
         ? `Backup snapshots were found on ${snapshotInfo.baseRoot}`
         : "Backup snapshots were found on the selected drive.";
     }
+  }
+
+  if ((snapshotInfo.unverifiedCount || snapshotInfo.incompleteCount) && nextStatus.integrity.level !== "error") {
+    const details = [];
+    if (snapshotInfo.unverifiedCount) {
+      details.push(`${snapshotInfo.unverifiedCount} snapshot folder${snapshotInfo.unverifiedCount === 1 ? "" : "s"} without a valid completion record`);
+    }
+    if (snapshotInfo.incompleteCount) {
+      details.push(`${snapshotInfo.incompleteCount} incomplete staging folder${snapshotInfo.incompleteCount === 1 ? "" : "s"}`);
+    }
+    nextStatus.integrity = {
+      ...nextStatus.integrity,
+      level: "warning",
+      summary: `DataSafe excluded ${details.join(" and ")} from backup and restore lists. Contact support before removing older backup folders.`
+    };
   }
 
   return nextStatus;
@@ -1304,8 +1309,11 @@ function analyzeStorage(config) {
     }
   }
 
+  const reserveBytes = Math.max(Math.ceil(estimatedBytes * 0.10), 256 * 1024 * 1024);
   return {
     estimatedBytes,
+    reserveBytes,
+    requiredBytes: estimatedBytes + reserveBytes,
     freeBytes,
     destinationRoot,
     missingPaths,
@@ -1559,7 +1567,7 @@ function detectInstalledEmailData() {
   return detected;
 }
 
-function simulateAction(scriptName) {
+function simulateAction(scriptName, extraScriptArgs = []) {
   const { statusPath } = dataPaths();
   const status = readJson(statusPath);
   const now = new Date();
@@ -1574,12 +1582,12 @@ function simulateAction(scriptName) {
       detail: "Preparing the backup destination."
     });
     publishBackupProgress({
-      phase: "copying-current",
+      phase: "copying-snapshot",
       jobName: "Preview Files",
       step: 2,
       totalSteps: 3,
       percent: 65,
-      detail: "Copying to the current backup set."
+      detail: "Copying into a protected staging snapshot."
     });
     const timestamp = now.toISOString().replace(/[:.]/g, "-");
     status.lastBackupAt = now.toISOString();
@@ -1587,6 +1595,13 @@ function simulateAction(scriptName) {
     status.lastBackupMessage = "Preview mode: simulated backup completed on this device.";
     status.destinationStatus = "Preview Mode";
     status.recentSnapshots = [timestamp, ...(status.recentSnapshots || [])].slice(0, 5);
+    status.integrity = {
+      checkedAt: now.toISOString(),
+      level: "success",
+      summary: "Preview mode: copied files passed simulated SHA-256 verification.",
+      snapshotName: timestamp,
+      filesChecked: 24
+    };
     writeJson(statusPath, status);
     publishBackupProgress({
       phase: "complete",
@@ -1623,7 +1638,37 @@ function simulateAction(scriptName) {
   }
 
   if (scriptName === "restore-snapshot.ps1") {
-    return { ok: true, message: "Preview mode: snapshot restore simulated." };
+    const actionIndex = extraScriptArgs.indexOf("-Action");
+    const action = actionIndex >= 0 ? extraScriptArgs[actionIndex + 1] : "restore";
+    if (action === "plan") {
+      return {
+        ok: true,
+        message: "Preview mode: restore plan prepared.",
+        data: {
+          mode: extraScriptArgs.includes("original") ? "original" : "alternate",
+          targetPath: "Preview restore location",
+          sourceFiles: 24,
+          sourceBytes: 1024 * 1024 * 48,
+          newFiles: 18,
+          identicalFiles: 2,
+          conflictingFiles: 4,
+          newerCurrentFiles: 1,
+          safetyCopyRequired: extraScriptArgs.includes("original"),
+          safetyCopyBytes: 1024 * 1024 * 32,
+          safetyCopyPath: "Preview safety copy location",
+          freeBytes: 1024 * 1024 * 1024 * 100,
+          enoughSpaceForSafetyCopy: true
+        }
+      };
+    }
+    return {
+      ok: true,
+      message: "Preview mode: snapshot restore simulated.",
+      data: {
+        targetPath: "Preview restore location",
+        safetyCopyPath: extraScriptArgs.includes("original") ? "Preview safety copy location" : null
+      }
+    };
   }
 
   return { ok: true, message: `Preview mode: simulated ${scriptName}.` };
@@ -1633,7 +1678,7 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
   return new Promise((resolve) => {
     if (process.platform !== "win32") {
       resolve({
-        ...simulateAction(scriptName),
+        ...simulateAction(scriptName, extraScriptArgs),
         code: 0
       });
       return;
@@ -1679,6 +1724,7 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
     });
 
     const progressPrefix = "__OB_PROGRESS__:";
+    const resultPrefix = "__OB_RESULT__:";
 
     const handleOutputChunk = (chunk, state, scriptForLog) => {
       state.buffer += chunk.toString();
@@ -1703,6 +1749,16 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
           continue;
         }
 
+        if (line.startsWith(resultPrefix)) {
+          const rawPayload = line.slice(resultPrefix.length);
+          try {
+            state.data = JSON.parse(rawPayload);
+          } catch (error) {
+            writeLauncherLog(`Failed to parse result data from ${scriptForLog}: ${error.message}`);
+          }
+          continue;
+        }
+
         state.stdout += `${line}\n`;
       }
     };
@@ -1719,6 +1775,15 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
           publishBackupProgress(JSON.parse(rawPayload));
         } catch (_error) {
           // Ignore malformed trailing progress lines.
+        }
+        return;
+      }
+
+      if (line.startsWith(resultPrefix)) {
+        try {
+          state.data = JSON.parse(line.slice(resultPrefix.length));
+        } catch (_error) {
+          // Ignore malformed trailing result lines.
         }
         return;
       }
@@ -1742,7 +1807,8 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
 
         const outputState = {
           stdout: "",
-          buffer: ""
+          buffer: "",
+          data: null
         };
         let stderr = "";
         let settled = false;
@@ -1780,7 +1846,8 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
           resolve({
             ok: code === 0,
             code,
-            message: stderr.trim() || outputState.stdout.trim() || `Exited with code ${code}.`
+            message: stderr.trim() || outputState.stdout.trim() || `Exited with code ${code}.`,
+            data: outputState.data
           });
         });
         return;
@@ -1795,7 +1862,8 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
 
       const outputState = {
         stdout: "",
-        buffer: ""
+        buffer: "",
+        data: null
       };
       let stderr = "";
       let settled = false;
@@ -1839,7 +1907,8 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
         resolve({
           ok: code === 0,
           code,
-          message: stderr.trim() || outputState.stdout.trim() || `Exited with code ${code}.`
+          message: stderr.trim() || outputState.stdout.trim() || `Exited with code ${code}.`,
+          data: outputState.data
         });
       });
     };
@@ -1855,7 +1924,7 @@ function createWindow() {
     height: 920,
     minWidth: 1080,
     minHeight: 760,
-    backgroundColor: "#f4efe7",
+    backgroundColor: "#0b0f13",
     title: "DataSafe",
     icon: appIconPath(),
     show: true,
@@ -2346,7 +2415,7 @@ ipcMain.handle("storage:analyze", async () => {
   };
 });
 
-ipcMain.handle("restore:run", async (_event, payload = {}) => {
+function restoreArguments(payload = {}, action = "restore") {
   const snapshotName = String(payload.snapshotName || "").trim();
   const jobId = String(payload.jobId || "").trim();
   const mode = payload.mode === "alternate" ? "alternate" : "original";
@@ -2360,22 +2429,52 @@ ipcMain.handle("restore:run", async (_event, payload = {}) => {
     throw new Error("Choose a restore folder before restoring to another location.");
   }
 
-  const extraArgs = [
+  const args = [
     "-SnapshotName",
     snapshotName,
     "-JobId",
     jobId,
     "-RestoreMode",
-    mode
+    mode,
+    "-Action",
+    action
   ];
-
   if (targetPath) {
-    extraArgs.push("-TargetPath", targetPath);
+    args.push("-TargetPath", targetPath);
   }
 
-  writeLauncherLog(`IPC restore:run received. snapshot=${snapshotName} job=${jobId} mode=${mode}`);
-  writeRuntimeLog(`Restore requested. snapshot=${snapshotName} job=${jobId} mode=${mode}`);
-  const result = await runPowerShell("restore-snapshot.ps1", extraArgs);
+  return {
+    args,
+    jobId,
+    mode,
+    snapshotName,
+    targetPath
+  };
+}
+
+ipcMain.handle("restore:plan", async (_event, payload = {}) => {
+  const request = restoreArguments(payload, "plan");
+  writeLauncherLog(`IPC restore:plan received. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
+  writeRuntimeLog(`Restore plan requested. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
+  const result = await runPowerShell("restore-snapshot.ps1", request.args);
+  if (!result.ok) {
+    throw new Error(result.message || "DataSafe could not prepare a safe restore plan.");
+  }
+
+  return {
+    ok: true,
+    message: result.message || "Restore plan prepared.",
+    plan: result.data || null,
+    meta: appMeta()
+  };
+});
+
+ipcMain.handle("restore:run", async (_event, payload = {}) => {
+  const request = restoreArguments(payload, "restore");
+
+  writeLauncherLog(`IPC restore:run received. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
+  writeRuntimeLog(`Restore requested. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
+  const result = await runPowerShell("restore-snapshot.ps1", request.args);
   writeLauncherLog(`IPC restore:run completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Restore completed. ok=${result.ok} message=${result.message}`);
 
@@ -2385,9 +2484,16 @@ ipcMain.handle("restore:run", async (_event, payload = {}) => {
 
   const { configPath } = dataPaths();
   const config = readJson(configPath);
-  const selectedJob = (config.jobs || []).find((job) => job.id === jobId);
+  const selectedJob = (config.jobs || []).find((job) => job.id === request.jobId);
   const notes = [];
 
+  if (result.data?.targetPath) {
+    notes.push(`Restored to: ${result.data.targetPath}`);
+  }
+  if (result.data?.safetyCopyPath) {
+    notes.push(`Verified safety copy kept at: ${result.data.safetyCopyPath}`);
+    notes.push("DataSafe recorded a restore journal beside the safety copy.");
+  }
   if (selectedJob?.sourceKind === "browser") {
     notes.push("Reopen the browser after the restore finishes. If this is a fresh install, launching the browser once before restore is safest.");
   } else if (selectedJob?.sourceKind === "email") {
@@ -2400,6 +2506,7 @@ ipcMain.handle("restore:run", async (_event, payload = {}) => {
     ok: true,
     message: result.message || "The selected snapshot was restored successfully.",
     notes,
+    restore: result.data || null,
     meta: appMeta()
   };
 });
@@ -2429,11 +2536,24 @@ ipcMain.handle("backup:run", async (_event, options = {}) => {
     percent: 2,
     detail: "Starting the backup process."
   });
-  const result = await runPowerShell("backup-engine.ps1");
+  const allowNewDestination = Boolean(options?.forceNewDestination) || !hasPreviousBackupHistory(currentStatus);
+  const backupArgs = allowNewDestination ? ["-AllowNewDestination"] : [];
+  const result = await runPowerShell("backup-engine.ps1", backupArgs);
   const snapshotInfo = inspectSnapshots(config);
-  const recentSnapshots = snapshotInfo.snapshots.map((entry) => entry.name);
-  const newestSnapshot = snapshotInfo.snapshots[0] || null;
-  const partialSuccess = !result.ok && recentSnapshots.length > 0;
+  let engineStatus = {};
+  try {
+    engineStatus = readJson(statusPath);
+  } catch (_error) {
+    engineStatus = {};
+  }
+  const recentSnapshots = process.platform === "win32"
+    ? snapshotInfo.snapshots.map((entry) => entry.name)
+    : (engineStatus.recentSnapshots || []);
+  const newestSnapshot = snapshotInfo.snapshots[0] || (
+    recentSnapshots[0]
+      ? { name: recentSnapshots[0], createdAt: Date.now() }
+      : null
+  );
   let updatedConfig = config;
   writeLauncherLog(`IPC backup:run completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Backup run completed. ok=${result.ok} message=${result.message}`);
@@ -2446,14 +2566,22 @@ ipcMain.handle("backup:run", async (_event, options = {}) => {
     detail: result.ok ? "Backup completed." : "Backup finished with an issue."
   });
   const statusPatch = {
-    destinationStatus: deriveDestinationStatus(result.message, result.ok),
-    lastBackupResult: result.ok ? "success" : partialSuccess ? "warning" : "error",
-    lastBackupMessage: result.message,
+    destinationStatus: result.ok
+      ? (engineStatus.destinationStatus || "Connected")
+      : deriveDestinationStatus(engineStatus.lastBackupMessage || result.message, false),
+    lastBackupResult: result.ok
+      ? (engineStatus.lastBackupResult === "warning" ? "warning" : "success")
+      : "error",
+    lastBackupMessage: engineStatus.lastBackupMessage || result.message,
+    integrity: {
+      ...defaultStatus().integrity,
+      ...(engineStatus.integrity || {})
+    },
     recentSnapshots
   };
 
-  if (result.ok || partialSuccess) {
-    statusPatch.lastBackupAt = new Date(newestSnapshot?.createdAt || Date.now()).toISOString();
+  if (result.ok && newestSnapshot) {
+    statusPatch.lastBackupAt = engineStatus.lastBackupAt || new Date(newestSnapshot.createdAt).toISOString();
     const synced = syncKnownDestinationsInConfig(config);
     updatedConfig = {
       ...synced.config,

@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
+const { inspectSnapshotsAtBaseRoot } = require("./backup-safety");
 
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, "data");
@@ -28,6 +29,13 @@ function defaultStatus() {
     lastBackupMessage: "No backups have been run yet.",
     destinationStatus: "Unknown",
     recentSnapshots: [],
+    integrity: {
+      checkedAt: null,
+      level: "info",
+      summary: "Backup integrity has not been verified yet.",
+      snapshotName: null,
+      filesChecked: 0
+    },
     cloud: {
       checkedAt: null,
       summary: "Cloud check has not been run yet.",
@@ -92,6 +100,7 @@ function mergeStatus(patch) {
 function appMeta() {
   return {
     version: APP_VERSION,
+    isPackaged: false,
     updateStatus: {
       supported: false,
       checkedAt: null,
@@ -145,38 +154,7 @@ function resolveDestinationBasePath(destination) {
 
 function listRecentSnapshots(config) {
   const baseRoot = resolveDestinationBasePath(config?.destination);
-  if (!baseRoot) {
-    return [];
-  }
-
-  const snapshotsRoot = path.join(baseRoot, "snapshots");
-  if (!fs.existsSync(snapshotsRoot)) {
-    return [];
-  }
-
-  try {
-    return fs.readdirSync(snapshotsRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        const fullPath = path.join(snapshotsRoot, entry.name);
-        let createdAt = 0;
-        try {
-          const stats = fs.statSync(fullPath);
-          createdAt = stats.birthtimeMs || stats.ctimeMs || 0;
-        } catch (_error) {
-          createdAt = 0;
-        }
-
-        return {
-          name: entry.name,
-          createdAt
-        };
-      })
-      .sort((left, right) => right.createdAt - left.createdAt)
-      .map((entry) => entry.name);
-  } catch (_error) {
-    return [];
-  }
+  return inspectSnapshotsAtBaseRoot(baseRoot).snapshots.map((snapshot) => snapshot.name);
 }
 
 function simulateAction(scriptName) {
@@ -190,6 +168,13 @@ function simulateAction(scriptName) {
     status.lastBackupMessage = "Preview mode: simulated backup completed on this device.";
     status.destinationStatus = "Preview Mode";
     status.recentSnapshots = [timestamp, ...(status.recentSnapshots || [])].slice(0, 5);
+    status.integrity = {
+      checkedAt: now.toISOString(),
+      level: "success",
+      summary: "Preview mode: copied files passed simulated SHA-256 verification.",
+      snapshotName: timestamp,
+      filesChecked: 24
+    };
     writeJson(STATUS_PATH, status);
     return { ok: true, message: status.lastBackupMessage };
   }
@@ -414,11 +399,12 @@ async function handleApi(request, response) {
   if (request.method === "POST" && request.url === "/api/run-backup") {
     const config = readJson(CONFIG_PATH);
     const result = await runPowerShell("backup-engine.ps1");
+    const simulatedSnapshots = readJson(STATUS_PATH).recentSnapshots || [];
     const status = mergeStatus({
       destinationStatus: deriveDestinationStatus(result.message, result.ok),
       lastBackupResult: result.ok ? "success" : "error",
       lastBackupMessage: result.message,
-      recentSnapshots: listRecentSnapshots(config)
+      recentSnapshots: process.platform === "win32" ? listRecentSnapshots(config) : simulatedSnapshots
     });
     sendJson(response, 200, { status, meta: appMeta() });
     return;
@@ -446,6 +432,41 @@ async function handleApi(request, response) {
     return;
   }
 
+  if (request.method === "POST" && request.url === "/api/restore-plan") {
+    const restore = await parseRequestBody(request);
+    const mode = restore.mode === "original" ? "original" : "alternate";
+    sendJson(response, 200, {
+      ok: true,
+      message: "Preview mode: restore plan prepared.",
+      plan: {
+        mode,
+        targetPath: mode === "original" ? "Original location" : "Preview restore folder",
+        sourceFiles: 24,
+        sourceBytes: 1024 * 1024 * 48,
+        newFiles: 18,
+        identicalFiles: 2,
+        conflictingFiles: 4,
+        newerCurrentFiles: 1,
+        safetyCopyRequired: mode === "original",
+        safetyCopyBytes: 1024 * 1024 * 32,
+        freeBytes: 1024 * 1024 * 1024 * 100,
+        enoughSpaceForSafetyCopy: true
+      },
+      meta: appMeta()
+    });
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/api/restore-snapshot") {
+    sendJson(response, 200, {
+      ok: true,
+      message: "Preview mode: snapshot restore simulated.",
+      notes: ["No files were changed in the Mac web preview."],
+      meta: appMeta()
+    });
+    return;
+  }
+
   if (request.method === "POST" && request.url === "/api/check-updates") {
     sendJson(response, 200, {
       meta: appMeta()
@@ -465,6 +486,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.url === "/styles.css") {
       serveFile(response, path.join(ROOT, "styles.css"), "text/css; charset=utf-8");
+      return;
+    }
+
+    if (request.url === "/professional.css") {
+      serveFile(response, path.join(ROOT, "professional.css"), "text/css; charset=utf-8");
       return;
     }
 

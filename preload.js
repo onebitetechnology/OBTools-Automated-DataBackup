@@ -36,5 +36,6 @@ contextBridge.exposeInMainWorld("onebiteDesktop", {
   inspectPath: (targetPath) => ipcRenderer.invoke("job:inspect-path", targetPath),
   pickDestinationFolder: () => ipcRenderer.invoke("destination:pick-folder"),
   pickBrandingLogo: () => ipcRenderer.invoke("branding:pick-logo"),
+  planRestore: (payload) => ipcRenderer.invoke("restore:plan", payload),
   restoreSnapshot: (payload) => ipcRenderer.invoke("restore:run", payload)
 });

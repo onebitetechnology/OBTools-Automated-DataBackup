@@ -1,6 +1,6 @@
 {
   "name": "onebite-backup-companion",
-  "version": "1.0.10-beta.61",
+  "version": "1.0.10-beta.62",
   "description": "Windows backup and sync desktop app for One Bite Technology customers.",
   "main": "main.js",
   "author": "One Bite Technology",
@@ -12,6 +12,7 @@
   "scripts": {
     "start": "electron .",
     "start:web": "node server.js",
+    "test": "node --test",
     "dist:win": "electron-builder --config electron-builder.config.js --win nsis --publish never",
     "pack": "electron-builder --config electron-builder.config.js --dir",
     "release:win": "electron-builder --config electron-builder.config.js --win nsis --publish always"

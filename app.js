@@ -51,6 +51,7 @@ const el = {
   headerCustomerLogo: document.getElementById("header-customer-logo"),
   backupSizeEstimate: document.getElementById("backup-size-estimate"),
   destinationFreeSpace: document.getElementById("destination-free-space"),
+  destinationIntegritySummary: document.getElementById("destination-integrity-summary"),
   destinationModeSummary: document.getElementById("destination-mode-summary"),
   retentionDays: document.getElementById("retention-days"),
   retentionMonths: document.getElementById("retention-months"),
@@ -81,8 +82,10 @@ const el = {
   saveConfig: document.getElementById("save-config"),
   runBackup: document.getElementById("run-backup"),
   runCloudCheck: document.getElementById("run-cloud-check"),
+  openRestore: document.getElementById("open-restore"),
   installAutomation: document.getElementById("install-automation"),
   browseDestination: document.getElementById("browse-destination"),
+  manageDestination: document.getElementById("manage-destination"),
   useManagedFolder: document.getElementById("use-managed-folder"),
   useExistingFolder: document.getElementById("use-existing-folder"),
   openSettings: document.getElementById("open-settings"),
@@ -151,9 +154,12 @@ const el = {
   restoreTargetSummary: document.getElementById("restore-target-summary"),
   runRestore: document.getElementById("run-restore"),
   termsGate: document.getElementById("terms-gate"),
+  termsCopy: document.getElementById("terms-copy"),
   termsConfirm: document.getElementById("terms-confirm"),
   termsAccept: document.getElementById("terms-accept"),
-  termsSkip: document.getElementById("terms-skip")
+  termsSkip: document.getElementById("terms-skip"),
+  settingsTermsCopy: document.getElementById("settings-terms-copy"),
+  settingsTermsStatus: document.getElementById("settings-terms-status")
 };
 
 async function request(url, options = {}) {
@@ -221,6 +227,10 @@ async function desktopRequest(url, options = {}) {
 
   if (url === "/api/restore-snapshot" && options.method === "POST") {
     return window.onebiteDesktop.restoreSnapshot(body);
+  }
+
+  if (url === "/api/restore-plan" && options.method === "POST") {
+    return window.onebiteDesktop.planRestore(body);
   }
 
   throw new Error(`Unsupported desktop request: ${url}`);
@@ -351,6 +361,14 @@ function normalizeStatus(status) {
         }
       : status),
     recentSnapshots: shouldResetPreviewStatus ? [] : status.recentSnapshots || [],
+    integrity: {
+      checkedAt: null,
+      level: "info",
+      summary: "Backup integrity has not been verified yet.",
+      snapshotName: null,
+      filesChecked: 0,
+      ...(shouldResetPreviewStatus ? {} : status.integrity || {})
+    },
     cloud: {
       checkedAt: null,
       summary: "Cloud check has not been run yet.",
@@ -624,11 +642,16 @@ function validateBackupPlan(config, { requireDestination = false } = {}) {
 }
 
 function showBackupPlanIssues(issues) {
+  const missingDestination = issues.some((issue) => /choose a backup location/i.test(issue));
+  const onlyMissingDestination = missingDestination && issues.length === 1;
+
   showResultModal({
-    title: "Backup Setup Needs Attention",
-    message: "DataSafe stopped before saving because two backup items could overwrite each other or an enabled item is incomplete.",
+    title: onlyMissingDestination ? "Choose Backup Location" : "Backup Setup Needs Attention",
+    message: onlyMissingDestination
+      ? "Choose where DataSafe should save this PC's backups before running the first backup."
+      : "A few setup details need attention before DataSafe can run this backup safely.",
     list: issues,
-    closeLabel: "Review Backup Items"
+    closeLabel: onlyMissingDestination ? "Choose Backup Location" : "Review Backup Items"
   });
 }
 
@@ -670,11 +693,27 @@ function protectionSummary(status) {
     };
   }
 
+  if (status.integrity?.level === "error") {
+    return {
+      tone: "error",
+      title: "Backup Verification Failed",
+      message: summarizeActionMessage(status.integrity.summary || "A saved snapshot failed its checksum verification.")
+    };
+  }
+
+  if (status.integrity?.level === "warning") {
+    return {
+      tone: "warning",
+      title: "Backup Verification Needs Attention",
+      message: summarizeActionMessage(status.integrity.summary || "The latest backup integrity check needs review.")
+    };
+  }
+
   if (!status.lastBackupAt) {
     return {
       tone: "warning",
       title: "Backup Needed",
-      message: "Pick a drive, save the config, and run the first sync."
+      message: "Choose a backup location, then run the first backup."
     };
   }
 
@@ -1582,6 +1621,69 @@ function displayJobType(job) {
   return "Folder";
 }
 
+function backupItemSourceSummary(job) {
+  const path = String(job.path || "").trim();
+  const name = String(job.name || "Backup item").trim();
+
+  if (!path) {
+    return "Choose a file or folder before this item can be backed up.";
+  }
+
+  if (job.sourceKind === "browser") {
+    return `${name} will be included when the related browser is closed.`;
+  }
+
+  if (job.sourceKind === "email") {
+    return `${name} will be included when the related email app is closed.`;
+  }
+
+  const normalizedPath = path.replace(/\//g, "\\");
+  const knownFolders = [
+    { pattern: /^%USERPROFILE%\\Documents$/i, label: "Your Documents folder" },
+    { pattern: /^%USERPROFILE%\\Desktop$/i, label: "Your Desktop folder" },
+    { pattern: /^%USERPROFILE%\\Pictures$/i, label: "Your Pictures folder" },
+    { pattern: /^%USERPROFILE%\\Downloads$/i, label: "Your Downloads folder" }
+  ];
+  const knownFolder = knownFolders.find((entry) => entry.pattern.test(normalizedPath));
+  if (knownFolder) {
+    return knownFolder.label;
+  }
+
+  const lastSegment = normalizedPath.split("\\").filter(Boolean).pop();
+  return lastSegment ? `Selected ${displayJobType(job).toLowerCase()}: ${lastSegment}` : "Location saved.";
+}
+
+function updateJobCardSummary(card, job) {
+  const nameDisplay = card.querySelector("[data-field='name-display']");
+  const kindSummary = card.querySelector("[data-field='kind-summary']");
+  const typeSummary = card.querySelector("[data-field='type-summary']");
+  const pathSummary = card.querySelector("[data-field='path-summary']");
+  const enabled = Boolean(job.enabled);
+
+  if (nameDisplay) {
+    nameDisplay.textContent = job.name || "Backup item";
+  }
+
+  if (kindSummary) {
+    if (job.sourceKind === "browser") {
+      kindSummary.textContent = "Browser data";
+    } else if (job.sourceKind === "email") {
+      kindSummary.textContent = "Email data";
+    } else {
+      kindSummary.textContent = displayJobType(job);
+    }
+  }
+
+  if (typeSummary) {
+    typeSummary.textContent = enabled ? "Included" : "Paused";
+    typeSummary.classList.toggle("is-paused", !enabled);
+  }
+
+  if (pathSummary) {
+    pathSummary.textContent = backupItemSourceSummary(job);
+  }
+}
+
 async function syncJobTypeFromPath(job, typeDisplayInput) {
   if (job.sourceKind === "browser" || job.sourceKind === "email") {
     if (job.sourceKind === "browser") {
@@ -1621,8 +1723,11 @@ function renderJobs() {
     const fragment = el.jobTemplate.content.cloneNode(true);
     const card = fragment.querySelector(".job-card");
     const typeDisplayInput = card.querySelector("[data-field='type-display']");
+    const pathInput = card.querySelector("[data-field='path']");
 
-    for (const input of card.querySelectorAll("[data-field]")) {
+    updateJobCardSummary(card, job);
+
+    for (const input of card.querySelectorAll("input[data-field]")) {
       const field = input.dataset.field;
       if (field === "type-display") {
         input.value = displayJobType(job);
@@ -1637,6 +1742,7 @@ function renderJobs() {
 
       input.addEventListener("input", (event) => {
         job[field] = input.type === "checkbox" ? event.target.checked : event.target.value;
+        updateJobCardSummary(card, job);
       });
     }
 
@@ -1645,17 +1751,19 @@ function renderJobs() {
     }
 
     const browseButton = card.querySelector("[data-action='browse']");
-    const pathInput = card.querySelector("[data-field='path']");
     if (job.sourceKind === "browser" || job.sourceKind === "email") {
-      browseButton.textContent = "View Path";
+      browseButton.textContent = "Details";
     }
 
     if (pathInput && job.sourceKind !== "browser" && job.sourceKind !== "email") {
       pathInput.addEventListener("blur", () => {
-        syncJobTypeFromPath(job, typeDisplayInput).catch(() => {
+        syncJobTypeFromPath(job, typeDisplayInput).then(() => {
+          updateJobCardSummary(card, job);
+        }).catch(() => {
           if (typeDisplayInput) {
             typeDisplayInput.value = displayJobType(job);
           }
+          updateJobCardSummary(card, job);
         });
       });
     }
@@ -1689,6 +1797,7 @@ function renderJobs() {
 
       pathInput.value = job.path;
       await syncJobTypeFromPath(job, typeDisplayInput);
+      updateJobCardSummary(card, job);
     });
 
     card.querySelector("[data-action='remove']").addEventListener("click", () => {
@@ -1696,10 +1805,13 @@ function renderJobs() {
     });
 
     el.jobsList.appendChild(fragment);
-    syncJobTypeFromPath(job, typeDisplayInput).catch(() => {
+    syncJobTypeFromPath(job, typeDisplayInput).then(() => {
+      updateJobCardSummary(card, job);
+    }).catch(() => {
       if (typeDisplayInput) {
         typeDisplayInput.value = displayJobType(job);
       }
+      updateJobCardSummary(card, job);
     });
   });
 }
@@ -1753,12 +1865,18 @@ function renderStatus() {
       ? `Using ${state.config.destination.driveLetter.replace(":", "")}:\\${state.config.destination.baseFolder || "DataSafe Backup"}`
       : "No backup location selected yet.";
   }
+  if (el.destinationIntegritySummary) {
+    const integrity = state.status.integrity || {};
+    el.destinationIntegritySummary.textContent = integrity.summary || "Backup integrity has not been verified yet.";
+    el.destinationIntegritySummary.classList.toggle("integrity-success", integrity.level === "success");
+    el.destinationIntegritySummary.classList.toggle("integrity-error", integrity.level === "error");
+  }
 
   renderRestoreSection();
 }
 
-function openSettingsDrawer() {
-  setActiveSettingsPanel(state.settingsActivePanelId || "automation-section");
+function openSettingsDrawer(panelId = state.settingsActivePanelId || "automation-section") {
+  setActiveSettingsPanel(panelId);
   el.settingsDrawer.hidden = false;
   document.body.classList.add("settings-open");
 }
@@ -1870,7 +1988,7 @@ function restoreSupportNote(job) {
     return "Email restores may need follow-up inside the mail app after files are copied back. Close the email app before restoring.";
   }
 
-  return "Restoring to the original location will copy the selected snapshot back over the current files. Restoring to another folder is safer if you want to compare files first.";
+  return "A separate-folder restore never replaces current files. For an original-location restore, DataSafe first makes and verifies a rollback copy of the current files.";
 }
 
 function renderRestoreSection() {
@@ -1929,7 +2047,7 @@ function renderRestoreSection() {
   el.restorePickTarget.disabled = !usingAlternate;
   el.restoreTargetSummary.textContent = usingAlternate
     ? (state.restoreTargetPath || "Choose a restore folder for the recovered files.")
-    : "Original location will be used unless you choose another folder.";
+    : "DataSafe will verify a safety copy before replacing any current files.";
   el.runRestore.disabled = !snapshots.length || !jobs.length || (usingAlternate && !state.restoreTargetPath);
 }
 
@@ -1940,7 +2058,7 @@ function renderStorageAnalysis() {
     return;
   }
 
-  el.backupSizeEstimate.textContent = formatBytes(state.storage.estimatedBytes);
+  el.backupSizeEstimate.textContent = formatBytes(state.storage.requiredBytes ?? state.storage.estimatedBytes);
   el.destinationFreeSpace.textContent = state.storage.freeBytes == null ? "Unavailable" : formatBytes(state.storage.freeBytes);
 }
 
@@ -1969,10 +2087,36 @@ function isTermsAccepted(config) {
 
 function renderTermsGate() {
   const mustAccept = !isTermsAccepted(state.config) && !state.termsBypassedForSession;
+  const allowInternalSkip = state.meta?.isPackaged === false;
   el.termsGate.hidden = !mustAccept;
   document.body.classList.toggle("terms-open", mustAccept);
+  el.termsSkip.hidden = !allowInternalSkip;
   el.termsConfirm.checked = false;
   el.termsAccept.disabled = true;
+}
+
+function renderTermsReview() {
+  if (el.settingsTermsCopy && el.termsCopy) {
+    const termsParagraphs = [...el.termsCopy.children].map((paragraph) => paragraph.cloneNode(true));
+    el.settingsTermsCopy.replaceChildren(...termsParagraphs);
+  }
+
+  if (!el.settingsTermsStatus) {
+    return;
+  }
+
+  const terms = state.config?.terms || {};
+  const version = terms.version || "Not recorded";
+  if (!isTermsAccepted(state.config)) {
+    el.settingsTermsStatus.textContent = `Version ${version} has not been accepted on this PC.`;
+    return;
+  }
+
+  const acceptedAt = new Date(terms.acceptedAt);
+  const acceptedLabel = Number.isNaN(acceptedAt.getTime())
+    ? "an unknown date"
+    : acceptedAt.toLocaleString();
+  el.settingsTermsStatus.textContent = `Version ${terms.acceptedVersion} accepted on ${acceptedLabel}.`;
 }
 
 function renderHeaderBranding() {
@@ -2023,7 +2167,7 @@ function renderConfig() {
   }
 
   const managedFolderName = destination.baseFolder || "DataSafe Backup";
-  el.destinationModeSummary.textContent = `The app will create and maintain an ${managedFolderName} folder on the selected drive.`;
+  el.destinationModeSummary.textContent = `DataSafe will create and maintain a ${managedFolderName} folder on the selected drive.`;
 
   if (el.useManagedFolder) {
     el.useManagedFolder.classList.add("choice-active");
@@ -2060,6 +2204,7 @@ function renderConfig() {
   el.remindersEnabled.checked = Boolean(reminders.enabled);
   el.reminderDays.value = reminders.staleDays;
   el.cloudCheckEnabled.checked = Boolean(cloudCheck.enabled);
+  renderTermsReview();
   if (el.supportName) {
     el.supportName.value = support?.name || "";
   }
@@ -2737,51 +2882,105 @@ async function runRestore() {
     ? (state.restoreTargetPath || "the selected restore folder")
     : (selectedJob?.path || "the original location");
 
-  if (restoreMode === "original") {
+  const snapshotName = el.restoreSnapshotSelect?.value || "";
+  const jobId = el.restoreJobSelect?.value || "";
+  if (!snapshotName || !jobId) {
     showResultModal({
-      title: "Replace Current Files?",
-      message: `Restore ${selectedJob?.name || "the selected backup item"} to its original location? Current files at ${destinationCopy} may be replaced.`,
-      list: [
-        "Close the related browser or email app first.",
-        "This action copies the snapshot back over the live location.",
-        "Restore to another folder first if you want to compare files before replacing anything."
-      ],
-      secondaryAction: {
-        label: "I Understand",
-        onClick: async () => {
-          showResultModal({
-            title: "Final Restore Confirmation",
-            message: `DataSafe is about to restore ${selectedJob?.name || "this backup item"} to the original location. Current files may be replaced.`,
-            list: [
-              "Only continue if you are sure this is the snapshot you want.",
-              "Use Cancel and switch to another folder if you want a safer review copy."
-            ],
-            secondaryAction: {
-              label: "Restore To Original Location",
-              onClick: performRestore
-            },
-            closeLabel: "Cancel"
-          });
-        }
-      },
-      closeLabel: "Cancel"
+      title: "Restore",
+      message: "Choose both a snapshot and a backup item before restoring."
+    });
+    return;
+  }
+
+  if (restoreMode === "alternate" && !state.restoreTargetPath) {
+    showResultModal({
+      title: "Restore Folder Needed",
+      message: "Choose a restore folder before restoring to another location."
     });
     return;
   }
 
   showResultModal({
-    title: "Restore This Snapshot?",
-    message: `Restore ${selectedJob?.name || "the selected backup item"} to ${destinationCopy}? This will copy the saved snapshot back onto the PC.`,
-    list: [
-      "Close the related browser or email app first.",
-      "Restore to another folder if you want to compare files before replacing the live copy."
-    ],
-    secondaryAction: {
-      label: "Restore Now",
-      onClick: performRestore
-    },
-    closeLabel: "Cancel"
+    title: "Checking Restore Safety",
+    message: "DataSafe is verifying the snapshot and comparing it with the current files before anything is changed.",
+    hideClose: true,
+    progress: {
+      percent: 10,
+      detail: "Reading snapshot checksums and current file details...",
+      indeterminate: true
+    }
   });
+
+  try {
+    const payload = await request("/api/restore-plan", {
+      method: "POST",
+      body: JSON.stringify({
+        snapshotName,
+        jobId,
+        mode: restoreMode,
+        targetPath: restoreMode === "alternate" ? state.restoreTargetPath : ""
+      })
+    });
+    const plan = payload.plan || {};
+    state.meta = payload.meta || state.meta;
+    renderMeta();
+
+    if (restoreMode === "original") {
+      const conflictCopy = Number(plan.conflictingFiles || 0) === 1 ? "file differs" : "files differ";
+      const currentNewerCopy = Number(plan.newerCurrentFiles || 0) === 1 ? "current file is newer" : "current files are newer";
+      const list = [
+        `${Number(plan.sourceFiles || 0).toLocaleString()} files in the selected snapshot`,
+        `${Number(plan.conflictingFiles || 0).toLocaleString()} ${conflictCopy} from the current copy`,
+        `${Number(plan.newerCurrentFiles || 0).toLocaleString()} ${currentNewerCopy}`,
+        plan.safetyCopyRequired
+          ? `Safety copy size: ${formatBytes(Number(plan.safetyCopyBytes || 0))}`
+          : "No current files were found, so no safety copy is needed.",
+        "If the restore fails, DataSafe will automatically put the safety copy back."
+      ];
+
+      if (plan.safetyCopyRequired && !plan.enoughSpaceForSafetyCopy) {
+        showResultModal({
+          title: "More Backup Drive Space Needed",
+          message: "DataSafe will not replace current files until there is enough room to make a verified safety copy first.",
+          list,
+          closeLabel: "Close"
+        });
+        return;
+      }
+
+      showResultModal({
+        title: "Restore Plan Ready",
+        message: `DataSafe can restore ${selectedJob?.name || "this backup item"} to ${destinationCopy} with rollback protection.`,
+        list,
+        secondaryAction: {
+          label: plan.safetyCopyRequired ? "Create Safety Copy and Restore" : "Restore Now",
+          onClick: performRestore
+        },
+        closeLabel: "Cancel"
+      });
+      return;
+    }
+
+    showResultModal({
+      title: "Restore Plan Ready",
+      message: `DataSafe will restore ${selectedJob?.name || "the selected backup item"} into a new folder without replacing files in ${destinationCopy}.`,
+      list: [
+        `${Number(plan.sourceFiles || 0).toLocaleString()} files will be restored`,
+        `New folder: ${plan.targetPath || destinationCopy}`,
+        "If the copy fails, DataSafe will remove the incomplete restore folder."
+      ],
+      secondaryAction: {
+        label: "Restore Now",
+        onClick: performRestore
+      },
+      closeLabel: "Cancel"
+    });
+  } catch (error) {
+    showResultModal({
+      title: "Restore Cannot Continue",
+      message: summarizeActionMessage(error.message || "DataSafe could not verify a safe restore plan.")
+    });
+  }
 }
 
 async function uploadHeaderLogo() {
@@ -2909,14 +3108,31 @@ el.reportIssue.addEventListener("click", () => {
   });
 });
 el.resultModalClose.addEventListener("click", closeResultModal);
-el.browseDestination.addEventListener("click", () => {
+const handleBrowseDestination = () => {
   browseDestinationFolder().catch((error) => {
     el.protectionState.textContent = "Unavailable";
     el.protectionMessage.textContent = error.message;
   });
+};
+el.browseDestination.addEventListener("click", handleBrowseDestination);
+if (el.manageDestination) {
+  el.manageDestination.addEventListener("click", handleBrowseDestination);
+}
+el.openSettings.addEventListener("click", () => {
+  openSettingsDrawer();
 });
-el.openSettings.addEventListener("click", openSettingsDrawer);
+if (el.openRestore) {
+  el.openRestore.addEventListener("click", () => {
+    openSettingsDrawer("restore-section");
+  });
+}
 el.closeSettings.addEventListener("click", closeSettingsDrawer);
+el.settingsDrawer.querySelector(".settings-backdrop")?.addEventListener("click", closeSettingsDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !el.settingsDrawer.hidden) {
+    closeSettingsDrawer();
+  }
+});
 el.addJob.addEventListener("click", openAddItemModal);
 el.detectUserFolders.addEventListener("click", () => {
   detectUserFolders().catch((error) => {
@@ -3005,6 +3221,9 @@ el.termsAccept.addEventListener("click", () => {
   });
 });
 el.termsSkip.addEventListener("click", () => {
+  if (state.meta?.isPackaged !== false) {
+    return;
+  }
   state.termsBypassedForSession = true;
   renderTermsGate();
 });

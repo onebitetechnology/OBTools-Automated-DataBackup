@@ -2,11 +2,15 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ConfigPath,
   [Parameter(Mandatory = $true)]
-  [string]$StatusPath
+  [string]$StatusPath,
+  [switch]$AllowNewDestination
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$safetyModulePath = Join-Path $PSScriptRoot "DataSafe.Safety.ps1"
+. $safetyModulePath
 
 function Read-Json([string]$Path) {
   Get-Content -Raw -Path $Path | ConvertFrom-Json
@@ -25,6 +29,13 @@ function New-DefaultStatus {
     lastBackupMessage = "No backups have been run yet."
     destinationStatus = "Unknown"
     recentSnapshots = @()
+    integrity = [PSCustomObject]@{
+      checkedAt = $null
+      level = "info"
+      summary = "Backup integrity has not been verified yet."
+      snapshotName = $null
+      filesChecked = 0
+    }
     cloud = [PSCustomObject]@{
       checkedAt = $null
       summary = "Cloud check has not been run yet."
@@ -173,11 +184,16 @@ function Write-FailedBackupStatus([string]$Path, [string]$Message) {
     $status = New-DefaultStatus
   }
 
-  $status.lastBackupAt = (Get-Date).ToString("o")
+  if ($null -eq $status.PSObject.Properties["lastBackupAttemptAt"]) {
+    $status | Add-Member -NotePropertyName "lastBackupAttemptAt" -NotePropertyValue $null
+  }
+  $status.lastBackupAttemptAt = (Get-Date).ToString("o")
   $status.lastBackupResult = "error"
   $status.lastBackupMessage = $Message
   if ($Message -match "Destination drive is not available" -or $Message -match "No destination drive could be resolved") {
     $status.destinationStatus = "Drive Not Connected"
+  } elseif ($Message -match "identity marker" -or $Message -match "does not match this DataSafe installation") {
+    $status.destinationStatus = "Destination Not Recognized"
   } else {
     $status.destinationStatus = "Issue Detected"
   }
@@ -187,19 +203,6 @@ function Write-FailedBackupStatus([string]$Path, [string]$Message) {
   } catch {
     # Preserve the original backup error; the app will still show it from stderr/stdout.
   }
-}
-
-function Write-DestinationMarker([string]$BaseRoot, $Config) {
-  $markerPath = Join-Path $BaseRoot ".datasafe-backup.json"
-  $marker = [ordered]@{
-    installId = if ($null -ne $Config.PSObject.Properties["installId"]) { "$($Config.installId)" } else { "" }
-    destinationId = if ($null -ne $Config.destination.PSObject.Properties["id"]) { "$($Config.destination.id)" } else { "" }
-    businessName = if ($null -ne $Config.PSObject.Properties["businessName"]) { "$($Config.businessName)" } else { "" }
-    createdAt = (Get-Date).ToString("o")
-    machineName = $env:COMPUTERNAME
-  }
-
-  Write-Json $markerPath $marker
 }
 
 function Get-RetentionPolicy($Config) {
@@ -449,16 +452,9 @@ function Copy-FolderToPath([string]$Source, [string]$Destination, [bool]$Mirror)
 }
 
 function Copy-MergedFolderSources($Sources, [string]$Destination) {
-  $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) "DataSafe-merged-folder-$([guid]::NewGuid().ToString('N'))"
-  try {
-    New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
-    foreach ($source in @($Sources)) {
-      Copy-FolderToPath $source $stagingRoot $false
-    }
-
-    Copy-FolderToPath $stagingRoot $Destination $true
-  } finally {
-    Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+  foreach ($source in @($Sources)) {
+    Copy-FolderToPath $source $Destination $false
   }
 }
 
@@ -540,28 +536,15 @@ function Parse-SnapshotTimestamp([string]$SnapshotName) {
 }
 
 function Get-SnapshotEntries([string]$SnapshotsRoot) {
-  if (-not (Test-Path -LiteralPath $SnapshotsRoot)) {
-    return @()
-  }
-
-  $entries = @(Get-ChildItem -Path $SnapshotsRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-    $timestamp = Parse-SnapshotTimestamp $_.Name
-    if ($null -eq $timestamp) {
-      return
-    }
-
-    [PSCustomObject]@{
-      Name = $_.Name
-      FullName = $_.FullName
-      Timestamp = $timestamp
-    }
-  })
-
-  return @($entries | Sort-Object Timestamp -Descending)
+  return @(Get-DataSafeCompletedSnapshots $SnapshotsRoot)
 }
 
 function Select-RetainedSnapshots($Snapshots, $RetentionPolicy) {
   $selected = New-Object "System.Collections.Generic.HashSet[string]"
+  $newestSnapshot = @($Snapshots | Sort-Object Timestamp -Descending | Select-Object -First 1)
+  if ($newestSnapshot.Count -gt 0) {
+    [void]$selected.Add($newestSnapshot[0].Name)
+  }
 
   if ($RetentionPolicy.days -gt 0) {
     $dailyGroups = @($Snapshots | Group-Object { $_.Timestamp.ToString("yyyy-MM-dd") } | Sort-Object Name -Descending)
@@ -635,9 +618,27 @@ function Copy-BackupItem($Job, [string]$RootPath) {
   Copy-Item -LiteralPath $source -Destination $destination -Force
 }
 
+function Get-BackupPlanSize($Jobs) {
+  $total = [int64]0
+  foreach ($job in @($Jobs)) {
+    $source = Resolve-JobSourcePath $job
+    if (-not (Test-Path -LiteralPath $source)) {
+      throw "Backup source missing: $source"
+    }
+
+    $total += Get-DataSafePathSize $source
+    foreach ($additionalSource in @(Get-AdditionalBackupSources $job $source)) {
+      $total += Get-DataSafePathSize $additionalSource
+    }
+  }
+
+  return $total
+}
+
 $lockPath = "$StatusPath.lock"
 $lockHandle = $null
 $configForNotification = $null
+$stagingSnapshotPath = $null
 
 try {
   $lockHandle = Acquire-BackupLock $lockPath
@@ -645,50 +646,74 @@ try {
   $configForNotification = $config
   $status = Read-Json $StatusPath
 
-  $driveRoot = Resolve-Destination $config.destination
-  if (-not (Test-Path -LiteralPath $driveRoot)) {
-    throw "Destination drive is not available: $driveRoot"
-  }
-
-  $baseRoot = if ([string]::IsNullOrWhiteSpace($config.destination.baseFolder)) {
-    $driveRoot
-  } else {
-    Join-Path $driveRoot $config.destination.baseFolder
-  }
-  $currentRoot = Join-Path $baseRoot "current"
+  $baseRoot = Get-DataSafeBaseRoot $config
   $snapshotsRoot = Join-Path $baseRoot "snapshots"
   $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
   $snapshotPath = Join-Path $snapshotsRoot $timestamp
+  $stagingSnapshotPath = Join-Path $snapshotsRoot ".incomplete-$timestamp-$([guid]::NewGuid().ToString('N')).incomplete"
   $retentionPolicy = Get-RetentionPolicy $config
   $enabledJobs = @($config.jobs | Where-Object { $_.enabled })
-  $totalSteps = [Math]::Max(($enabledJobs.Count * 2) + 1, 1)
+  $totalSteps = [Math]::Max($enabledJobs.Count + 4, 4)
   Test-BackupJobPlan $enabledJobs
 
-  New-Item -ItemType Directory -Force -Path $currentRoot | Out-Null
+  $existingMarker = Assert-DataSafeDestinationIdentity -BaseRoot $baseRoot -Config $config -Status $status -AllowNewDestination:$AllowNewDestination
+  $null = Ensure-DataSafeDestinationMarker -BaseRoot $baseRoot -Config $config -ExistingMarker $existingMarker
+  Test-DataSafeMediaReadWrite $baseRoot
   New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
+  Remove-DataSafeIncompleteSnapshots $snapshotsRoot
+  $estimatedBytes = Get-BackupPlanSize $enabledJobs
+  $capacity = Assert-DataSafeCapacity -BaseRoot $baseRoot -EstimatedBytes $estimatedBytes
+  if (Test-Path -LiteralPath $snapshotPath) {
+    throw "A completed backup already exists for timestamp $timestamp. Wait one minute and try again."
+  }
 
-  Write-ProgressMarker -Phase "preparing" -JobName "" -Step 1 -TotalSteps $totalSteps -Detail "Preparing the backup destination."
-  [void](Prune-Snapshots $snapshotsRoot $retentionPolicy)
+  New-Item -ItemType Directory -Path $stagingSnapshotPath | Out-Null
+  Write-ProgressMarker -Phase "preparing" -JobName "" -Step 1 -TotalSteps $totalSteps -Detail "The backup drive passed identity, space, and read/write checks."
 
   for ($index = 0; $index -lt $enabledJobs.Count; $index++) {
     $job = $enabledJobs[$index]
-    $currentStep = 2 + ($index * 2)
-
-    Write-ProgressMarker -Phase "copying-current" -JobName $job.name -Step $currentStep -TotalSteps $totalSteps -Detail "Copying to the current backup set."
-    Copy-BackupItem $job $currentRoot
-
-    Write-ProgressMarker -Phase "copying-snapshot" -JobName $job.name -Step ($currentStep + 1) -TotalSteps $totalSteps -Detail "Creating the dated snapshot copy."
-    Copy-BackupItem $job $snapshotPath
+    $currentStep = 2 + $index
+    Write-ProgressMarker -Phase "copying-snapshot" -JobName $job.name -Step $currentStep -TotalSteps $totalSteps -Detail "Copying this item into a protected staging snapshot."
+    Copy-BackupItem $job $stagingSnapshotPath
   }
 
-  $remainingSnapshots = @(Prune-Snapshots $snapshotsRoot $retentionPolicy)
+  $verificationStep = 2 + $enabledJobs.Count
+  Write-ProgressMarker -Phase "verifying-snapshot" -JobName "" -Step $verificationStep -TotalSteps $totalSteps -Detail "Reading copied files back and creating SHA-256 checksums."
+  $integrity = New-DataSafeIntegrityIndex $stagingSnapshotPath
+  $null = Write-DataSafeSnapshotMetadata -SnapshotPath $stagingSnapshotPath -SnapshotName $timestamp -Config $config -Jobs $enabledJobs -Integrity $integrity
+
+  Write-ProgressMarker -Phase "committing-snapshot" -JobName "" -Step ($verificationStep + 1) -TotalSteps $totalSteps -Detail "Publishing the completed snapshot."
+  Move-Item -LiteralPath $stagingSnapshotPath -Destination $snapshotPath
+  $stagingSnapshotPath = $null
+
+  $retentionWarning = $null
+  try {
+    $remainingSnapshots = @(Prune-Snapshots $snapshotsRoot $retentionPolicy)
+  } catch {
+    $retentionWarning = "The new snapshot is complete, but older snapshots could not be pruned. Review free space before the next backup."
+    $remainingSnapshots = @(Get-SnapshotEntries $snapshotsRoot)
+  }
   $remaining = @($remainingSnapshots | Select-Object -ExpandProperty Name)
-  Write-DestinationMarker $baseRoot $config
   $status.lastBackupAt = (Get-Date).ToString("o")
-  $status.lastBackupResult = "success"
-  $status.lastBackupMessage = "Backup completed to $baseRoot"
+  if ($null -ne $status.PSObject.Properties["lastBackupAttemptAt"]) {
+    $status.lastBackupAttemptAt = $status.lastBackupAt
+  }
+  $status.lastBackupResult = if ($retentionWarning) { "warning" } else { "success" }
+  $status.lastBackupMessage = if ($retentionWarning) { $retentionWarning } else { "Backup completed and verified to $baseRoot" }
   $status.destinationStatus = "Connected"
   $status.recentSnapshots = @($remaining)
+  $integrityStatus = [PSCustomObject]@{
+    checkedAt = $status.lastBackupAt
+    level = "success"
+    summary = "$($integrity.fileCount) copied files were read back and verified with SHA-256 checksums."
+    snapshotName = $timestamp
+    filesChecked = [int]$integrity.fileCount
+  }
+  if ($null -eq $status.PSObject.Properties["integrity"]) {
+    $status | Add-Member -NotePropertyName "integrity" -NotePropertyValue $integrityStatus
+  } else {
+    $status.integrity = $integrityStatus
+  }
 
   try {
     Write-Json $StatusPath $status
@@ -696,8 +721,10 @@ try {
     throw "The backup files were copied, but DataSafe could not update its backup status. Close DataSafe completely, reopen it, and run the backup again. If this keeps happening, contact One Bite Technology."
   }
   Write-ProgressMarker -Phase "complete" -JobName "" -Step $totalSteps -TotalSteps $totalSteps -Detail "Backup completed successfully."
-  Show-BackupNotification -Title "DataSafe Backup Complete" -Message "Backup completed successfully to $baseRoot." -Level "Info" -ClickTarget $null
-  Write-Output "Backup completed successfully."
+  $notificationLevel = if ($retentionWarning) { "Warning" } else { "Info" }
+  $notificationTitle = if ($retentionWarning) { "DataSafe Backup Completed With a Warning" } else { "DataSafe Backup Complete" }
+  Show-BackupNotification -Title $notificationTitle -Message $status.lastBackupMessage -Level $notificationLevel -ClickTarget $null
+  Write-Output $status.lastBackupMessage
 } catch {
   $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
   Write-FailedBackupStatus $StatusPath $message
@@ -723,6 +750,9 @@ try {
   Write-Error $message
   exit 1
 } finally {
+  if ($stagingSnapshotPath -and (Test-Path -LiteralPath $stagingSnapshotPath)) {
+    Remove-Item -LiteralPath $stagingSnapshotPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
   if ($lockHandle) {
     Release-BackupLock $lockHandle $lockPath
   }

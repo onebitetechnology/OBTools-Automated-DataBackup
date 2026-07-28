@@ -3,209 +3,243 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; img-src 'self' file: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' http://localhost:3200; object-src 'none'; base-uri 'none'">
     <title>DataSafe</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="professional.css">
   </head>
   <body>
-    <div class="page-shell">
-      <header class="app-header card">
-        <div class="app-header-logo">
-          <img id="header-customer-logo" src="" alt="Custom shop logo" class="customer-corner-logo" hidden>
-        </div>
+    <div class="page-shell professional-shell">
+      <header class="app-header">
         <div class="app-header-brand">
-          <div class="brand-lockup centered-brand-lockup">
-            <img src="assets/datasafe-icon.png" alt="DataSafe icon" class="brand-logo">
+          <div class="brand-lockup">
+            <img src="assets/datasafe-mark.svg" alt="" class="brand-logo">
             <div class="brand-meta">
-              <span class="brand-name hero-brand-name">DataSafe</span>
+              <span class="brand-name">DataSafe</span>
+              <span class="brand-description">Backup and recovery</span>
             </div>
           </div>
+          <img id="header-customer-logo" src="" alt="Custom shop logo" class="customer-corner-logo" hidden>
+        </div>
+        <div class="computer-context">
+          <div class="computer-name">This PC</div>
+          <div class="computer-detail">Local backup configuration</div>
         </div>
         <div class="app-header-actions">
           <div id="version-status-pill" class="version-status-pill status-good">
             <span id="version-status-light" class="version-status-light status-good" aria-hidden="true"></span>
             <span id="build-version" class="build-version">Version loading...</span>
           </div>
-          <button id="open-settings" class="app-settings-button ghost" type="button">
-            <span class="settings-gear" aria-hidden="true">⚙</span>
-            <span>Settings</span>
-          </button>
+          <button id="open-settings" class="app-settings-button quiet" type="button">Settings</button>
         </div>
       </header>
 
-      <header class="hero">
-        <section class="hero-copy card">
-          <div class="hero-copy-inner">
-            <p class="status-label">Back Up This PC</p>
-            <h1 class="hero-primary-title">Run backups with confidence.</h1>
-            <p class="hero-primary-copy">Use DataSafe to protect important folders, browser data, and supported email data without digging through technical settings.</p>
-            <div class="hero-copy-actions">
-              <button id="run-backup" class="primary">Run Backup Now</button>
-              <button id="run-cloud-check" class="secondary">Check Cloud Sync</button>
+      <main class="app-content">
+        <section id="backup-status-card" class="status-band status-good">
+          <div class="status-copy-block">
+            <div class="status-heading">
+              <span class="status-state-dot" aria-hidden="true"></span>
+              <h1 id="protection-state">Loading</h1>
             </div>
-            <div class="hero-plan-summary">
-              <article class="summary-card compact-summary">
-                <p class="metric-label">Retention Plan</p>
-                <p id="settings-retention-summary" class="summary-value">3 days</p>
-              </article>
-              <article class="summary-card compact-summary">
-                <p class="metric-label">Automation</p>
-                <p id="settings-schedule-summary" class="summary-value">Manual only</p>
-              </article>
-            </div>
+            <p id="protection-message">Checking backup health.</p>
+          </div>
+          <div class="status-actions">
+            <button id="browse-destination" class="secondary" type="button">Choose location</button>
+            <button id="run-backup" class="primary" type="button">Run backup</button>
           </div>
         </section>
-        <section id="backup-status-card" class="hero-status card status-good">
-          <p class="status-label">Backup Health</p>
-          <h2 id="protection-state">Loading</h2>
-          <p id="protection-message">Checking backup health.</p>
-          <div class="health-strip">
-            <article class="status-insight-card compact-insight">
-              <p class="metric-label">Last backup</p>
-              <p id="last-backup" class="mini-value">Never</p>
-            </article>
-            <article class="status-insight-card compact-insight">
-              <p class="metric-label">Snapshots kept</p>
-              <p id="snapshot-count" class="mini-value">0</p>
-            </article>
-            <article class="status-insight-card compact-insight">
-              <p class="metric-label">Cloud sync</p>
-              <div class="cloud-health-head compact-cloud-head">
-                <span id="cloud-health-indicator" class="health-indicator health-indicator-neutral" aria-hidden="true"></span>
-                <p id="cloud-health-label" class="health-label">Not checked yet</p>
-              </div>
-            </article>
-          </div>
-          <article class="status-insight-card destination-health-card">
-            <p class="metric-label">Backup destination</p>
-            <p id="destination-health-summary" class="summary-value">Backups will appear here once a destination is selected.</p>
+
+        <section class="operational-metrics" aria-label="Backup summary">
+          <article class="operational-metric">
+            <p class="metric-label">Last successful backup</p>
+            <p id="last-backup" class="metric-value">Never</p>
           </article>
-          <p id="cloud-summary" class="metric-note">Cloud check has not been run yet.</p>
+          <article class="operational-metric">
+            <p class="metric-label">Backup location</p>
+            <p id="destination-health-summary" class="metric-value">Not selected</p>
+          </article>
+          <article class="operational-metric">
+            <p class="metric-label">Snapshots kept</p>
+            <p id="snapshot-count" class="metric-value">0</p>
+          </article>
+          <article class="operational-metric">
+            <p class="metric-label">Schedule</p>
+            <p id="settings-schedule-summary" class="metric-value">Manual only</p>
+          </article>
           <span id="last-backup-detail" hidden>Never</span>
         </section>
-      </header>
 
-      <main class="dashboard">
-        <section class="card panel">
-          <div class="panel-head">
-            <div>
-              <h3>Choose a backup destination</h3>
-              <p class="section-note">Choose the external drive where backups should live. DataSafe will create and use a <strong>DataSafe Backup</strong> folder on that drive.</p>
+        <div class="workspace-grid">
+          <section class="panel protected-items-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Protected items</h2>
+                <p class="section-note">Files and application data included in the next backup.</p>
+              </div>
+              <div class="panel-actions-underhead">
+                <button id="detect-user-folders" class="secondary" type="button">Common folders</button>
+                <button id="detect-browsers" class="secondary" type="button">Browser data</button>
+                <button id="detect-email-data" class="secondary" type="button">Email data</button>
+                <button id="add-job" class="secondary" type="button">Add item</button>
+              </div>
             </div>
-          </div>
-          <div class="panel-actions-underhead">
-            <button id="browse-destination" class="secondary" type="button">Choose Backup Location</button>
-          </div>
-          <p id="destination-picked-summary" class="hint">No backup drive or folder selected yet.</p>
-          <p id="destination-final-summary" class="destination-final-summary">Backups will appear here once a destination is selected.</p>
-          <div class="storage-analysis-grid">
-            <article class="summary-card compact-summary">
-              <p class="metric-label">Estimated Backup Size</p>
-              <p id="backup-size-estimate" class="summary-value">Waiting for analysis</p>
-            </article>
-            <article class="summary-card compact-summary">
-              <p class="metric-label">Destination Free Space</p>
-              <p id="destination-free-space" class="summary-value">Waiting for analysis</p>
-            </article>
-          </div>
-          <p id="destination-mode-summary" class="hint">DataSafe checks for your existing backup set before starting a new one on this drive.</p>
-          <input id="destination-mode" type="hidden" value="driveLetter">
-          <input id="destination-base-folder" type="hidden">
-          <input id="destination-drive-letter" type="hidden">
-          <input id="destination-label" type="hidden">
-        </section>
+            <div id="jobs-list" class="jobs-list"></div>
+          </section>
 
-        <section class="card panel">
-          <div class="panel-head">
-            <div>
-              <h3>Choose what gets backed up</h3>
-              <p class="section-note">Start with the essentials like Documents, Desktop, exported bookmarks, or customer project folders.</p>
-            </div>
-          </div>
-          <div class="panel-actions-underhead">
-            <button id="detect-user-folders" class="secondary" type="button">Choose User Folders</button>
-            <button id="detect-browsers" class="secondary" type="button">Choose Browser Data</button>
-            <button id="detect-email-data" class="secondary" type="button">Backup Email Data</button>
-            <button id="add-job" class="ghost">Add Item</button>
-          </div>
-          <div id="jobs-list" class="jobs-list"></div>
-        </section>
+          <aside class="side-stack">
+            <section class="panel destination-panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Backup location</h2>
+                  <p class="section-note">External drive or managed folder.</p>
+                </div>
+              </div>
+              <div class="destination-content">
+                <p id="destination-picked-summary" class="destination-title">No backup location selected.</p>
+                <p id="destination-final-summary" class="destination-final-summary">Choose a connected drive or folder before the first backup.</p>
+                <button id="manage-destination" class="secondary" type="button">Choose backup location</button>
+                <div class="storage-analysis-grid">
+                  <article class="storage-stat">
+                    <p class="metric-label">Space needed</p>
+                    <p id="backup-size-estimate" class="metric-value">Waiting for analysis</p>
+                  </article>
+                  <article class="storage-stat">
+                    <p class="metric-label">Free space</p>
+                    <p id="destination-free-space" class="metric-value">Waiting for analysis</p>
+                  </article>
+                </div>
+                <p id="destination-integrity-summary" class="integrity-summary">Backup integrity has not been verified yet.</p>
+                <p id="destination-mode-summary" class="hint">DataSafe checks for an existing backup before creating a new one on this drive.</p>
+              </div>
+              <input id="destination-mode" type="hidden" value="driveLetter">
+              <input id="destination-base-folder" type="hidden">
+              <input id="destination-drive-letter" type="hidden">
+              <input id="destination-label" type="hidden">
+            </section>
 
+            <section class="panel cloud-recovery-panel">
+              <div class="panel-head">
+                <div>
+                  <h2>Cloud and recovery</h2>
+                  <p class="section-note">Cloud health and restore tools.</p>
+                </div>
+              </div>
+              <div class="cloud-content">
+                <div class="cloud-health-head">
+                  <span id="cloud-health-indicator" class="health-indicator health-indicator-neutral" aria-hidden="true"></span>
+                  <p id="cloud-health-label" class="health-label">Cloud health not checked yet</p>
+                </div>
+                <p id="cloud-summary" class="metric-note">Cloud check has not been run yet.</p>
+                <div class="configuration-row">
+                  <span>Retention</span>
+                  <strong id="settings-retention-summary">3 days</strong>
+                </div>
+                <div class="side-actions">
+                  <button id="run-cloud-check" class="secondary" type="button">Check cloud sync</button>
+                  <button id="open-restore" class="secondary" type="button">Restore files</button>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
       </main>
+
+      <footer class="app-footer">
+        <span class="service-state">DataSafe service ready</span>
+        <span>Configuration is stored locally on this PC</span>
+      </footer>
     </div>
 
     <template id="job-template">
       <article class="job-card">
-        <div class="job-row">
-          <label>
-            <span>Name</span>
-            <input data-field="name" type="text">
-          </label>
-          <label>
-            <span>Type</span>
-            <input data-field="type-display" type="text" readonly>
-          </label>
-          <label class="checkbox inline-toggle">
-            <input data-field="enabled" type="checkbox">
-            <span>Enabled</span>
-          </label>
+        <div class="job-summary-copy">
+          <h3 data-field="name-display">Backup item</h3>
+          <p data-field="kind-summary" class="job-kind-summary">Folder</p>
         </div>
-        <div class="job-row">
-          <label class="grow">
-            <span>Windows Path</span>
-            <input data-field="path" type="text" placeholder="%USERPROFILE%\\Documents">
-          </label>
-          <button data-action="browse" class="secondary">Browse</button>
-          <button data-action="remove" class="ghost danger">Remove</button>
+        <p data-field="path-summary" class="job-path-summary">Location saved.</p>
+        <p data-field="type-summary" class="job-type-summary">Included</p>
+        <label class="job-enabled-toggle" title="Include this item in backups">
+          <input data-field="enabled" type="checkbox" aria-label="Include this backup item">
+          <span class="toggle-track" aria-hidden="true"></span>
+        </label>
+        <div class="job-card-actions">
+          <button data-action="browse" class="quiet" type="button">Change</button>
+          <button data-action="remove" class="quiet danger" type="button">Remove</button>
         </div>
+        <details class="job-advanced">
+          <summary>Technical details</summary>
+          <div class="job-row">
+            <label>
+              <span>Name</span>
+              <input data-field="name" type="text">
+            </label>
+            <label>
+              <span>Type</span>
+              <input data-field="type-display" type="text" readonly>
+            </label>
+          </div>
+          <div class="job-row">
+            <label class="grow">
+              <span>Windows Path</span>
+              <input data-field="path" type="text" placeholder="%USERPROFILE%\\Documents">
+            </label>
+          </div>
+        </details>
       </article>
     </template>
 
     <div id="settings-drawer" class="settings-drawer" hidden>
       <div class="settings-backdrop"></div>
-      <aside class="settings-panel">
+      <aside class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="settings-modal-header">
           <div class="settings-modal-title-wrap">
-            <div class="settings-modal-title">Settings</div>
-            <div class="settings-modal-subtitle">Version <strong id="settings-version-copy">Loading...</strong>. Configure retention, automation, updates, and support tools from one place.</div>
+            <div id="settings-title" class="settings-modal-title">Settings</div>
+            <div class="settings-modal-subtitle">DataSafe <strong id="settings-version-copy">Loading...</strong></div>
           </div>
         </div>
         <div class="settings-modal-body">
           <div class="settings-layout">
             <div class="settings-nav" id="settings-nav">
               <section class="settings-nav-card">
-                <div class="settings-nav-title">Control Room</div>
                 <div class="settings-nav-list" id="settings-nav-list">
-                  <button type="button" class="settings-nav-button" data-panel-target="appearance-section">
-                    <span class="settings-nav-button-label">Appearance</span>
-                    <span class="settings-nav-button-copy">Corner branding and app visuals for this deployed copy.</span>
+                  <div class="settings-nav-title">Backup</div>
+                  <button type="button" class="settings-nav-button" data-panel-target="automation-section">
+                    <span class="settings-nav-button-label">Schedule</span>
+                    <span class="settings-nav-button-copy">Schedule, reminders, and cloud checks.</span>
                   </button>
                   <button type="button" class="settings-nav-button" data-panel-target="retention-section">
                     <span class="settings-nav-button-label">Retention</span>
-                    <span class="settings-nav-button-copy">Daily, monthly, and yearly snapshot history rules.</span>
-                  </button>
-                  <button type="button" class="settings-nav-button" data-panel-target="automation-section">
-                    <span class="settings-nav-button-label">Automation</span>
-                    <span class="settings-nav-button-copy">Scheduled backups, reminder timing, and cloud health checks.</span>
-                  </button>
-                  <button type="button" class="settings-nav-button" data-panel-target="support-section">
-                    <span class="settings-nav-button-label">Support Contact</span>
-                    <span class="settings-nav-button-copy">Who customers should contact when DataSafe needs attention.</span>
-                  </button>
-                  <button type="button" class="settings-nav-button" data-panel-target="licensing-section">
-                    <span class="settings-nav-button-label">Annual Licensing</span>
-                    <span class="settings-nav-button-copy">Future subscription scaffolding, still disabled during testing.</span>
-                  </button>
-                  <button type="button" class="settings-nav-button" data-panel-target="updates-section">
-                    <span class="settings-nav-button-label">App Updates</span>
-                    <span class="settings-nav-button-copy">Stable vs beta channel choice, updater actions, and maintenance tools.</span>
+                    <span class="settings-nav-button-copy">How long backup history is kept.</span>
                   </button>
                   <button type="button" class="settings-nav-button" data-panel-target="restore-section">
                     <span class="settings-nav-button-label">Restore</span>
-                    <span class="settings-nav-button-copy">Recover files, browser data, or supported email data from a saved snapshot.</span>
+                    <span class="settings-nav-button-copy">Recover files from a saved backup.</span>
+                  </button>
+                  <div class="settings-nav-title">Application</div>
+                  <button type="button" class="settings-nav-button" data-panel-target="appearance-section">
+                    <span class="settings-nav-button-label">Appearance</span>
+                    <span class="settings-nav-button-copy">Shop logo and deployed app branding.</span>
+                  </button>
+                  <button type="button" class="settings-nav-button" data-panel-target="support-section">
+                    <span class="settings-nav-button-label">Support</span>
+                    <span class="settings-nav-button-copy">Who customers should contact when DataSafe needs attention.</span>
+                  </button>
+                  <button type="button" class="settings-nav-button" data-panel-target="updates-section">
+                    <span class="settings-nav-button-label">Updates</span>
+                    <span class="settings-nav-button-copy">Stable releases, test builds, and maintenance.</span>
+                  </button>
+                  <button type="button" class="settings-nav-button" data-panel-target="terms-section">
+                    <span class="settings-nav-button-label">Terms</span>
+                    <span class="settings-nav-button-copy">Review the terms accepted for this installation.</span>
+                  </button>
+                  <div class="settings-nav-title">Technician</div>
+                  <button type="button" class="settings-nav-button" data-panel-target="licensing-section">
+                    <span class="settings-nav-button-label">Licensing</span>
+                    <span class="settings-nav-button-copy">Technician setup for future subscriptions.</span>
                   </button>
                   <button type="button" class="settings-nav-button" data-panel-target="logs-section">
-                    <span class="settings-nav-button-label">Support Logs</span>
-                    <span class="settings-nav-button-copy">Open the local log folder when something behaves unexpectedly.</span>
+                    <span class="settings-nav-button-label">Support logs</span>
+                    <span class="settings-nav-button-copy">Open local logs for support.</span>
                   </button>
                 </div>
               </section>
@@ -214,7 +248,6 @@
 
               <section class="settings-section settings-page" id="appearance-section" data-nav-label="Appearance" data-nav-copy="Corner branding and app visuals for this deployed copy.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Appearance</span>
                   <h3>Appearance</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Customize the corner branding shown in the app while keeping the main title centered.</div>
                 </div>
@@ -225,7 +258,7 @@
                       <div class="settings-subsection-copy">Upload an optional logo for the upper-left corner of this deployed copy of the app.</div>
                       <div class="grid two">
                         <div class="appearance-logo-card">
-                          <span>Corner Logo Preview</span>
+                          <span>Corner logo preview</span>
                           <div id="appearance-logo-preview-shell" class="appearance-logo-preview is-empty">
                             <img id="appearance-logo-preview" src="" alt="Selected logo preview" hidden>
                             <p id="appearance-logo-empty">No custom logo selected.</p>
@@ -233,10 +266,10 @@
                           <p class="hint">Transparent PNG or SVG logos tend to look best here.</p>
                         </div>
                         <div class="appearance-actions-card">
-                          <span>Logo Controls</span>
+                          <span>Logo controls</span>
                           <div class="appearance-actions">
-                            <button id="appearance-upload-logo" class="secondary" type="button">Upload Logo</button>
-                            <button id="appearance-clear-logo" class="ghost" type="button">Remove Logo</button>
+                            <button id="appearance-upload-logo" class="secondary" type="button">Upload logo</button>
+                            <button id="appearance-clear-logo" class="ghost" type="button">Remove logo</button>
                           </div>
                           <p class="hint">This only affects the branding for this deployed copy of the app.</p>
                         </div>
@@ -248,22 +281,21 @@
 
               <section class="settings-section settings-page" id="retention-section" data-nav-label="Retention" data-nav-copy="Daily, monthly, and yearly snapshot history rules.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Retention</span>
                   <h3>Retention</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Choose how many recent daily, monthly, and yearly snapshots to keep automatically.</div>
                 </div>
                 <div class="settings-panel-body">
                   <div class="grid three">
                     <label>
-                      <span>Recent Days</span>
+                      <span>Recent days</span>
                       <input id="retention-days" type="number" min="0" max="365">
                     </label>
                     <label>
-                      <span>Recent Months</span>
+                      <span>Recent months</span>
                       <input id="retention-months" type="number" min="0" max="120">
                     </label>
                     <label>
-                      <span>Recent Years</span>
+                      <span>Recent years</span>
                       <input id="retention-years" type="number" min="0" max="50">
                     </label>
                   </div>
@@ -271,90 +303,103 @@
                 </div>
               </section>
 
-              <section class="settings-section settings-page" id="automation-section" data-nav-label="Automation" data-nav-copy="Scheduled backups, reminder timing, and cloud health checks.">
+              <section class="settings-section settings-page" id="automation-section" data-nav-label="Schedule" data-nav-copy="Scheduled backups, reminder timing, and cloud health checks.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Automation</span>
-                  <h3>Automation</h3>
-                  <div class="settings-section-copy settings-panel-hero-copy">Set the backup schedule, stale-backup reminders, and cloud health checks.</div>
+                  <h3>Backup schedule</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Choose when DataSafe should back up this PC and when users should be reminded.</div>
                 </div>
                 <div class="settings-panel-body">
-                  <div class="settings-inline-actions">
-                    <button id="install-automation" class="secondary" type="button">Install Windows Tasks</button>
-                  </div>
-                  <p class="hint">This creates Windows Scheduled Tasks so the PC can run backups automatically and remind the user when backups have gone stale. Manual backups still work even if you do not install the tasks.</p>
-                  <div class="grid three">
-                    <label class="checkbox">
-                      <input id="schedule-enabled" type="checkbox">
-                      <span>Enable scheduled backups</span>
-                    </label>
-                    <label>
-                      <span>Frequency</span>
-                      <select id="schedule-frequency">
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Backup Day</span>
-                      <select id="schedule-day-of-week">
-                        <option value="Sunday">Sunday</option>
-                        <option value="Monday">Monday</option>
-                        <option value="Tuesday">Tuesday</option>
-                        <option value="Wednesday">Wednesday</option>
-                        <option value="Thursday">Thursday</option>
-                        <option value="Friday">Friday</option>
-                        <option value="Saturday">Saturday</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Time</span>
-                      <input id="schedule-time" type="time">
-                    </label>
-                    <label>
-                      <span>Time Display</span>
-                      <select id="time-format">
-                        <option value="12h">12-hour</option>
-                        <option value="24h">24-hour</option>
-                      </select>
-                    </label>
-                    <label class="checkbox">
-                      <input id="reminders-enabled" type="checkbox">
-                      <span>Enable stale backup reminders</span>
-                    </label>
-                    <label>
-                      <span>Warn After (Days)</span>
-                      <input id="reminder-days" type="number" min="1" max="90">
-                    </label>
-                    <label class="checkbox">
-                      <input id="cloud-check-enabled" type="checkbox">
-                      <span>Include cloud health checks</span>
-                    </label>
+                  <div class="settings-subsections">
+                    <section class="settings-subsection">
+                      <div class="settings-subsection-title">Schedule</div>
+                      <label class="checkbox">
+                        <input id="schedule-enabled" type="checkbox">
+                        <span class="toggle-copy"><strong>Automatic backups</strong><small>Run backups using Windows Task Scheduler.</small></span>
+                      </label>
+                      <div class="grid three">
+                        <label>
+                          <span>Frequency</span>
+                          <select id="schedule-frequency">
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>Backup day</span>
+                          <select id="schedule-day-of-week">
+                            <option value="Sunday">Sunday</option>
+                            <option value="Monday">Monday</option>
+                            <option value="Tuesday">Tuesday</option>
+                            <option value="Wednesday">Wednesday</option>
+                            <option value="Thursday">Thursday</option>
+                            <option value="Friday">Friday</option>
+                            <option value="Saturday">Saturday</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>Time</span>
+                          <input id="schedule-time" type="time">
+                        </label>
+                      </div>
+                      <div class="settings-compact-row">
+                        <label>
+                          <span>Time display</span>
+                          <select id="time-format">
+                            <option value="12h">12-hour</option>
+                            <option value="24h">24-hour</option>
+                          </select>
+                        </label>
+                        <div class="settings-inline-actions">
+                          <button id="install-automation" class="secondary" type="button">Install Windows tasks</button>
+                        </div>
+                      </div>
+                      <p class="hint">Installing the Windows tasks allows DataSafe to run this schedule automatically. Manual backups work without them.</p>
+                    </section>
+                    <section class="settings-subsection">
+                      <div class="settings-subsection-title">Reminders</div>
+                      <label class="checkbox">
+                        <input id="reminders-enabled" type="checkbox">
+                        <span class="toggle-copy"><strong>Backup reminders</strong><small>Notify the user when no backup has completed recently.</small></span>
+                      </label>
+                      <div class="settings-compact-row">
+                        <label>
+                          <span>Warn after (days)</span>
+                          <input id="reminder-days" type="number" min="1" max="90">
+                        </label>
+                      </div>
+                    </section>
+                    <section class="settings-subsection">
+                      <div class="settings-subsection-title">Cloud checks</div>
+                      <label class="checkbox">
+                        <input id="cloud-check-enabled" type="checkbox">
+                        <span class="toggle-copy"><strong>Check cloud backup health</strong><small>Include OneDrive and supported cloud checks in status reviews.</small></span>
+                      </label>
+                    </section>
                   </div>
                 </div>
               </section>
 
-              <section class="settings-section settings-page" id="support-section" data-nav-label="Support Contact" data-nav-copy="Who customers should contact when DataSafe needs attention.">
+              <section class="settings-section settings-page" id="support-section" data-nav-label="Support" data-nav-copy="Who customers should contact when DataSafe needs attention.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Support Contact</span>
-                  <h3>Support Contact</h3>
+                  <h3>Support</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Tell users exactly who to contact when reminders, alerts, or support actions point them back to the shop.</div>
                 </div>
                 <div class="settings-panel-body">
                   <div class="grid two">
                     <label>
-                      <span>Store or Support Name</span>
+                      <span>Store or support name</span>
                       <input id="support-name" type="text" placeholder="One Bite Technology">
                     </label>
                     <label>
-                      <span>Phone Number</span>
+                      <span>Phone number</span>
                       <input id="support-phone" type="text" placeholder="780-555-1234">
                     </label>
                     <label>
-                      <span>Support Email</span>
+                      <span>Support email</span>
                       <input id="support-email" type="email" placeholder="support@example.com">
                     </label>
                     <label>
-                      <span>Contact Page or Support Link</span>
+                      <span>Contact page or support link</span>
                       <input id="support-url" type="url" placeholder="https://example.com/contact">
                     </label>
                   </div>
@@ -362,28 +407,27 @@
                 </div>
               </section>
 
-              <section class="settings-section settings-page" id="licensing-section" data-nav-label="Annual Licensing" data-nav-copy="Future subscription scaffolding, still disabled during testing.">
+              <section class="settings-section settings-page" id="licensing-section" data-nav-label="Licensing" data-nav-copy="Future subscription scaffolding, still disabled during testing.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Annual Licensing</span>
-                  <h3>Annual Licensing</h3>
+                  <h3>Licensing</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Prepare the app for a future one-license-per-install subscription service without enabling enforcement yet.</div>
                 </div>
                 <div class="settings-panel-body">
                   <div class="grid two">
                     <label>
-                      <span>Licensing Service URL</span>
+                      <span>Licensing service URL</span>
                       <input id="licensing-service-url" type="url" placeholder="https://licensing.onebitetechnology.ca">
                     </label>
                     <label>
-                      <span>Customer or Subscription Reference</span>
+                      <span>Customer or subscription reference</span>
                       <input id="licensing-customer-ref" type="text" placeholder="Customer account or subscription ID">
                     </label>
                     <label>
-                      <span>Renewal Warning Days</span>
+                      <span>Renewal warning days</span>
                       <input id="licensing-warning-days" type="number" min="1" max="365">
                     </label>
                     <label>
-                      <span>Grace Period Days</span>
+                      <span>Grace period days</span>
                       <input id="licensing-grace-days" type="number" min="1" max="90">
                     </label>
                   </div>
@@ -392,10 +436,9 @@
                 </div>
               </section>
 
-              <section class="settings-section settings-page" id="updates-section" data-nav-label="App Updates" data-nav-copy="Stable vs beta channel choice, updater actions, and maintenance tools.">
+              <section class="settings-section settings-page" id="updates-section" data-nav-label="Updates" data-nav-copy="Stable vs beta channel choice, updater actions, and maintenance tools.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">App Updates</span>
-                  <h3>App Updates</h3>
+                  <h3>Updates</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Choose whether this PC should receive stable releases only or internal beta builds too.</div>
                 </div>
                 <div class="settings-panel-body">
@@ -405,11 +448,11 @@
                       <span>Receive beta and test builds</span>
                     </label>
                     <div class="updates-meta-row">
-                      <span class="updates-meta-label">Current Version:</span>
+                      <span class="updates-meta-label">Current version:</span>
                       <span id="app-version" class="updates-meta-value">Loading...</span>
                     </div>
                     <div class="updates-meta-row">
-                      <span class="updates-meta-label">Latest Version:</span>
+                      <span class="updates-meta-label">Latest version:</span>
                       <span id="update-latest-version" class="updates-meta-value">Not checked yet</span>
                     </div>
                     <p id="update-status" class="settings-meta-value">Checking update support...</p>
@@ -421,15 +464,15 @@
                     </div>
                     <p class="hint">Turn beta updates off to stay on final releases only. Turn it on to receive internal test builds as they are published.</p>
                     <div class="updates-actions">
-                      <button id="check-updates" class="primary" type="button">Check for Updates</button>
-                      <button id="download-update" class="secondary" type="button" disabled>Download Update</button>
-                      <button id="install-update" class="primary" type="button" disabled>Install Update Now</button>
+                      <button id="check-updates" class="primary" type="button">Check for updates</button>
+                      <button id="download-update" class="secondary" type="button" disabled>Download update</button>
+                      <button id="install-update" class="primary" type="button" disabled>Install update now</button>
                     </div>
                     <div class="maintenance-tools-card">
-                      <div class="maintenance-tools-label">Maintenance Tools</div>
+                      <div class="maintenance-tools-label">Maintenance tools</div>
                       <div class="maintenance-tool-grid">
                         <div class="maintenance-tool">
-                          <button id="report-issue" class="ghost" type="button">Feature Request / Report Bug</button>
+                          <button id="report-issue" class="ghost" type="button">Request a feature or report a bug</button>
                           <p class="hint">Create a support-ready email and open the logs folder so the user can attach diagnostic files.</p>
                         </div>
                       </div>
@@ -438,58 +481,68 @@
                 </div>
               </section>
 
+              <section class="settings-section settings-page" id="terms-section" data-nav-label="Terms" data-nav-copy="Review the terms accepted for this installation.">
+                <div class="settings-panel-hero">
+                  <h3>Terms and conditions</h3>
+                  <div class="settings-section-copy settings-panel-hero-copy">Review the terms presented when DataSafe was first opened on this PC.</div>
+                </div>
+                <div class="settings-panel-body">
+                  <p id="settings-terms-status" class="settings-meta-value">Acceptance status is loading.</p>
+                  <div id="settings-terms-copy" class="settings-terms-document terms-copy" aria-label="DataSafe terms and conditions"></div>
+                  <p class="hint">This page is provided for reference. A revised terms version will require acceptance the next time DataSafe opens.</p>
+                </div>
+              </section>
+
               <section class="settings-section settings-page" id="restore-section" data-nav-label="Restore" data-nav-copy="Recover files, browser data, or supported email data from a saved snapshot.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Restore</span>
                   <h3>Restore</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Restore files, browser data, or supported email data from a saved snapshot back to the PC.</div>
                 </div>
                 <div class="settings-panel-body">
                   <div class="grid two">
                     <label>
-                      <span>Snapshot to Restore</span>
+                      <span>Snapshot to restore</span>
                       <select id="restore-snapshot-select"></select>
                     </label>
                     <label>
-                      <span>Backup Item</span>
+                      <span>Backup item</span>
                       <select id="restore-job-select"></select>
                     </label>
                   </div>
                   <p id="restore-support-note" class="settings-meta-value">Choose a snapshot and backup item to review restore support notes.</p>
-                  <div class="grid two">
-                    <label>
-                      <span>Restore Mode</span>
+                  <div class="grid two restore-mode-grid">
+                    <label class="restore-mode-card">
+                      <span>Restore mode</span>
                       <select id="restore-mode-select">
                         <option value="alternate">Restore to another folder</option>
                         <option value="original">Restore to original location</option>
                       </select>
                     </label>
                     <div class="restore-target-card">
-                      <span>Alternate Restore Folder</span>
+                      <span>Alternate restore folder</span>
                       <div class="settings-inline-actions">
-                        <button id="restore-pick-target" class="secondary" type="button">Choose Restore Folder</button>
+                        <button id="restore-pick-target" class="secondary" type="button">Choose restore folder</button>
                       </div>
-                      <p id="restore-target-summary" class="hint">Original location will be used unless you choose another folder.</p>
+                      <p id="restore-target-summary" class="hint">Choose a folder for a separate, non-destructive restore copy.</p>
                     </div>
                   </div>
                   <div class="settings-inline-actions">
-                    <button id="run-restore" class="primary" type="button">Restore Selected Snapshot</button>
+                    <button id="run-restore" class="primary" type="button">Restore selected snapshot</button>
                   </div>
-                  <p class="hint">For browser and email restores, close the related app first. Fresh installs are usually safest after launching the app once before restoring its data.</p>
+                  <p class="settings-guidance">DataSafe verifies the selected snapshot before restoring. A restore to the original location also creates and verifies a rollback copy of the current files first.</p>
                 </div>
               </section>
 
-              <section class="settings-section settings-page" id="logs-section" data-nav-label="Support Logs" data-nav-copy="Open the local log folder when something behaves unexpectedly.">
+              <section class="settings-section settings-page" id="logs-section" data-nav-label="Support logs" data-nav-copy="Open the local log folder when something behaves unexpectedly.">
                 <div class="settings-panel-hero">
-                  <span class="settings-panel-kicker">Support Logs</span>
-                  <h3>Support Logs</h3>
+                  <h3>Support logs</h3>
                   <div class="settings-section-copy settings-panel-hero-copy">Open the local app-data folder to review runtime and launcher logs when something behaves unexpectedly.</div>
                 </div>
                 <div class="settings-panel-body">
                   <div class="settings-inline-actions">
-                    <button id="open-logs-folder" class="secondary" type="button">Open Logs Folder</button>
+                    <button id="open-logs-folder" class="secondary" type="button">Open logs folder</button>
                   </div>
-                  <p class="settings-meta-value">Look for <strong>`obtools-runtime.log`</strong> and <strong>`obtools-launcher.log`</strong>.</p>
+                  <p class="settings-meta-value">Look for <strong>obtools-runtime.log</strong> and <strong>obtools-launcher.log</strong>.</p>
                 </div>
               </section>
 
@@ -500,8 +553,8 @@
         <div class="settings-modal-footer">
           <div class="settings-footer-copy">Settings save to this machine. Retention, automation, and update preferences apply the next time a backup or cloud check runs.</div>
           <div class="settings-actions">
-            <button id="close-settings" class="ghost" type="button">Close</button>
-            <button id="save-config" class="primary" type="button">Save Settings</button>
+            <button id="close-settings" class="ghost" type="button">Cancel</button>
+            <button id="save-config" class="primary" type="button">Save changes</button>
           </div>
         </div>
       </aside>
@@ -510,11 +563,11 @@
     <div id="terms-gate" class="terms-gate" hidden>
       <div class="terms-backdrop"></div>
       <section class="terms-modal">
-        <button id="terms-skip" class="terms-skip" type="button" aria-label="Internal setup skip"></button>
+        <button id="terms-skip" class="terms-skip" type="button">Preview without accepting</button>
         <p class="eyebrow">Customer Acceptance</p>
         <h2>Terms and Conditions</h2>
         <p class="terms-intro">Before using DataSafe, the customer must review and accept these terms.</p>
-        <div class="terms-copy">
+        <div id="terms-copy" class="terms-copy">
           <p>One Bite Technology provides this software as a convenience tool for local backup automation. The customer remains responsible for verifying that backups complete successfully and that restore copies are readable.</p>
           <p>One Bite Technology is not liable for data loss, incomplete backups, device failure, media corruption, cloud sync problems, user error, malware, theft, or any direct or indirect damages arising from the use of this software.</p>
           <p>The customer should maintain more than one copy of important data and should periodically test restore procedures. Continued use of this software indicates acceptance of these terms.</p>

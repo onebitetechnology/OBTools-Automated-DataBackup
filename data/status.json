@@ -4,6 +4,13 @@
   "lastBackupMessage": "No backups have been run yet.",
   "destinationStatus": "Unknown",
   "recentSnapshots": [],
+  "integrity": {
+    "checkedAt": null,
+    "level": "info",
+    "summary": "Backup integrity has not been verified yet.",
+    "snapshotName": null,
+    "filesChecked": 0
+  },
   "cloud": {
     "checkedAt": null,
     "summary": "Cloud check has not been run yet.",

@@ -2,6 +2,16 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.62 - 2026-07-28
+
+- Reworked the app and Settings interface with a quieter, more professional visual system, consistent typography, aligned controls, clearer labels, and a simplified DataSafe brand mark.
+- Added in-app Terms and Conditions access, restore integrity status, restore planning, and clearer customer-facing safety guidance.
+- Made snapshots transactional so incomplete backup runs stay hidden and cannot be presented as valid restore points.
+- Added destination identity enforcement for scheduled backups, preflight media and free-space checks, completion manifests, checksum indexes, and a weekly integrity verification task.
+- Moved retention cleanup until after a replacement snapshot commits successfully.
+- Added restore conflict planning, a rollback safety copy for original-location restores, post-restore verification, and an automatic rollback attempt when verification fails.
+- Added automated snapshot-validation tests and documented the backup format plus remaining Windows release-readiness risks.
+
 ## 1.0.10-beta.61 - 2026-05-28
 
 - Reworded Task Scheduler permission, backup status-write, and overlapping-backup failures into customer-friendly guidance that explains whether to wait, retry, or contact One Bite Technology.
