@@ -436,6 +436,7 @@ function defaultStatus() {
     lastBackupMessage: "No backups have been run yet.",
     destinationStatus: "Unknown",
     recentSnapshots: [],
+    snapshotCatalog: [],
     integrity: {
       checkedAt: null,
       level: "info",
@@ -1169,6 +1170,24 @@ function listRecentSnapshots(config) {
   return inspectSnapshots(config).snapshots.map((entry) => entry.name);
 }
 
+function snapshotCatalogEntry(snapshot) {
+  const jobs = Array.isArray(snapshot?.manifest?.jobs) ? snapshot.manifest.jobs : [];
+  return {
+    name: snapshot.name,
+    completedAt: snapshot.completedAt || null,
+    jobs: jobs.map((job) => ({
+      id: String(job?.id || ""),
+      name: String(job?.name || "Backup item"),
+      type: String(job?.type || "folder"),
+      sourcePath: String(job?.sourcePath || ""),
+      sourceKind: String(job?.sourceKind || ""),
+      emailApp: String(job?.emailApp || ""),
+      processNames: Array.isArray(job?.processNames) ? job.processNames : [],
+      relativeDestination: Array.isArray(job?.relativeDestination) ? job.relativeDestination : []
+    })).filter((job) => job.id)
+  };
+}
+
 function reconcileStatusWithDisk(config, status) {
   const baseStatus = defaultStatus();
   const snapshotInfo = inspectSnapshots(config);
@@ -1217,6 +1236,8 @@ function reconcileStatusWithDisk(config, status) {
         : "Backup snapshots were found on the selected drive.";
     }
   }
+
+  nextStatus.snapshotCatalog = snapshotInfo.snapshots.map(snapshotCatalogEntry);
 
   if ((snapshotInfo.unverifiedCount || snapshotInfo.incompleteCount) && nextStatus.integrity.level !== "error") {
     const details = [];
@@ -1621,11 +1642,13 @@ function simulateAction(scriptName, extraScriptArgs = []) {
   if (scriptName === "check-cloud-health.ps1") {
     status.cloud = {
       checkedAt: now.toISOString(),
-      summary: "Preview mode: cloud sync review completed.",
+      summary: "Preview mode: local OneDrive configuration review completed. This does not verify cloud uploads, quota, or provider errors.",
       level: "info",
+      provider: "OneDrive",
+      verificationScope: "local-configuration",
       recommendations: [
         "Confirm OneDrive or another cloud sync tool is signed in on the customer PC.",
-        "Keep local USB backups enabled even when cloud sync appears healthy."
+        "Keep local USB backups enabled even when OneDrive configuration looks ready."
       ]
     };
     writeJson(statusPath, status);
@@ -2619,11 +2642,14 @@ ipcMain.handle("cloud:check", async () => {
   writeLauncherLog(`IPC cloud:check completed. ok=${result.ok} message=${result.message}`);
   writeRuntimeLog(`Cloud sync check completed. ok=${result.ok} message=${result.message}`);
   const { statusPath } = dataPaths();
+  const previousCloud = readJson(statusPath).cloud || {};
   const status = mergeStatus({
     cloud: {
-      ...readJson(statusPath).cloud,
+      ...previousCloud,
       checkedAt: new Date().toISOString(),
-      summary: result.message || "Cloud check completed."
+      level: result.ok ? (previousCloud.level || "info") : "error",
+      summary: result.message || (result.ok ? "Cloud configuration check completed." : "Cloud configuration check could not run."),
+      verificationScope: result.ok ? (previousCloud.verificationScope || "local-configuration") : "local-configuration"
     }
   });
   updateTrayStatus({ notify: true });

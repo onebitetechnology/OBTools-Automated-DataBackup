@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ConfigPath,
   [Parameter(Mandatory = $true)]
-  [string]$StatusPath
+  [string]$StatusPath,
+  [switch]$Notify
 )
 
 Set-StrictMode -Version Latest
@@ -21,6 +22,15 @@ function Write-Json([string]$Path, $Value) {
 function Add-Recommendation([System.Collections.Generic.List[string]]$Recommendations, [string]$Message) {
   if (-not [string]::IsNullOrWhiteSpace($Message) -and -not $Recommendations.Contains($Message)) {
     $Recommendations.Add($Message)
+  }
+}
+
+function Show-CloudWarning([string]$Message) {
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shell.Popup($Message, 20, "DataSafe Cloud Configuration Needs Attention", 48) | Out-Null
+  } catch {
+    # Scheduled-task history retains the warning when an interactive popup is unavailable.
   }
 }
 
@@ -227,17 +237,28 @@ if ($unprotectedFolders.Count -gt 0) {
   $healthy = $false
 }
 
-$level = if ($healthy -and $recommendations.Count -eq 0) { "success" } else { "warning" }
-if ($level -eq "success") {
-  $summaryParts.Add("OneDrive appears signed in, running, and protecting Desktop/Documents.")
+$level = if ($healthy -and $recommendations.Count -eq 0) { "info" } else { "warning" }
+if ($level -eq "info") {
+  $summaryParts.Add("OneDrive's local account, sync-client, and folder configuration looks ready for review.")
 }
+$summaryParts.Add("This check does not verify cloud uploads, quota, or provider errors.")
 
-$status.cloud = [ordered]@{
+$cloudStatus = [ordered]@{
   checkedAt = (Get-Date).ToString("o")
   summary = ($summaryParts -join " ")
   level = $level
+  provider = "OneDrive"
+  verificationScope = "local-configuration"
   recommendations = @($recommendations)
+}
+if ($null -eq $status.PSObject.Properties["cloud"]) {
+  $status | Add-Member -NotePropertyName "cloud" -NotePropertyValue $cloudStatus
+} else {
+  $status.cloud = $cloudStatus
 }
 
 Write-Json $StatusPath $status
+if ($Notify -and $level -eq "warning") {
+  Show-CloudWarning "$($cloudStatus.summary) Open DataSafe to review the recommended next steps."
+}
 Write-Output $status.cloud.summary

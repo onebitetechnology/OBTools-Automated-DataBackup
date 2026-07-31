@@ -64,6 +64,23 @@ Main scripts:
 - `windows/check-reminders.ps1`
 - `windows/check-cloud-health.ps1`
 
+## Windows Release Trust
+
+The release workflow runs `npm test` before it builds and publishes the
+installer. It builds the published installer only once, then uploads that same
+artifact for review.
+
+To sign a production installer, configure these GitHub Actions secrets with an
+organization-owned Authenticode certificate and its password:
+
+- `WINDOWS_CSC_LINK`
+- `WINDOWS_CSC_KEY_PASSWORD`
+
+Until those secrets are configured, beta installers remain unsigned and should
+be treated as internal test builds. Uninstall now preserves DataSafe recovery
+configuration and local logs; remove these through an explicit support or
+future in-app reset workflow rather than relying on uninstall.
+
 ## Files
 
 - `server.js` - local HTTP server and API layer

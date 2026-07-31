@@ -146,37 +146,6 @@ function Show-BackupNotification(
   $shell.Popup($Message, 20, $Title, $iconCode) | Out-Null
 }
 
-function Acquire-BackupLock([string]$LockPath) {
-  if (Test-Path -LiteralPath $LockPath) {
-    $existing = Get-Item -LiteralPath $LockPath -ErrorAction SilentlyContinue
-    $ageHours = if ($existing) { ((Get-Date) - $existing.LastWriteTime).TotalHours } else { 0 }
-    if ($ageHours -lt 12) {
-      throw "A DataSafe backup is already running. Wait for it to finish before starting another backup."
-    }
-
-    Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
-  }
-
-  try {
-    $handle = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes("pid=$PID`nstartedAt=$((Get-Date).ToString('o'))`n")
-    $handle.Write($bytes, 0, $bytes.Length)
-    $handle.Flush()
-    $handle.Position = 0
-    return $handle
-  } catch {
-    throw "A DataSafe backup is already running. Wait for it to finish before starting another backup."
-  }
-}
-
-function Release-BackupLock($Handle, [string]$LockPath) {
-  if ($Handle) {
-    $Handle.Dispose()
-  }
-
-  Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
-}
-
 function Write-FailedBackupStatus([string]$Path, [string]$Message) {
   try {
     $status = Read-Json $Path
@@ -648,7 +617,7 @@ $configForNotification = $null
 $stagingSnapshotPath = $null
 
 try {
-  $lockHandle = Acquire-BackupLock $lockPath
+  $lockHandle = Acquire-DataSafeOperationLock $lockPath
   $config = Read-Json $ConfigPath
   $configForNotification = $config
   $status = Read-Json $StatusPath
@@ -761,6 +730,6 @@ try {
     Remove-Item -LiteralPath $stagingSnapshotPath -Recurse -Force -ErrorAction SilentlyContinue
   }
   if ($lockHandle) {
-    Release-BackupLock $lockHandle $lockPath
+    Release-DataSafeOperationLock $lockHandle $lockPath
   }
 }

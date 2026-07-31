@@ -54,7 +54,7 @@ module.exports = {
     allowToChangeInstallationDirectory: true,
     createDesktopShortcut: true,
     createStartMenuShortcut: true,
-    deleteAppDataOnUninstall: true,
+    deleteAppDataOnUninstall: false,
     shortcutName: "DataSafe"
   }
 };

@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  build-windows-installer:
+  build-and-publish-prerelease:
     runs-on: windows-latest
 
     steps:
@@ -26,10 +26,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Windows installer
-        run: npm run dist:win
+      - name: Run safety regression tests
+        run: npm test
 
-      - name: Upload installer artifact
+      - name: Build and publish internal prerelease
+        run: npm run release:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+
+      - name: Upload published installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: OBTools-Automated-Backups-Windows-Installer
@@ -37,25 +44,3 @@ jobs:
             dist/*.exe
             dist/*.yml
           if-no-files-found: error
-
-  publish-prerelease:
-    needs: build-windows-installer
-    runs-on: windows-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Publish internal prerelease
-        run: npm run release:win
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

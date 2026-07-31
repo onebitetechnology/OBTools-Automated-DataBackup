@@ -1820,7 +1820,7 @@ function renderStatus() {
   const summary = protectionSummary(state.status);
   const cloudLevel = state.status.cloud?.level || "info";
   const cloudChecked = Boolean(state.status.cloud?.checkedAt);
-  const cloudHealthy = cloudChecked && cloudLevel === "success";
+  const cloudConfigurationFound = cloudChecked && cloudLevel === "info" && state.status.cloud?.verificationScope === "local-configuration";
   const cloudProblem = cloudChecked && (cloudLevel === "warning" || cloudLevel === "error");
 
   el.backupStatusCard.classList.remove("status-good", "status-warning", "status-error");
@@ -1848,14 +1848,14 @@ function renderStatus() {
   el.cloudSummary.classList.toggle("error-copy", state.status.cloud?.level === "error");
   el.cloudHealthIndicator.classList.remove("health-indicator-neutral", "health-indicator-success", "health-indicator-error");
   el.cloudHealthIndicator.classList.add(
-    cloudHealthy ? "health-indicator-success" : cloudProblem ? "health-indicator-error" : "health-indicator-neutral"
+    cloudProblem ? "health-indicator-error" : "health-indicator-neutral"
   );
-  el.cloudHealthLabel.textContent = cloudHealthy
-    ? "OneDrive backup looks healthy"
+  el.cloudHealthLabel.textContent = cloudConfigurationFound
+    ? "OneDrive configuration found"
     : cloudProblem
-      ? "Cloud backup needs attention"
+      ? "Cloud configuration needs attention"
       : cloudChecked
-        ? "Cloud sync reviewed"
+        ? "Cloud configuration reviewed"
         : "Cloud health not checked yet";
   const snapshots = state.status.recentSnapshots || [];
   el.snapshotCount.textContent = String(snapshots.length);
@@ -1991,13 +1991,29 @@ function restoreSupportNote(job) {
   return "A separate-folder restore never replaces current files. For an original-location restore, DataSafe first makes and verifies a rollback copy of the current files.";
 }
 
+function getSnapshotCatalogEntry(snapshotName) {
+  return (state.status?.snapshotCatalog || []).find((snapshot) => snapshot.name === snapshotName) || null;
+}
+
+function getSnapshotRestoreJobs(snapshotName) {
+  const snapshot = getSnapshotCatalogEntry(snapshotName);
+  return Array.isArray(snapshot?.jobs) && snapshot.jobs.length
+    ? snapshot.jobs
+    : (state.config?.jobs || []);
+}
+
+function getSelectedRestoreJob() {
+  const snapshotName = el.restoreSnapshotSelect?.value || "";
+  const jobId = el.restoreJobSelect?.value || "";
+  return getSnapshotRestoreJobs(snapshotName).find((job) => job.id === jobId) || null;
+}
+
 function renderRestoreSection() {
   if (!el.restoreSnapshotSelect || !el.restoreJobSelect) {
     return;
   }
 
   const snapshots = state.status?.recentSnapshots || [];
-  const jobs = state.config?.jobs || [];
   const currentSnapshot = el.restoreSnapshotSelect.value;
   const currentJobId = el.restoreJobSelect.value;
 
@@ -2021,11 +2037,15 @@ function renderRestoreSection() {
     el.restoreSnapshotSelect.disabled = false;
   }
 
+  const selectedSnapshotName = el.restoreSnapshotSelect.value;
+  const jobs = getSnapshotRestoreJobs(selectedSnapshotName);
+  const snapshotCatalog = getSnapshotCatalogEntry(selectedSnapshotName);
+
   el.restoreJobSelect.innerHTML = "";
   if (!jobs.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "No backup items configured yet";
+    option.textContent = snapshotCatalog ? "No backup items were recorded in this snapshot" : "No backup items configured yet";
     el.restoreJobSelect.appendChild(option);
     el.restoreJobSelect.disabled = true;
   } else {
@@ -2042,7 +2062,18 @@ function renderRestoreSection() {
   }
 
   const selectedJob = jobs.find((job) => job.id === el.restoreJobSelect.value) || jobs[0] || null;
-  el.restoreSupportNote.textContent = restoreSupportNote(selectedJob);
+  const configuredJob = (state.config?.jobs || []).find((job) => job.id === selectedJob?.id) || null;
+  const originalModeOption = el.restoreModeSelect?.querySelector("option[value='original']");
+  const originalRestoreUnavailable = Boolean(snapshotCatalog && (!selectedJob?.sourcePath || !configuredJob));
+  if (originalModeOption) {
+    originalModeOption.disabled = originalRestoreUnavailable;
+  }
+  if (originalRestoreUnavailable && el.restoreModeSelect?.value === "original") {
+    el.restoreModeSelect.value = "alternate";
+  }
+  el.restoreSupportNote.textContent = originalRestoreUnavailable
+    ? "This backup item is no longer configured on this PC, so DataSafe will restore it only to a separate folder."
+    : restoreSupportNote(selectedJob);
   const usingAlternate = el.restoreModeSelect?.value === "alternate";
   el.restorePickTarget.disabled = !usingAlternate;
   el.restoreTargetSummary.textContent = usingAlternate
@@ -2613,7 +2644,9 @@ async function invokeAction(path, options = {}) {
 
     if (path === "/api/check-cloud") {
       showResultModal({
-        title: state.status.cloud?.level === "success" ? "Cloud Sync Looks Healthy" : "Cloud Sync Needs Attention",
+        title: state.status.cloud?.level === "warning" || state.status.cloud?.level === "error"
+          ? "Cloud Configuration Needs Attention"
+          : "OneDrive Configuration Reviewed",
         message: summarizeActionMessage(state.status.cloud?.summary || "Cloud check completed."),
         list: state.status.cloud?.recommendations || [],
         secondaryAction: window.onebiteDesktop?.openOneDrive
@@ -2876,11 +2909,12 @@ async function performRestore() {
 }
 
 async function runRestore() {
-  const selectedJob = (state.config?.jobs || []).find((job) => job.id === (el.restoreJobSelect?.value || ""));
+  const selectedJob = getSelectedRestoreJob();
+  const configuredJob = (state.config?.jobs || []).find((job) => job.id === selectedJob?.id) || null;
   const restoreMode = el.restoreModeSelect?.value || "alternate";
   const destinationCopy = restoreMode === "alternate"
     ? (state.restoreTargetPath || "the selected restore folder")
-    : (selectedJob?.path || "the original location");
+    : (configuredJob?.path || "the original location");
 
   const snapshotName = el.restoreSnapshotSelect?.value || "";
   const jobId = el.restoreJobSelect?.value || "";

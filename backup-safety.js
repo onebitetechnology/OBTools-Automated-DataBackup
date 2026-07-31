@@ -37,6 +37,67 @@ function isSafeSnapshotName(value) {
   return SNAPSHOT_NAME_PATTERN.test(String(value || ""));
 }
 
+function normalizeIntegrityPath(value) {
+  const normalized = String(value || "").replace(/\\/g, "/");
+  if (!normalized || normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized)) {
+    return null;
+  }
+
+  const parts = normalized.split("/");
+  if (parts.some((part) => !part || part === "." || part === "..")) {
+    return null;
+  }
+
+  return parts.join("/");
+}
+
+function listSnapshotFiles(snapshotPath, ignoredNames) {
+  const files = new Set();
+  const visit = (directoryPath, relativeDirectory) => {
+    for (const entry of fs.readdirSync(directoryPath, { withFileTypes: true })) {
+      const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        visit(path.join(directoryPath, entry.name), relativePath);
+      } else if (entry.isFile() && !ignoredNames.has(relativePath)) {
+        files.add(relativePath);
+      }
+    }
+  };
+
+  visit(snapshotPath, "");
+  return files;
+}
+
+function snapshotTreeMatchesIntegrityIndex(snapshotPath, integrityPath) {
+  const indexedFiles = new Set();
+  const indexLines = fs.readFileSync(integrityPath, "utf8").split(/\r?\n/);
+  for (const line of indexLines) {
+    if (!line.trim()) {
+      continue;
+    }
+
+    const relativePath = normalizeIntegrityPath(JSON.parse(line).path);
+    if (!relativePath || indexedFiles.has(relativePath)) {
+      return false;
+    }
+
+    indexedFiles.add(relativePath);
+  }
+
+  const metadataFiles = new Set([
+    SNAPSHOT_MANIFEST_FILE,
+    SNAPSHOT_COMPLETE_FILE,
+    SNAPSHOT_INTEGRITY_FILE,
+    SNAPSHOT_VERIFICATION_FILE
+  ]);
+  const snapshotFiles = listSnapshotFiles(snapshotPath, metadataFiles);
+  if (snapshotFiles.size !== indexedFiles.size) {
+    return false;
+  }
+
+  return [...snapshotFiles].every((relativePath) => indexedFiles.has(relativePath));
+}
+
 function inspectCompletedSnapshot(snapshotPath) {
   const snapshotName = path.basename(snapshotPath);
   if (!isSafeSnapshotName(snapshotName)) {
@@ -80,6 +141,10 @@ function inspectCompletedSnapshot(snapshotPath) {
       String(manifest.integrity?.indexFile || "") !== SNAPSHOT_INTEGRITY_FILE ||
       sha256File(integrityPath) !== String(complete.integrityIndexSha256 || "").toUpperCase()
     ) {
+      return null;
+    }
+
+    if (!snapshotTreeMatchesIntegrityIndex(snapshotPath, integrityPath)) {
       return null;
     }
 
@@ -182,5 +247,6 @@ module.exports = {
   inspectCompletedSnapshot,
   inspectSnapshotsAtBaseRoot,
   isSafeSnapshotName,
+  normalizeIntegrityPath,
   sha256File
 };

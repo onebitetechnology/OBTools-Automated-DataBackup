@@ -53,7 +53,7 @@ function Test-BackupIsDue($Schedule, $Status) {
   }
 
   $mostRecentScheduledTime = Get-MostRecentScheduledTime $Schedule
-  if (-not $Status.lastBackupAt -or $Status.lastBackupResult -ne "success") {
+  if (-not $Status.lastBackupAt) {
     return $true
   }
 

@@ -35,7 +35,7 @@ function Assert-SafeSnapshotName([string]$Value) {
   }
 }
 
-function Assert-SafeRestoreTarget([string]$DestinationPath, $Job) {
+function Assert-SafeRestoreTarget([string]$DestinationPath, [string]$ItemType) {
   if ([string]::IsNullOrWhiteSpace($DestinationPath)) {
     throw "DataSafe could not resolve a restore location for this backup item."
   }
@@ -44,7 +44,7 @@ function Assert-SafeRestoreTarget([string]$DestinationPath, $Job) {
   $rootPath = [System.IO.Path]::GetPathRoot($fullPath)
   $normalizedFullPath = $fullPath -replace '\\+$', ''
   $normalizedRootPath = $rootPath -replace '\\+$', ''
-  if ((Get-DataSafeProperty $Job "type" "folder") -eq "folder" -and $normalizedFullPath -eq $normalizedRootPath) {
+  if ($ItemType -eq "folder" -and $normalizedFullPath -eq $normalizedRootPath) {
     throw "DataSafe will not restore a folder directly onto the root of a drive. Choose another restore folder."
   }
 }
@@ -122,7 +122,11 @@ function Get-UniqueAlternateTarget($Job, [string]$ChosenTarget, [string]$Snapsho
     throw "Choose a restore folder before restoring to another location."
   }
 
-  $sourceLeaf = Split-Path -Leaf (Expand-WindowsPath "$(Get-DataSafeProperty $Job 'path' '')")
+  $originalSourcePath = "$(Get-DataSafeProperty $Job 'sourcePath' '')"
+  if ([string]::IsNullOrWhiteSpace($originalSourcePath)) {
+    $originalSourcePath = "$(Get-DataSafeProperty $Job 'path' '')"
+  }
+  $sourceLeaf = Split-Path -Leaf (Expand-WindowsPath $originalSourcePath)
   if ([string]::IsNullOrWhiteSpace($sourceLeaf)) {
     $sourceLeaf = Get-SafeBackupSegment "$(Get-DataSafeProperty $Job 'name' 'Restored Item')" "Restored Item"
   }
@@ -212,7 +216,8 @@ function Get-RestorePlan(
   [bool]$IsFolder,
   [string]$Mode,
   [string]$BaseRoot,
-  [string]$SafetyPath
+  [string]$SafetyPath,
+  $SnapshotJob
 ) {
   $sourceMap = Get-FileMap $SourcePath $IsFolder
   $newFiles = 0
@@ -262,7 +267,7 @@ function Get-RestorePlan(
   return [PSCustomObject]@{
     snapshotName = $SnapshotName
     jobId = $JobId
-    jobName = "$(Get-DataSafeProperty $activeJob 'name' 'Backup item')"
+    jobName = "$(Get-DataSafeProperty $SnapshotJob 'name' 'Backup item')"
     mode = $Mode
     targetPath = $RestoreTarget
     sourceFiles = $sourceMap.Count
@@ -318,56 +323,74 @@ function Update-RestoreJournal([string]$JournalPath, $Journal, [string]$State, [
 
 $config = Read-DataSafeJson $ConfigPath
 $status = Read-DataSafeJson $StatusPath
-Assert-SafeSnapshotName $SnapshotName
-$job = @($config.jobs | Where-Object { $_.id -eq $JobId } | Select-Object -First 1)
-if ($job.Count -eq 0) {
-  throw "The selected backup item could not be found in this app configuration."
-}
+$operationLock = $null
+try {
+  Assert-SafeSnapshotName $SnapshotName
+  $activeJobMatches = @($config.jobs | Where-Object { $_.id -eq $JobId } | Select-Object -First 1)
+  $activeJob = if ($activeJobMatches.Count -gt 0) { $activeJobMatches[0] } else { $null }
 
-$activeJob = $job[0]
-$runningProcesses = @(Get-RunningProcessNames $activeJob)
-if ($runningProcesses.Count -gt 0) {
-  $sourceKind = "$(Get-DataSafeProperty $activeJob 'sourceKind' '')"
-  $appLabel = if ($sourceKind -eq "browser") { "browser" } elseif ($sourceKind -eq "email") { "email app" } else { "app" }
-  throw "Close the related $appLabel before restoring this data: $($runningProcesses -join ', ')."
-}
-
-$baseRoot = Get-DataSafeBaseRoot $config
-$null = Assert-DataSafeDestinationIdentity -BaseRoot $baseRoot -Config $config -Status $status
-$snapshotRoot = Join-Path (Join-Path $baseRoot "snapshots") $SnapshotName
-$completedSnapshot = Get-DataSafeCompletedSnapshot $snapshotRoot
-if ($null -eq $completedSnapshot) {
-  throw "The selected snapshot is incomplete or its completion record is invalid. DataSafe will not restore from it."
-}
-
-$backupItemRoot = Get-BackupItemRoot $activeJob $snapshotRoot
-if (-not (Test-Path -LiteralPath $backupItemRoot)) {
-  throw "That backup item is not available in the selected snapshot. It may have been added after that snapshot was created."
-}
-
-$isFolder = "$(Get-DataSafeProperty $activeJob 'type' 'folder')" -eq "folder"
-$sourcePath = $backupItemRoot
-if (-not $isFolder) {
-  $sourceFile = Get-SourceFile $backupItemRoot
-  if ($null -eq $sourceFile) {
-    throw "The selected snapshot does not contain a restorable file for this backup item."
+  if ($Action -eq "restore") {
+    $operationLock = Acquire-DataSafeOperationLock "$StatusPath.lock"
   }
-  $sourcePath = $sourceFile.FullName
-}
+
+  $baseRoot = Get-DataSafeBaseRoot $config
+  $null = Assert-DataSafeDestinationIdentity -BaseRoot $baseRoot -Config $config -Status $status
+  $snapshotRoot = Join-Path (Join-Path $baseRoot "snapshots") $SnapshotName
+  $completedSnapshot = Get-DataSafeCompletedSnapshot $snapshotRoot
+  if ($null -eq $completedSnapshot) {
+    throw "The selected snapshot is incomplete or its completion record is invalid. DataSafe will not restore from it."
+  }
+
+  $snapshotJob = Get-DataSafeSnapshotJob -Snapshot $completedSnapshot -JobId $JobId
+  $canRestoreToOriginal = Test-DataSafeSnapshotJobMatchesActiveJob -SnapshotJob $snapshotJob -ActiveJob $activeJob
+  if ($RestoreMode -eq "original" -and -not $canRestoreToOriginal) {
+    throw "This backup item's current source path has changed or is no longer configured. To protect current data, restore this snapshot to a separate folder instead."
+  }
+
+  $restoreJob = if ($RestoreMode -eq "original") { $activeJob } else { $snapshotJob }
+  $runningProcesses = @(Get-RunningProcessNames $snapshotJob)
+  if ($runningProcesses.Count -gt 0) {
+    $sourceKind = "$(Get-DataSafeProperty $snapshotJob 'sourceKind' '')"
+    $appLabel = if ($sourceKind -eq "browser") { "browser" } elseif ($sourceKind -eq "email") { "email app" } else { "app" }
+    throw "Close the related $appLabel before restoring this data: $($runningProcesses -join ', ')."
+  }
+
+  $backupItemRoot = Get-BackupItemRoot $snapshotJob $snapshotRoot
+  if (-not (Test-Path -LiteralPath $backupItemRoot)) {
+    throw "That backup item is not available in the selected snapshot. It may have been removed or the backup drive was changed after this snapshot completed."
+  }
+
+  $isFolder = "$(Get-DataSafeProperty $snapshotJob 'type' 'folder')" -eq "folder"
+  $sourcePath = $backupItemRoot
+  if (-not $isFolder) {
+    $sourceFile = Get-SourceFile $backupItemRoot
+    if ($null -eq $sourceFile) {
+      throw "The selected snapshot does not contain a restorable file for this backup item."
+    }
+    $sourcePath = $sourceFile.FullName
+  }
 
 $sourceFileCount = (Get-FileMap $sourcePath $isFolder).Count
 if ($sourceFileCount -gt 0) {
-  $integrityPrefix = @(Get-BackupDestinationSegments $activeJob) -join '\'
+  $integrityPrefix = @(Get-BackupDestinationSegments $snapshotJob) -join '\'
   $null = Test-DataSafeIntegrityIndex -SnapshotPath $snapshotRoot -RelativePrefix $integrityPrefix
 }
 
-$restoreTarget = Get-RestoreTarget $activeJob $RestoreMode $TargetPath $SnapshotName
-Assert-SafeRestoreTarget $restoreTarget $activeJob
-$restoreJobSegment = Get-SafeBackupSegment "$(Get-DataSafeProperty $activeJob 'name' 'Item')"
+if ($RestoreMode -eq "alternate") {
+  $originalSourcePath = "$(Get-DataSafeProperty $snapshotJob 'sourcePath' '')"
+  if ([string]::IsNullOrWhiteSpace($originalSourcePath) -and $activeJob) {
+    $originalSourcePath = "$(Get-DataSafeProperty $activeJob 'path' '')"
+  }
+  Assert-DataSafeAlternateRestoreTarget -ChosenTarget $TargetPath -BaseRoot $baseRoot -SnapshotRoot $snapshotRoot -OriginalSourcePath $originalSourcePath
+}
+
+$restoreTarget = Get-RestoreTarget $restoreJob $RestoreMode $TargetPath $SnapshotName
+Assert-SafeRestoreTarget $restoreTarget "$(Get-DataSafeProperty $snapshotJob 'type' 'folder')"
+$restoreJobSegment = Get-SafeBackupSegment "$(Get-DataSafeProperty $snapshotJob 'name' 'Item')"
 $restoreId = "$(Get-Date -Format 'yyyyMMdd-HHmmss')-$([guid]::NewGuid().ToString('N').Substring(0, 8))-$restoreJobSegment"
 $safetyRoot = Join-Path (Join-Path $baseRoot "restore-safety") $restoreId
 $safetyOriginal = Join-Path $safetyRoot "original"
-$plan = Get-RestorePlan -SourcePath $sourcePath -RestoreTarget $restoreTarget -IsFolder $isFolder -Mode $RestoreMode -BaseRoot $baseRoot -SafetyPath $safetyOriginal
+$plan = Get-RestorePlan -SourcePath $sourcePath -RestoreTarget $restoreTarget -IsFolder $isFolder -Mode $RestoreMode -BaseRoot $baseRoot -SafetyPath $safetyOriginal -SnapshotJob $snapshotJob
 
 if ($Action -eq "plan") {
   Write-RestoreResult $plan
@@ -385,7 +408,7 @@ $journal = [PSCustomObject]@{
   restoreId = $restoreId
   snapshotName = $SnapshotName
   jobId = $JobId
-  jobName = "$(Get-DataSafeProperty $activeJob 'name' 'Backup item')"
+  jobName = "$(Get-DataSafeProperty $snapshotJob 'name' 'Backup item')"
   mode = $RestoreMode
   targetPath = $restoreTarget
   safetyCopyPath = if ($plan.safetyCopyRequired) { $safetyOriginal } else { $null }
@@ -470,3 +493,8 @@ $result = [PSCustomObject]@{
 }
 Write-RestoreResult $result
 Write-Output "Restore completed to $restoreTarget"
+} finally {
+  if ($operationLock) {
+    Release-DataSafeOperationLock $operationLock "$StatusPath.lock"
+  }
+}

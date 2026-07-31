@@ -5,11 +5,13 @@ const { spawn } = require("child_process");
 const { inspectSnapshotsAtBaseRoot } = require("./backup-safety");
 
 const ROOT = __dirname;
+const ASSETS_DIR = path.join(ROOT, "assets");
 const DATA_DIR = path.join(ROOT, "data");
 const CONFIG_PATH = path.join(DATA_DIR, "config.json");
 const STATUS_PATH = path.join(DATA_DIR, "status.json");
 const WINDOWS_DIR = path.join(ROOT, "windows");
 const PORT = Number(process.env.PORT || 3200);
+const PREVIEW_HOST = "127.0.0.1";
 const SHELL_WORK_DIR = ROOT;
 const APP_VERSION = require(path.join(ROOT, "package.json")).version;
 
@@ -86,6 +88,25 @@ function contentTypeFor(filePath) {
     return "image/svg+xml";
   }
   return "application/octet-stream";
+}
+
+function resolvePreviewAssetPath(requestUrl) {
+  try {
+    const pathname = decodeURIComponent(new URL(requestUrl, "http://localhost").pathname);
+    if (!pathname.startsWith("/assets/")) {
+      return null;
+    }
+
+    const relativePath = pathname.slice("/assets/".length);
+    if (!relativePath) {
+      return null;
+    }
+
+    const assetPath = path.resolve(ASSETS_DIR, relativePath);
+    return assetPath.startsWith(`${ASSETS_DIR}${path.sep}`) ? assetPath : null;
+  } catch (_error) {
+    return null;
+  }
 }
 
 function mergeStatus(patch) {
@@ -182,11 +203,13 @@ function simulateAction(scriptName) {
   if (scriptName === "check-cloud-health.ps1") {
     status.cloud = {
       checkedAt: now.toISOString(),
-      summary: "Preview mode: cloud sync review completed.",
+      summary: "Preview mode: local OneDrive configuration review completed. This does not verify cloud uploads, quota, or provider errors.",
       level: "info",
+      provider: "OneDrive",
+      verificationScope: "local-configuration",
       recommendations: [
         "Confirm OneDrive or another cloud sync tool is signed in on the customer PC.",
-        "Keep local USB backups enabled even when cloud sync appears healthy."
+        "Keep local USB backups enabled even when OneDrive configuration looks ready."
       ]
     };
     writeJson(STATUS_PATH, status);
@@ -412,11 +435,14 @@ async function handleApi(request, response) {
 
   if (request.method === "POST" && request.url === "/api/check-cloud") {
     const result = await runPowerShell("check-cloud-health.ps1");
+    const previousCloud = readJson(STATUS_PATH).cloud || {};
     const status = mergeStatus({
       cloud: {
-        ...readJson(STATUS_PATH).cloud,
+        ...previousCloud,
         checkedAt: new Date().toISOString(),
-        summary: result.message || "Cloud check completed."
+        level: result.ok ? (previousCloud.level || "info") : "error",
+        summary: result.message || (result.ok ? "Cloud configuration check completed." : "Cloud configuration check could not run."),
+        verificationScope: result.ok ? (previousCloud.verificationScope || "local-configuration") : "local-configuration"
       }
     });
     sendJson(response, 200, { status, meta: appMeta() });
@@ -500,8 +526,8 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.url.startsWith("/assets/")) {
-      const assetPath = path.join(ROOT, request.url);
-      if (!fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
+      const assetPath = resolvePreviewAssetPath(request.url);
+      if (!assetPath || !fs.existsSync(assetPath) || !fs.statSync(assetPath).isFile()) {
         sendJson(response, 404, { error: "Not found" });
         return;
       }
@@ -521,7 +547,7 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, PREVIEW_HOST, () => {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const status = readJson(STATUS_PATH);
   if (

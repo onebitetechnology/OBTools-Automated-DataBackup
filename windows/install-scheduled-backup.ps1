@@ -80,6 +80,7 @@ $backupScript = Join-Path $ScriptRoot "backup-engine.ps1"
 $reminderScript = Join-Path $ScriptRoot "check-reminders.ps1"
 $catchUpScript = Join-Path $ScriptRoot "check-backup-catchup.ps1"
 $integrityScript = Join-Path $ScriptRoot "verify-backup-integrity.ps1"
+$cloudHealthScript = Join-Path $ScriptRoot "check-cloud-health.ps1"
 $time = [DateTime]::ParseExact($schedule.time, "HH:mm", $null)
 $backupDay = Get-NormalizedDayOfWeek $schedule
 
@@ -87,6 +88,7 @@ $backupAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-No
 $reminderAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$reminderScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
 $catchUpAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$catchUpScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`" -ScriptRoot `"$ScriptRoot`""
 $integrityAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$integrityScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`""
+$cloudHealthAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$cloudHealthScript`" -ConfigPath `"$ConfigPath`" -StatusPath `"$StatusPath`" -Notify"
 $taskExecutionLimit = New-TimeSpan -Hours 12
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit $taskExecutionLimit
 $taskUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -100,6 +102,7 @@ if ($schedule.frequency -eq "weekly") {
 
 $reminderTrigger = New-ScheduledTaskTrigger -Daily -At 09:00
 $integrityTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 11:00
+$cloudHealthTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 10:30
 $catchUpLogonTrigger = New-ScheduledTaskTrigger -AtLogOn
 $includeStartupCatchUp = Test-IsAdministrator
 $catchUpTriggers = @($catchUpLogonTrigger)
@@ -149,6 +152,19 @@ if ($reminders.enabled) {
 } else {
   Remove-TaskIfExists "OneBiteBackupReminder"
   $messages.Add("Reminder notification task removed because reminders are disabled.")
+}
+
+$cloudCheck = if ($config.cloudCheck) { $config.cloudCheck } else { [PSCustomObject]@{ enabled = $true } }
+if ($cloudCheck.enabled) {
+  $cloudWarning = Register-TaskWithMessage -TaskName "OneBiteBackupCloudHealth" -Action $cloudHealthAction -Trigger $cloudHealthTrigger -Settings $taskSettings -Principal $taskPrincipal -Required $false
+  if ($cloudWarning) {
+    $messages.Add($cloudWarning)
+  } else {
+    $messages.Add("Weekly OneDrive configuration review task installed or updated for Sunday at 10:30.")
+  }
+} else {
+  Remove-TaskIfExists "OneBiteBackupCloudHealth"
+  $messages.Add("Weekly OneDrive configuration review task removed because cloud checks are disabled.")
 }
 
 Write-Output ($messages -join " ")

@@ -24,6 +24,117 @@ function Get-DataSafeProperty($Value, [string]$Name, $DefaultValue = $null) {
   return $Value.$Name
 }
 
+function Expand-DataSafePath([string]$Value) {
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return ""
+  }
+
+  return [Environment]::ExpandEnvironmentVariables($Value)
+}
+
+function Get-DataSafeComparablePath([string]$Value) {
+  $expanded = Expand-DataSafePath $Value
+  if ([string]::IsNullOrWhiteSpace($expanded)) {
+    return ""
+  }
+
+  try {
+    return [System.IO.Path]::GetFullPath($expanded).TrimEnd('\', '/')
+  } catch {
+    return $expanded.TrimEnd('\', '/')
+  }
+}
+
+function Test-DataSafeSnapshotJobMatchesActiveJob($SnapshotJob, $ActiveJob) {
+  if ($null -eq $SnapshotJob -or $null -eq $ActiveJob) {
+    return $false
+  }
+
+  $snapshotId = "$(Get-DataSafeProperty $SnapshotJob 'id' '')"
+  $activeId = "$(Get-DataSafeProperty $ActiveJob 'id' '')"
+  $snapshotType = "$(Get-DataSafeProperty $SnapshotJob 'type' '')"
+  $activeType = "$(Get-DataSafeProperty $ActiveJob 'type' '')"
+  $snapshotPath = Get-DataSafeComparablePath "$(Get-DataSafeProperty $SnapshotJob 'sourcePath' '')"
+  $activePath = Get-DataSafeComparablePath "$(Get-DataSafeProperty $ActiveJob 'path' '')"
+
+  return (
+    -not [string]::IsNullOrWhiteSpace($snapshotId) -and
+    $snapshotId -eq $activeId -and
+    -not [string]::IsNullOrWhiteSpace($snapshotType) -and
+    $snapshotType -eq $activeType -and
+    -not [string]::IsNullOrWhiteSpace($snapshotPath) -and
+    -not [string]::IsNullOrWhiteSpace($activePath) -and
+    $snapshotPath.Equals($activePath, [System.StringComparison]::OrdinalIgnoreCase)
+  )
+}
+
+function Test-DataSafePathInside([string]$CandidatePath, [string]$RootPath) {
+  $candidate = Get-DataSafeComparablePath $CandidatePath
+  $root = Get-DataSafeComparablePath $RootPath
+  if ([string]::IsNullOrWhiteSpace($candidate) -or [string]::IsNullOrWhiteSpace($root)) {
+    return $false
+  }
+
+  $separator = [System.IO.Path]::DirectorySeparatorChar
+  return (
+    $candidate.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or
+    $candidate.StartsWith("$root$separator", [System.StringComparison]::OrdinalIgnoreCase)
+  )
+}
+
+function Assert-DataSafeAlternateRestoreTarget(
+  [string]$ChosenTarget,
+  [string]$BaseRoot,
+  [string]$SnapshotRoot,
+  [string]$OriginalSourcePath
+) {
+  if ([string]::IsNullOrWhiteSpace($ChosenTarget)) {
+    throw "Choose a restore folder before restoring to another location."
+  }
+
+  $protectedRoots = @(
+    [PSCustomObject]@{ Label = "DataSafe backup repository"; Path = $BaseRoot },
+    [PSCustomObject]@{ Label = "selected snapshot"; Path = $SnapshotRoot },
+    [PSCustomObject]@{ Label = "original source"; Path = $OriginalSourcePath }
+  )
+  foreach ($protectedRoot in $protectedRoots) {
+    if (Test-DataSafePathInside -CandidatePath $ChosenTarget -RootPath $protectedRoot.Path) {
+      throw "DataSafe will not use a restore folder inside the $($protectedRoot.Label). Choose a separate location."
+    }
+  }
+}
+
+function Acquire-DataSafeOperationLock([string]$LockPath) {
+  if (Test-Path -LiteralPath $LockPath) {
+    $existing = Get-Item -LiteralPath $LockPath -ErrorAction SilentlyContinue
+    $ageHours = if ($existing) { ((Get-Date) - $existing.LastWriteTime).TotalHours } else { 0 }
+    if ($ageHours -lt 12) {
+      throw "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
+    }
+
+    Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+  }
+
+  try {
+    $handle = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes("pid=$PID`nstartedAt=$((Get-Date).ToString('o'))`n")
+    $handle.Write($bytes, 0, $bytes.Length)
+    $handle.Flush()
+    $handle.Position = 0
+    return $handle
+  } catch {
+    throw "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
+  }
+}
+
+function Release-DataSafeOperationLock($Handle, [string]$LockPath) {
+  if ($Handle) {
+    $Handle.Dispose()
+  }
+
+  Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+}
+
 function Resolve-DataSafeDestination($Destination) {
   if (
     (Get-DataSafeProperty $Destination "mode" "") -eq "label" -and
@@ -312,6 +423,12 @@ function Write-DataSafeSnapshotMetadata(
       id = "$(Get-DataSafeProperty $_ 'id' '')"
       name = "$(Get-DataSafeProperty $_ 'name' '')"
       type = "$(Get-DataSafeProperty $_ 'type' '')"
+      sourcePath = Expand-DataSafePath "$(Get-DataSafeProperty $_ 'path' '')"
+      sourceKind = "$(Get-DataSafeProperty $_ 'sourceKind' '')"
+      emailApp = "$(Get-DataSafeProperty $_ 'emailApp' '')"
+      processNames = @(
+        Get-DataSafeProperty $_ "processNames" @()
+      )
       relativeDestination = @(
         Get-DataSafeProperty $_ "relativeDestination" @()
       )
@@ -423,6 +540,16 @@ function Get-DataSafeCompletedSnapshots([string]$SnapshotsRoot) {
   return @($snapshots | Sort-Object Timestamp -Descending)
 }
 
+function Get-DataSafeSnapshotJob($Snapshot, [string]$JobId) {
+  $jobs = @(Get-DataSafeProperty $Snapshot.Manifest "jobs" @())
+  $matches = @($jobs | Where-Object { "$(Get-DataSafeProperty $_ 'id' '')" -eq $JobId } | Select-Object -First 1)
+  if ($matches.Count -eq 0) {
+    throw "The selected backup item is not recorded in this snapshot. Choose a different snapshot or backup item."
+  }
+
+  return $matches[0]
+}
+
 function Remove-DataSafeIncompleteSnapshots([string]$SnapshotsRoot) {
   if (-not (Test-Path -LiteralPath $SnapshotsRoot)) {
     return
@@ -448,7 +575,26 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
     throw "The snapshot integrity index has changed since the backup completed."
   }
 
-  $normalizedPrefix = $RelativePrefix.TrimStart('\').TrimEnd('\')
+  $normalizedPrefix = $RelativePrefix.Trim().TrimStart('\', '/').TrimEnd('\', '/')
+  if (
+    [System.IO.Path]::IsPathRooted($normalizedPrefix) -or
+    $normalizedPrefix -match '(^|[\\/])\.\.?(?=([\\/]|$))'
+  ) {
+    throw "The requested backup item path is not safe."
+  }
+
+  $normalizedPrefix = $normalizedPrefix.Replace('/', '\')
+  $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  $metadataPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($metadataName in @(
+    $script:DataSafeManifestFile,
+    $script:DataSafeCompleteFile,
+    $script:DataSafeIntegrityFile,
+    $script:DataSafeVerificationFile
+  )) {
+    [void]$metadataPaths.Add([System.IO.Path]::GetFullPath((Join-Path $SnapshotPath $metadataName)))
+  }
+
   $checked = 0
   $checkedBytes = [int64]0
   foreach ($line in [System.IO.File]::ReadLines($indexPath)) {
@@ -459,9 +605,22 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
     $entry = $line | ConvertFrom-Json
     $relativePath = "$(Get-DataSafeProperty $entry 'path' '')"
     if (
+      [string]::IsNullOrWhiteSpace($relativePath) -or
+      [System.IO.Path]::IsPathRooted($relativePath) -or
+      $relativePath -match '(^|[\\/])\.\.?(?=([\\/]|$))'
+    ) {
+      throw "The snapshot integrity index contains an unsafe file path."
+    }
+
+    $comparisonPath = $relativePath.Replace('/', '\')
+    if (-not $expectedPaths.Add($comparisonPath)) {
+      throw "The snapshot integrity index contains a duplicate file path: $relativePath"
+    }
+
+    if (
       -not [string]::IsNullOrWhiteSpace($normalizedPrefix) -and
-      $relativePath -ne $normalizedPrefix -and
-      -not $relativePath.StartsWith("$normalizedPrefix\", [System.StringComparison]::OrdinalIgnoreCase)
+      $comparisonPath -ne $normalizedPrefix -and
+      -not $comparisonPath.StartsWith("$normalizedPrefix\", [System.StringComparison]::OrdinalIgnoreCase)
     ) {
       continue
     }
@@ -492,6 +651,27 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
 
   if (-not [string]::IsNullOrWhiteSpace($normalizedPrefix) -and $checked -eq 0) {
     throw "No integrity records were found for the selected backup item."
+  }
+
+  foreach ($file in @(Get-ChildItem -LiteralPath $SnapshotPath -File -Recurse -Force -ErrorAction Stop)) {
+    $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
+    if ($metadataPaths.Contains($fullPath)) {
+      continue
+    }
+
+    $relativePath = Get-DataSafeRelativePath $SnapshotPath $fullPath
+    $comparisonPath = $relativePath.Replace('/', '\')
+    if (
+      -not [string]::IsNullOrWhiteSpace($normalizedPrefix) -and
+      $comparisonPath -ne $normalizedPrefix -and
+      -not $comparisonPath.StartsWith("$normalizedPrefix\", [System.StringComparison]::OrdinalIgnoreCase)
+    ) {
+      continue
+    }
+
+    if (-not $expectedPaths.Contains($comparisonPath)) {
+      throw "A file is present in the snapshot but is not listed in its integrity index: $relativePath"
+    }
   }
 
   return [PSCustomObject]@{
