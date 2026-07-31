@@ -355,12 +355,19 @@ function Resolve-KnownFolderPath($Job, [string]$FallbackPath) {
 
   $knownFolder = "$($Job.windowsKnownFolder)"
   try {
-    switch ($knownFolder) {
-      "Desktop" { return [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::DesktopDirectory) }
-      "MyDocuments" { return [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments) }
-      "MyPictures" { return [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyPictures) }
-      default { return $FallbackPath }
+    $resolvedPath = switch ($knownFolder) {
+      "Desktop" { [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::DesktopDirectory) }
+      "MyDocuments" { [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyDocuments) }
+      "MyPictures" { [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::MyPictures) }
+      default { "" }
     }
+
+    # Windows can report an absent Public Desktop as the known desktop folder.
+    if (-not [string]::IsNullOrWhiteSpace($resolvedPath) -and (Test-Path -LiteralPath $resolvedPath)) {
+      return $resolvedPath
+    }
+
+    return $FallbackPath
   } catch {
     return $FallbackPath
   }

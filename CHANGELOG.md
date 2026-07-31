@@ -2,6 +2,11 @@
 
 All notable changes to `DataSafe` should be recorded in this file.
 
+## 1.0.10-beta.63 - 2026-07-30
+
+- Fixed common-folder detection on Windows profiles where the Desktop known-folder lookup incorrectly resolves to a missing `C:\\Users\\Public\\Desktop` path.
+- DataSafe now falls back to the selected user folder when a Windows known-folder path is absent, while keeping an existing Public Desktop folder as optional supplemental backup content.
+
 ## 1.0.10-beta.62 - 2026-07-28
 
 - Reworked the app and Settings interface with a quieter, more professional visual system, consistent typography, aligned controls, clearer labels, and a simplified DataSafe brand mark.

@@ -254,11 +254,13 @@ function normalizeBackupJobs(jobs = []) {
     }
 
     const knownFolderName = knownFolderNameForCommonFolder(commonFolderName);
+    const publicFolderName = job.includePublicFolder || commonFolderName;
+    const includePublicFolder = fs.existsSync(publicFolderPath(publicFolderName));
     return {
       ...job,
       windowsKnownFolder: job.windowsKnownFolder || knownFolderName || undefined,
-      includePublicFolder: job.includePublicFolder || commonFolderName,
-      includePublicDesktop: commonFolderName === "Desktop" ? job.includePublicDesktop !== false : undefined
+      includePublicFolder: includePublicFolder ? publicFolderName : undefined,
+      includePublicDesktop: commonFolderName === "Desktop" && includePublicFolder ? true : undefined
     };
   });
 }
@@ -289,7 +291,9 @@ function knownFolderPath(job = {}, fallbackPath = "") {
   }
 
   try {
-    return app.getPath(electronPathName) || fallbackPath;
+    const resolvedPath = app.getPath(electronPathName);
+    // Some Windows profiles report the optional Public Desktop even when it does not exist.
+    return resolvedPath && fs.existsSync(resolvedPath) ? resolvedPath : fallbackPath;
   } catch (_error) {
     return fallbackPath;
   }
