@@ -250,11 +250,35 @@ test("PowerShell restore integrity rejects an added unindexed file", (context) =
   const result = spawnSync(powerShell, [
     "-NoProfile",
     "-Command",
-    `& { $ErrorActionPreference = 'Stop'; . '${safetyModule}'; Test-DataSafeIntegrityIndex -SnapshotPath '${escapedSnapshotPath}' | Out-Null }`
+    `& { $ErrorActionPreference = 'Stop'; . '${safetyModule}'; function Get-FileHash { throw 'Get-FileHash unavailable' }; Test-DataSafeIntegrityIndex -SnapshotPath '${escapedSnapshotPath}' | Out-Null }`
   ], { encoding: "utf8" });
 
   assert.notEqual(result.status, 0);
   assert.match(`${result.stderr}\n${result.stdout}`, /unexpected-file\.txt/i);
+});
+
+test("PowerShell safety hashes files when Get-FileHash is unavailable", (context) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    context.skip("PowerShell is not installed in this test environment.");
+    return;
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "datasafe-sha256-fallback-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const filePath = path.join(root, "customer-file.txt");
+  fs.writeFileSync(filePath, "verified backup data", "utf8");
+
+  const safetyModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.Safety.ps1"));
+  const result = runPowerShellScript(powerShell, `
+$ErrorActionPreference = 'Stop'
+. '${safetyModule}'
+function Get-FileHash { throw 'Get-FileHash unavailable' }
+$actual = Get-DataSafeSha256 -Path '${powerShellLiteral(filePath)}'
+if ($actual -ne '${sha256(filePath)}') { throw "Unexpected SHA-256 value: $actual" }
+`);
+
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
 });
 
 test("snapshot metadata retains the source identity needed for recovery", (context) => {
@@ -271,6 +295,7 @@ test("snapshot metadata retains the source identity needed for recovery", (conte
   const result = runPowerShellScript(powerShell, `
 $ErrorActionPreference = 'Stop'
 . '${safetyModule}'
+function Get-FileHash { throw 'Get-FileHash unavailable' }
 New-Item -ItemType Directory -Force -Path '${snapshotPath}' | Out-Null
 $config = [PSCustomObject]@{
   installId = 'install-1'

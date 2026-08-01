@@ -239,8 +239,8 @@ function Get-RestorePlan(
     $sameLength = [int64]$sourceFile.Length -eq [int64]$targetFile.Length
     $sameHash = $false
     if ($sameLength) {
-      $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
-      $targetHash = (Get-FileHash -LiteralPath $targetFile.FullName -Algorithm SHA256).Hash
+      $sourceHash = Get-DataSafeSha256 -Path $sourceFile.FullName
+      $targetHash = Get-DataSafeSha256 -Path $targetFile.FullName
       $sameHash = $sourceHash -eq $targetHash
     }
 
@@ -306,8 +306,8 @@ function Assert-CopyMatches([string]$SourcePath, [string]$DestinationPath, [bool
       throw "The safety copy has a size mismatch for $relativePath."
     }
 
-    $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
-    $destinationHash = (Get-FileHash -LiteralPath $destinationFile.FullName -Algorithm SHA256).Hash
+    $sourceHash = Get-DataSafeSha256 -Path $sourceFile.FullName
+    $destinationHash = Get-DataSafeSha256 -Path $destinationFile.FullName
     if ($sourceHash -ne $destinationHash) {
       throw "The safety copy failed checksum verification for $relativePath."
     }

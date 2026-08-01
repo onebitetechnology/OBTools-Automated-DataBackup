@@ -16,6 +16,21 @@ function Write-DataSafeJson([string]$Path, $Value) {
   [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
+function Get-DataSafeSha256([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw "DataSafe could not read a file needed for integrity verification: $Path"
+  }
+
+  $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  $algorithm = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace("-", "")
+  } finally {
+    $algorithm.Dispose()
+    $stream.Dispose()
+  }
+}
+
 function Get-DataSafeProperty($Value, [string]$Name, $DefaultValue = $null) {
   if ($null -eq $Value -or $null -eq $Value.PSObject.Properties[$Name]) {
     return $DefaultValue
@@ -386,12 +401,12 @@ function New-DataSafeIntegrityIndex([string]$SnapshotPath) {
 
     foreach ($file in $files) {
       $relativePath = Get-DataSafeRelativePath $SnapshotPath $file.FullName
-      $hash = Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256
+      $hash = Get-DataSafeSha256 -Path $file.FullName
       $record = [ordered]@{
         path = $relativePath
         length = [int64]$file.Length
         lastWriteUtc = $file.LastWriteTimeUtc.ToString("o")
-        sha256 = $hash.Hash.ToUpperInvariant()
+        sha256 = $hash
       }
       $writer.WriteLine(($record | ConvertTo-Json -Compress))
       $fileCount += 1
@@ -401,7 +416,7 @@ function New-DataSafeIntegrityIndex([string]$SnapshotPath) {
     $writer.Dispose()
   }
 
-  $indexHash = (Get-FileHash -LiteralPath $indexPath -Algorithm SHA256).Hash.ToUpperInvariant()
+  $indexHash = Get-DataSafeSha256 -Path $indexPath
   return [PSCustomObject]@{
     path = $indexPath
     sha256 = $indexHash
@@ -453,7 +468,7 @@ function Write-DataSafeSnapshotMetadata(
   }
   $manifestPath = Join-Path $SnapshotPath $script:DataSafeManifestFile
   Write-DataSafeJson $manifestPath $manifest
-  $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
+  $manifestHash = Get-DataSafeSha256 -Path $manifestPath
   $complete = [ordered]@{
     formatVersion = 1
     snapshotName = $SnapshotName
@@ -495,8 +510,8 @@ function Get-DataSafeCompletedSnapshot([string]$SnapshotPath) {
   try {
     $manifest = Read-DataSafeJson $manifestPath
     $complete = Read-DataSafeJson $completePath
-    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToUpperInvariant()
-    $integrityHash = (Get-FileHash -LiteralPath $integrityPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $manifestHash = Get-DataSafeSha256 -Path $manifestPath
+    $integrityHash = Get-DataSafeSha256 -Path $integrityPath
     if (
       [int](Get-DataSafeProperty $manifest "formatVersion" 0) -ne 1 -or
       [int](Get-DataSafeProperty $complete "formatVersion" 0) -ne 1 -or
@@ -570,7 +585,7 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
 
   $indexPath = Join-Path $SnapshotPath $script:DataSafeIntegrityFile
   $expectedIndexHash = ("$(Get-DataSafeProperty $snapshot.Complete 'integrityIndexSha256' '')").ToUpperInvariant()
-  $actualIndexHash = (Get-FileHash -LiteralPath $indexPath -Algorithm SHA256).Hash.ToUpperInvariant()
+  $actualIndexHash = Get-DataSafeSha256 -Path $indexPath
   if ($actualIndexHash -ne $expectedIndexHash) {
     throw "The snapshot integrity index has changed since the backup completed."
   }
@@ -640,7 +655,7 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
       throw "A backed up file has changed size: $relativePath"
     }
 
-    $actualHash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToUpperInvariant()
+    $actualHash = Get-DataSafeSha256 -Path $fullPath
     if ($actualHash -ne ("$(Get-DataSafeProperty $entry 'sha256' '')").ToUpperInvariant()) {
       throw "A backed up file failed its checksum: $relativePath"
     }
