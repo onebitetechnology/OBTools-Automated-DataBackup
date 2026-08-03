@@ -190,11 +190,12 @@ test("only complete snapshots with matching metadata are listed", (context) => {
   createCompletedSnapshot(root, "2026-07-28_10-00-00", "2026-07-28T16:00:00.000Z");
   fs.mkdirSync(path.join(root, "snapshots", "2026-07-28_11-00-00"), { recursive: true });
   fs.mkdirSync(path.join(root, "snapshots", ".incomplete-2026-07-28_12-00-00.incomplete"), { recursive: true });
+  fs.mkdirSync(path.join(root, "snapshots", ".stage"), { recursive: true });
 
   const result = inspectSnapshotsAtBaseRoot(root);
   assert.deepEqual(result.snapshots.map((snapshot) => snapshot.name), ["2026-07-28_10-00-00"]);
   assert.equal(result.unverifiedCount, 1);
-  assert.equal(result.incompleteCount, 1);
+  assert.equal(result.incompleteCount, 2);
 });
 
 test("tampering with a completed manifest invalidates the snapshot", (context) => {
@@ -276,6 +277,66 @@ $ErrorActionPreference = 'Stop'
 function Get-FileHash { throw 'Get-FileHash unavailable' }
 $actual = Get-DataSafeSha256 -Path '${powerShellLiteral(filePath)}'
 if ($actual -ne '${sha256(filePath)}') { throw "Unexpected SHA-256 value: $actual" }
+`);
+
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+});
+
+test("short staging paths keep the reported Rockstar cache path below Windows' legacy limit", (context) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    context.skip("PowerShell is not installed in this test environment.");
+    return;
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "datasafe-staging-path-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const safetyModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.Safety.ps1"));
+  const snapshotsRoot = powerShellLiteral(path.join(root, "snapshots"));
+  const result = runPowerShellScript(powerShell, `
+$ErrorActionPreference = 'Stop'
+. '${safetyModule}'
+$snapshotsRoot = '${snapshotsRoot}'
+New-Item -ItemType Directory -Force -Path $snapshotsRoot | Out-Null
+$stagingPath = Get-DataSafeStagingSnapshotPath -SnapshotsRoot $snapshotsRoot
+if ((Split-Path -Leaf $stagingPath) -ne '.stage') { throw "Unexpected staging folder: $stagingPath" }
+New-Item -ItemType Directory -Force -Path $stagingPath | Out-Null
+Remove-DataSafeIncompleteSnapshots -SnapshotsRoot $snapshotsRoot
+if (Test-Path -LiteralPath $stagingPath) { throw 'short staging folder was not cleaned up' }
+$rockstarSuffix = 'Users\\baker\\Documents\\Rockstar Games\\Social Club\\Launcher\\Renderer\\Service Worker\\CacheStorage\\7c129e28a53a20755871f994f1997209760a9724\\94089f3e-f2fd-4ba8-a2f1-6ce9be4867d9'
+$legacyPath = 'E:\\DataSafe Backup\\snapshots\\.incomplete-2026-07-30_21-49-14-9ac611c5840448a2b641675ac17d3e45.incomplete\\' + $rockstarSuffix
+$shortPath = 'E:\\DataSafe Backup\\snapshots\\.stage\\' + $rockstarSuffix
+if ($legacyPath.Length -le 260) { throw "incident path was not over the legacy limit: $($legacyPath.Length)" }
+if ($shortPath.Length -ge 260) { throw "short staging path still exceeds the legacy limit: $($shortPath.Length)" }
+`);
+
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+});
+
+test("incomplete staging cleanup warns when Windows cannot remove the folder", (context) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    context.skip("PowerShell is not installed in this test environment.");
+    return;
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "datasafe-staging-cleanup-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const safetyModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.Safety.ps1"));
+  const snapshotsRoot = powerShellLiteral(path.join(root, "snapshots"));
+  const result = runPowerShellScript(powerShell, `
+$ErrorActionPreference = 'Stop'
+. '${safetyModule}'
+$snapshotsRoot = '${snapshotsRoot}'
+$stagingPath = Get-DataSafeStagingSnapshotPath -SnapshotsRoot $snapshotsRoot
+New-Item -ItemType Directory -Force -Path $stagingPath | Out-Null
+function Remove-Item {
+  param([Parameter(ValueFromRemainingArguments = $true)]$Remaining)
+  throw 'simulated locked staging folder'
+}
+$warnings = @(& { Remove-DataSafeIncompleteSnapshots -SnapshotsRoot $snapshotsRoot } 3>&1)
+if ($warnings.Count -eq 0) { throw 'staging cleanup did not report the deletion failure' }
+if ("$warnings" -notmatch 'could not remove incomplete backup folder') { throw "unexpected cleanup warning: $warnings" }
 `);
 
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);

@@ -565,15 +565,29 @@ function Get-DataSafeSnapshotJob($Snapshot, [string]$JobId) {
   return $matches[0]
 }
 
+function Get-DataSafeStagingSnapshotPath([string]$SnapshotsRoot) {
+  if ([string]::IsNullOrWhiteSpace($SnapshotsRoot)) {
+    throw "DataSafe could not create a staging location because the snapshots folder is missing."
+  }
+
+  # The operation lock allows one in-progress snapshot, so keep this path short for deep source folders.
+  return Join-Path $SnapshotsRoot ".stage"
+}
+
 function Remove-DataSafeIncompleteSnapshots([string]$SnapshotsRoot) {
   if (-not (Test-Path -LiteralPath $SnapshotsRoot)) {
     return
   }
 
   Get-ChildItem -LiteralPath $SnapshotsRoot -Directory -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '\.incomplete$' -or $_.Name -match '^\.incomplete-' } |
+    Where-Object { $_.Name -eq ".stage" -or $_.Name -match '\.incomplete$' -or $_.Name -match '^\.incomplete-' } |
     ForEach-Object {
-      Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+      $incompleteSnapshot = $_
+      try {
+        Remove-Item -LiteralPath $incompleteSnapshot.FullName -Recurse -Force -ErrorAction Stop
+      } catch {
+        Write-Warning "DataSafe could not remove incomplete backup folder '$($incompleteSnapshot.FullName)': $($_.Exception.Message)"
+      }
     }
 }
 

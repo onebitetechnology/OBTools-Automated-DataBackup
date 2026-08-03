@@ -626,7 +626,7 @@ try {
   $snapshotsRoot = Join-Path $baseRoot "snapshots"
   $timestamp = Get-Date -Format "yyyy-MM-dd_HH-mm-ss"
   $snapshotPath = Join-Path $snapshotsRoot $timestamp
-  $stagingSnapshotPath = Join-Path $snapshotsRoot ".incomplete-$timestamp-$([guid]::NewGuid().ToString('N')).incomplete"
+  $stagingSnapshotPath = Get-DataSafeStagingSnapshotPath $snapshotsRoot
   $retentionPolicy = Get-RetentionPolicy $config
   $enabledJobs = @($config.jobs | Where-Object { $_.enabled })
   $totalSteps = [Math]::Max($enabledJobs.Count + 4, 4)
@@ -727,7 +727,11 @@ try {
   exit 1
 } finally {
   if ($stagingSnapshotPath -and (Test-Path -LiteralPath $stagingSnapshotPath)) {
-    Remove-Item -LiteralPath $stagingSnapshotPath -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+      Remove-Item -LiteralPath $stagingSnapshotPath -Recurse -Force -ErrorAction Stop
+    } catch {
+      Write-Warning "DataSafe could not remove incomplete backup folder '$stagingSnapshotPath': $($_.Exception.Message)"
+    }
   }
   if ($lockHandle) {
     Release-DataSafeOperationLock $lockHandle $lockPath
