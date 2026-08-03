@@ -10,6 +10,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$taskHelpersPath = Join-Path $ScriptRoot "DataSafe.ScheduledTasks.ps1"
+. $taskHelpersPath
+
 function Read-Json([string]$Path) {
   Get-Content -Raw -Path $Path | ConvertFrom-Json
 }
@@ -103,7 +106,7 @@ if ($schedule.frequency -eq "weekly") {
 $reminderTrigger = New-ScheduledTaskTrigger -Daily -At 09:00
 $integrityTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 11:00
 $cloudHealthTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 10:30
-$catchUpLogonTrigger = New-ScheduledTaskTrigger -AtLogOn
+$catchUpLogonTrigger = New-DataSafeCatchUpLogonTrigger -TaskUser $taskUser
 $includeStartupCatchUp = Test-IsAdministrator
 $catchUpTriggers = @($catchUpLogonTrigger)
 if ($includeStartupCatchUp) {

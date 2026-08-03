@@ -402,6 +402,29 @@ if (Test-Path -LiteralPath $lockPath) { throw 'lock file remained after release'
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
 });
 
+test("catch-up sign-in trigger is scoped to the current DataSafe user", (context) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    context.skip("PowerShell is not installed in this test environment.");
+    return;
+  }
+
+  const taskModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.ScheduledTasks.ps1"));
+  const result = runPowerShellScript(powerShell, `
+$ErrorActionPreference = 'Stop'
+function New-ScheduledTaskTrigger {
+  param([switch]$AtLogOn, [string]$User)
+  return [PSCustomObject]@{ AtLogOn = $AtLogOn.IsPresent; User = $User }
+}
+. '${taskModule}'
+$trigger = New-DataSafeCatchUpLogonTrigger -TaskUser 'CONTOSO\\Customer'
+if (-not $trigger.AtLogOn) { throw 'catch-up trigger is not a sign-in trigger' }
+if ($trigger.User -ne 'CONTOSO\\Customer') { throw "catch-up trigger was not scoped to the current user: $($trigger.User)" }
+`);
+
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+});
+
 test("catch-up skips a recent completed backup that only has a retention warning", (context) => {
   const powerShell = findPowerShell();
   if (!powerShell) {
