@@ -313,6 +313,30 @@ if ($shortPath.Length -ge 260) { throw "short staging path still exceeds the leg
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
 });
 
+test("staging chooses another short workspace when a previous cleanup could not remove one", (context) => {
+  const powerShell = findPowerShell();
+  if (!powerShell) {
+    context.skip("PowerShell is not installed in this test environment.");
+    return;
+  }
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "datasafe-staging-collision-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const safetyModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.Safety.ps1"));
+  const snapshotsRoot = powerShellLiteral(path.join(root, "snapshots"));
+  const result = runPowerShellScript(powerShell, `
+$ErrorActionPreference = 'Stop'
+. '${safetyModule}'
+$snapshotsRoot = '${snapshotsRoot}'
+New-Item -ItemType Directory -Force -Path (Join-Path $snapshotsRoot '.stage') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $snapshotsRoot '.stage-1') | Out-Null
+$stagingPath = Get-DataSafeStagingSnapshotPath -SnapshotsRoot $snapshotsRoot
+if ((Split-Path -Leaf $stagingPath) -ne '.stage-2') { throw "Expected next short staging folder, got $stagingPath" }
+`);
+
+  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+});
+
 test("incomplete staging cleanup warns when Windows cannot remove the folder", (context) => {
   const powerShell = findPowerShell();
   if (!powerShell) {

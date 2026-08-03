@@ -204,7 +204,7 @@ function inspectSnapshotsAtBaseRoot(baseRoot) {
         continue;
       }
 
-      if (entry.name === ".stage" || /\.incomplete$/i.test(entry.name) || /^\.incomplete-/i.test(entry.name)) {
+      if (/^\.stage(?:-\d+)?$/i.test(entry.name) || /\.incomplete$/i.test(entry.name) || /^\.incomplete-/i.test(entry.name)) {
         incompleteCount += 1;
         continue;
       }

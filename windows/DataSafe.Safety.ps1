@@ -571,7 +571,15 @@ function Get-DataSafeStagingSnapshotPath([string]$SnapshotsRoot) {
   }
 
   # The operation lock allows one in-progress snapshot, so keep this path short for deep source folders.
-  return Join-Path $SnapshotsRoot ".stage"
+  for ($index = 0; $index -lt 1000; $index++) {
+    $folderName = if ($index -eq 0) { ".stage" } else { ".stage-$index" }
+    $candidate = Join-Path $SnapshotsRoot $folderName
+    if (-not (Test-Path -LiteralPath $candidate)) {
+      return $candidate
+    }
+  }
+
+  throw "DataSafe could not create a temporary backup workspace because earlier incomplete workspaces are still present."
 }
 
 function Remove-DataSafeIncompleteSnapshots([string]$SnapshotsRoot) {
@@ -580,7 +588,7 @@ function Remove-DataSafeIncompleteSnapshots([string]$SnapshotsRoot) {
   }
 
   Get-ChildItem -LiteralPath $SnapshotsRoot -Directory -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq ".stage" -or $_.Name -match '\.incomplete$' -or $_.Name -match '^\.incomplete-' } |
+    Where-Object { $_.Name -match '^\.stage(?:-\d+)?$' -or $_.Name -match '\.incomplete$' -or $_.Name -match '^\.incomplete-' } |
     ForEach-Object {
       $incompleteSnapshot = $_
       try {
