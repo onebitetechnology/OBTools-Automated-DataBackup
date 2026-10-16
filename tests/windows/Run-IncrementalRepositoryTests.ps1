@@ -201,6 +201,7 @@ if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
       $actual = Get-DataSafeDestinationCapabilities $driveRoot
       $drive = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($driveRoot))
       Assert-True ($actual.FileSystem -eq $drive.DriveFormat) 'Drive filesystem detection disagrees.'
+      Assert-True ($actual.TotalBytes -is [long] -and $actual.TotalBytes -eq $drive.TotalSize) 'Drive total capacity missing or incorrect.'
     }
     Test-Case 'atomic JSON write replaces whole documents and create-only preserves winner' {
       $path = Join-Path $tempRoot 'atomic.json'

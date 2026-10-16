@@ -133,7 +133,9 @@ function Get-DataSafeDestinationCapabilities([string]$DriveRoot) {
   $root = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath((ConvertFrom-DataSafeExtendedPath $DriveRoot)))
   $drive = New-Object System.IO.DriveInfo($root)
   if (-not $drive.IsReady) { throw 'DataSafe destination drive is unavailable.' }
-  return Get-DataSafeFilesystemCapabilities $drive.DriveFormat
+  $capabilities = Get-DataSafeFilesystemCapabilities $drive.DriveFormat
+  $capabilities | Add-Member -NotePropertyName TotalBytes -NotePropertyValue ([long]$drive.TotalSize)
+  return $capabilities
 }
 
 function ConvertTo-DataSafeComputerSegment([string]$ComputerName) {
