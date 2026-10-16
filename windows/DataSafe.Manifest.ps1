@@ -8,8 +8,11 @@ Set-StrictMode -Version Latest
 #   sourceErrors: [{sourceId,path,message}] }
 # Paths in metadata use '/', times use UTC round-trip strings, attributes use
 # FileAttributes integers. Directories have length 0 / sha256 null. Entries do
-# not include the source root itself. Jobs are already-selected/resolved engine
-# jobs (id/path/name and optional destination fields), not consumer config.
+# not include a directory source root itself. A selected file uses its basename
+# as relativePath, matching Copy-BackupItem's destination folder plus basename.
+# Jobs are already-selected/resolved engine jobs (id/path/name and optional
+# destination fields), not consumer config. source.path is always the actual
+# selection, not a selected file's parent.
 
 function ConvertTo-DataSafeManifestRelativePath($Path) {
   if ($Path -isnot [string] -or [string]::IsNullOrWhiteSpace($Path)) { throw [ArgumentException]'DataSafe manifest requires a safe relative path.' }
@@ -47,11 +50,24 @@ function Get-DataSafeManifestOrderedKeys($Dictionary) {
   return $keys
 }
 
+function Get-DataSafeManifestScalar($Object, [string]$Name, [string]$Kind = 'string', [switch]$AllowNull) {
+  if ($Object -isnot [PSCustomObject] -or $null -eq $Object.PSObject.Properties[$Name]) { throw "DataSafe manifest schema requires an object with field: $Name" }
+  # Inspect the raw property before returning anything onto the pipeline. The
+  # general property getter can collapse [value] into value and [] into null.
+  $value = $Object.PSObject.Properties[$Name].Value
+  if ($null -eq $value -and $AllowNull) { return $null }
+  if (($Kind -eq 'string' -and $value -isnot [string]) -or
+      ($Kind -eq 'integer' -and $value -isnot [int] -and $value -isnot [long])) {
+    throw "DataSafe manifest schema requires a scalar $Kind field: $Name"
+  }
+  return $value
+}
+
 function ConvertTo-DataSafeValidatedManifest($Manifest) {
-  if ($null -eq $Manifest -or $Manifest -isnot [PSCustomObject] -or (Get-DataSafeProperty $Manifest 'schema') -cne 'datasafe.manifest') { throw 'DataSafe manifest schema is invalid.' }
-  $version = Get-DataSafeProperty $Manifest 'formatVersion'
-  if (($version -isnot [int] -and $version -isnot [long]) -or $version -ne 2) { throw 'DataSafe manifest format version is unsupported.' }
-  $created = Get-DataSafeProperty $Manifest 'createdUtc'
+  if ($null -eq $Manifest -or $Manifest -isnot [PSCustomObject] -or (Get-DataSafeManifestScalar $Manifest 'schema') -cne 'datasafe.manifest') { throw 'DataSafe manifest schema is invalid.' }
+  $version = Get-DataSafeManifestScalar $Manifest 'formatVersion' 'integer'
+  if ($version -ne 2) { throw 'DataSafe manifest format version is unsupported.' }
+  $created = Get-DataSafeManifestScalar $Manifest 'createdUtc'
   Assert-DataSafeManifestUtc $created
   foreach ($name in @('sources', 'entries', 'sourceErrors')) {
     # The general property helper emits onto the pipeline and unwraps singleton
@@ -60,13 +76,18 @@ function ConvertTo-DataSafeValidatedManifest($Manifest) {
   }
   $sources = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   $destinations = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  $physicalSources = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
   foreach ($source in $Manifest.sources) {
-    $id = Get-DataSafeProperty $source 'sourceId'
+    $id = Get-DataSafeManifestScalar $source 'sourceId'
     if ($id -isnot [string] -or [string]::IsNullOrWhiteSpace($id) -or $id.Contains([string][char]0)) { throw 'DataSafe manifest source identity is invalid.' }
     if ($sources.ContainsKey($id)) { throw 'DataSafe manifest contains duplicate source identities.' }
-    $path = Get-DataSafeProperty $source 'path'
+    $path = Get-DataSafeManifestScalar $source 'path'
     Assert-DataSafeManifestSourcePath $path
-    $destination = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeProperty $source 'relativeDestination')
+    # Physical paths are a collision guard only; sourceId remains identity.
+    # Normalize Windows spelling without touching the selected filesystem.
+    $physicalPath = [IO.Path]::GetFullPath($path.Replace('/', '\')).TrimEnd('\')
+    if (-not $physicalSources.Add($physicalPath)) { throw 'DataSafe manifest contains duplicate physical source mappings.' }
+    $destination = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeManifestScalar $source 'relativeDestination')
     if (-not $destinations.Add($destination)) { throw 'DataSafe manifest contains a destination collision.' }
     $sources.Add($id, [PSCustomObject][ordered]@{ sourceId = $id; path = $path; relativeDestination = $destination })
   }
@@ -82,19 +103,16 @@ function ConvertTo-DataSafeValidatedManifest($Manifest) {
   $entries = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   $locations = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
   foreach ($entry in $Manifest.entries) {
-    foreach ($name in @('sourceId','relativePath','entryType','length','modifiedUtc','attributes','sha256','versionLocation')) {
-      if ($null -eq $entry -or $null -eq $entry.PSObject.Properties[$name]) { throw "DataSafe manifest entry schema is missing field: $name" }
-    }
-    $id = Get-DataSafeProperty $entry 'sourceId'
+    $id = Get-DataSafeManifestScalar $entry 'sourceId'
     if ($id -isnot [string] -or -not $sources.ContainsKey($id)) { throw 'DataSafe manifest entry has an unknown source identity.' }
-    $relative = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeProperty $entry 'relativePath')
+    $relative = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeManifestScalar $entry 'relativePath')
     $key = $id + [char]0 + $relative
     if ($entries.ContainsKey($key)) { throw "DataSafe manifest contains a case-insensitive path collision: $relative" }
-    $type = Get-DataSafeProperty $entry 'entryType'
-    $length = Get-DataSafeProperty $entry 'length'
-    $attributes = Get-DataSafeProperty $entry 'attributes'
-    $hash = Get-DataSafeProperty $entry 'sha256'
-    $modified = Get-DataSafeProperty $entry 'modifiedUtc'
+    $type = Get-DataSafeManifestScalar $entry 'entryType'
+    $length = Get-DataSafeManifestScalar $entry 'length' 'integer'
+    $attributes = Get-DataSafeManifestScalar $entry 'attributes' 'integer'
+    $hash = Get-DataSafeManifestScalar $entry 'sha256' -AllowNull
+    $modified = Get-DataSafeManifestScalar $entry 'modifiedUtc'
     Assert-DataSafeManifestUtc $modified
     if ($type -cnotin @('file','directory') -or ($length -isnot [int] -and $length -isnot [long]) -or $length -lt 0 -or
         ($attributes -isnot [int] -and $attributes -isnot [long]) -or $attributes -lt 0 -or $attributes -gt [int]::MaxValue -or ($attributes -band 1024) -ne 0) {
@@ -104,7 +122,7 @@ function ConvertTo-DataSafeValidatedManifest($Manifest) {
       if ($hash -isnot [string] -or $hash -notmatch '^[a-fA-F0-9]{64}$' -or ($attributes -band 16) -ne 0) { throw 'DataSafe manifest file hash or attributes are invalid.' }
       $hash = $hash.ToUpperInvariant()
     } elseif ($length -ne 0 -or $null -ne $hash -or ($attributes -band 16) -eq 0) { throw 'DataSafe manifest directory schema is invalid.' }
-    $location = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeProperty $entry 'versionLocation')
+    $location = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeManifestScalar $entry 'versionLocation')
     if (-not $location.StartsWith('Latest Backup/', [StringComparison]::Ordinal) -and -not $location.StartsWith('Earlier Versions/', [StringComparison]::Ordinal)) { throw 'DataSafe manifest version location is outside the ordinary-file roots.' }
     $expectedLatest = 'Latest Backup/' + $sources[$id].relativeDestination + '/' + $relative
     if ($location.StartsWith('Latest Backup/', [StringComparison]::Ordinal) -and -not $location.Equals($expectedLatest, [StringComparison]::OrdinalIgnoreCase)) { throw 'DataSafe manifest latest version path does not match its source-relative destination.' }
@@ -124,9 +142,9 @@ function ConvertTo-DataSafeValidatedManifest($Manifest) {
   }
   $errors = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   foreach ($sourceError in $Manifest.sourceErrors) {
-    $id = Get-DataSafeProperty $sourceError 'sourceId'
-    $path = Get-DataSafeProperty $sourceError 'path'
-    $message = Get-DataSafeProperty $sourceError 'message'
+    $id = Get-DataSafeManifestScalar $sourceError 'sourceId'
+    $path = Get-DataSafeManifestScalar $sourceError 'path'
+    $message = Get-DataSafeManifestScalar $sourceError 'message'
     if ($id -isnot [string] -or -not $sources.ContainsKey($id) -or $errors.ContainsKey($id) -or $path -cne $sources[$id].path -or
         $message -isnot [string] -or [string]::IsNullOrWhiteSpace($message)) { throw 'DataSafe manifest source-error schema is invalid.' }
     $errors.Add($id, [PSCustomObject][ordered]@{ sourceId = $id; path = $path; message = $message })
@@ -177,9 +195,9 @@ function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, 
   $manifest = [PSCustomObject][ordered]@{
     schema = 'datasafe.manifest'; formatVersion = 2; createdUtc = [datetime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
     sources = @(foreach ($job in $Jobs) {
-      $path = Get-DataSafeProperty $job 'path'
+      $path = Get-DataSafeManifestScalar $job 'path'
       Assert-DataSafeManifestSourcePath $path
-      [PSCustomObject][ordered]@{ sourceId = Get-DataSafeProperty $job 'id'; path = [IO.Path]::GetFullPath($path); relativeDestination = Get-DataSafeManifestDestination $job }
+      [PSCustomObject][ordered]@{ sourceId = Get-DataSafeManifestScalar $job 'id'; path = [IO.Path]::GetFullPath($path); relativeDestination = Get-DataSafeManifestDestination $job }
     })
     entries = @(); sourceErrors = @()
   }
@@ -190,14 +208,17 @@ function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, 
     $sourceEntries = New-Object 'System.Collections.Generic.List[object]'
     try {
       Assert-DataSafeNoReparsePath $source.path
-      if (-not (Test-DataSafeDirectory $source.path)) { throw 'Selected source directory is unavailable.' }
+      $sourceAttributes = [IO.File]::GetAttributes((ConvertTo-DataSafeExtendedPath $source.path))
+      $selectedFile = ($sourceAttributes -band [IO.FileAttributes]::Directory) -eq 0
       $pending = New-Object 'System.Collections.Generic.Stack[string]'
       $pending.Push($source.path)
-      $sourcePrefix = $source.path.TrimEnd('\', '/') + '\'
+      $relativeRoot = if ($selectedFile) { [IO.Path]::GetDirectoryName($source.path) } else { $source.path }
+      $sourcePrefix = $relativeRoot.TrimEnd('\', '/') + '\'
       while ($pending.Count -gt 0) {
         $directory = $pending.Pop()
         Assert-DataSafeNoReparsePath $directory
-        [string[]]$children = [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $directory))
+        [string[]]$children = @(if ($selectedFile) { ConvertTo-DataSafeExtendedPath $directory }
+          else { [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $directory)) })
         [Array]::Sort($children, [StringComparer]::OrdinalIgnoreCase)
         foreach ($extended in $children) {
           $attributes = [IO.File]::GetAttributes($extended)
@@ -209,6 +230,7 @@ function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, 
           $relative = ConvertTo-DataSafeManifestRelativePath $path.Substring($sourcePrefix.Length)
           Assert-DataSafeNoReparsePath $path
           $isDirectory = ($attributes -band [IO.FileAttributes]::Directory) -ne 0
+          if ($selectedFile -and $isDirectory) { throw 'Selected source file changed into a directory during scanning.' }
           $length = [long]0; $hash = $null
           $modified = [IO.File]::GetLastWriteTimeUtc($extended).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
           if ($isDirectory) { $pending.Push($path) }

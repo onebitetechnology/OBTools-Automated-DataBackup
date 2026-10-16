@@ -33,6 +33,65 @@ function New-FixtureManifest {
   }
 }
 
+# Malformed scalar fixtures must preserve their exact raw property value; no
+# pipeline-returning property getter is involved in constructing mutations.
+$scalarFields = @(
+  @{ Area = 'manifest'; Fields = @('schema','formatVersion','createdUtc') },
+  @{ Area = 'source'; Fields = @('sourceId','path','relativeDestination') },
+  @{ Area = 'entry'; Fields = @('sourceId','relativePath','entryType','length','modifiedUtc','attributes','sha256','versionLocation') },
+  @{ Area = 'error'; Fields = @('sourceId','path','message') }
+)
+function New-ScalarMutationFixture([string]$Area, [string]$Field, [string]$Shape) {
+  $manifest = New-FixtureManifest
+  $target = $manifest
+  switch ($Area) {
+    'source' { $target = $manifest.sources[0] }
+    'entry' { $target = $manifest.entries[0] }
+    'error' {
+      $manifest.entries = @()
+      $manifest.sourceErrors = @([PSCustomObject]@{ sourceId = 'documents'; path = 'C:\Source'; message = 'Unavailable' })
+      $target = $manifest.sourceErrors[0]
+    }
+  }
+  $original = $target.PSObject.Properties[$Field].Value
+  switch ($Shape) {
+    'singleton' { $target.$Field = @($original) }
+    'nested' { $target.$Field = ,@($original) }
+    'empty' { $target.$Field = @() }
+    'null' { $target.$Field = $null }
+    'object' { $target.$Field = [PSCustomObject]@{ value = $original } }
+  }
+  return $manifest
+}
+
+foreach ($row in $scalarFields) {
+  foreach ($field in $row.Fields) {
+    foreach ($shape in @('singleton','nested','empty','null','object')) {
+      Test-Case "public comparison and prior scan reject $($row.Area).$field scalar as $shape" {
+        $malformed = New-ScalarMutationFixture $row.Area $field $shape
+        Assert-Throws { Compare-DataSafeManifests $null $malformed } 'manifest|schema|path|source|hash|time|attribute'
+        Assert-Throws { Compare-DataSafeManifests $malformed (New-FixtureManifest) } 'manifest|schema|path|source|hash|time|attribute'
+        Assert-Throws { New-DataSafeSourceManifest -Jobs @() -PreviousManifest $malformed } 'manifest|schema|path|source|hash|time|attribute'
+      }
+    }
+  }
+}
+foreach ($shape in @('singleton','nested','empty','object')) {
+  Test-Case "directory hash rejects $shape instead of collapsing it to null" {
+    $manifest = New-ScalarMutationFixture 'entry' 'sha256' $shape
+    $manifest.entries[0].entryType = 'directory'; $manifest.entries[0].length = [long]0; $manifest.entries[0].attributes = [long]16
+    if ($shape -eq 'singleton') { $manifest.entries[0].sha256 = @($null) }
+    if ($shape -eq 'nested') { $manifest.entries[0].sha256 = ,@($null) }
+    Assert-Throws { Compare-DataSafeManifests $null $manifest } 'manifest|schema|hash'
+  }
+}
+Test-Case 'directory hash accepts only explicit scalar null' {
+  $manifest = New-FixtureManifest
+  $manifest.entries[0].entryType = 'directory'; $manifest.entries[0].length = [long]0
+  $manifest.entries[0].attributes = [long]16; $manifest.entries[0].sha256 = $null
+  Assert-True ((Compare-DataSafeManifests $null $manifest).Added.Count -eq 1) 'Explicit directory hash null was rejected.'
+}
+
 Test-Case 'initial comparison exposes file counts and byte totals' {
   $result = Compare-DataSafeManifests -Previous $null -Current (New-FixtureManifest)
   Assert-True ($result.Added.Count -eq 1 -and $result.Deleted.Count -eq 0) 'Initial comparison was not an addition.'
@@ -135,6 +194,158 @@ if ([IO.Path]::DirectorySeparatorChar -eq '\') {
     return Read-DataSafeManifest $path
   }
   try {
+    $validationRepositoryRoot = New-TestSource
+    $validationRepository = Initialize-DataSafeRepository $validationRepositoryRoot 'Validation PC' '10112233-4455-4677-8899-aabbccddeeff'
+    foreach ($row in $scalarFields) {
+      foreach ($field in $row.Fields) {
+        foreach ($shape in @('singleton','nested','empty','null','object')) {
+          Test-Case "reader and writer reject $($row.Area).$field scalar as $shape" {
+            $malformed = New-ScalarMutationFixture $row.Area $field $shape
+            Assert-Throws { Read-TestJson (ConvertTo-Json -InputObject $malformed -Depth 32) } 'manifest|JSON|schema'
+            Assert-Throws { Write-DataSafeManifest $validationRepository $malformed ([guid]::NewGuid().ToString('D')) } 'manifest|schema|path|source|hash|time|attribute'
+          }
+        }
+      }
+    }
+    foreach ($area in @('sources','entries','sourceErrors')) {
+      foreach ($shape in @('null','string','nested','empty-object')) {
+        Test-Case "manifest $area items must be objects, not $shape" {
+          $manifest = New-FixtureManifest
+          if ($area -eq 'sourceErrors') {
+            $manifest.entries = @()
+            $manifest.sourceErrors = @([PSCustomObject]@{ sourceId = 'documents'; path = 'C:\Source'; message = 'Unavailable' })
+          }
+          $original = $manifest.$area[0]
+          switch ($shape) {
+            'null' { $manifest.$area = @($null) }
+            'string' { $manifest.$area = @('not an object') }
+            'nested' { $manifest.$area = ,@($original) }
+            'empty-object' { $manifest.$area = @([PSCustomObject]@{}) }
+          }
+          Assert-Throws { Compare-DataSafeManifests $null $manifest } 'manifest|schema|source'
+          Assert-Throws { Read-TestJson (ConvertTo-Json -InputObject $manifest -Depth 32) } 'manifest|JSON|schema'
+        }
+      }
+    }
+    foreach ($shape in @('singleton','nested','empty','object')) {
+      Test-Case "reader rejects directory hash $shape versus scalar null" {
+        $manifest = New-ScalarMutationFixture 'entry' 'sha256' $shape
+        $manifest.entries[0].entryType = 'directory'; $manifest.entries[0].length = [long]0; $manifest.entries[0].attributes = [long]16
+        if ($shape -eq 'singleton') { $manifest.entries[0].sha256 = @($null) }
+        if ($shape -eq 'nested') { $manifest.entries[0].sha256 = ,@($null) }
+        Assert-Throws { Read-TestJson (ConvertTo-Json -InputObject $manifest -Depth 32) } 'manifest|JSON|schema'
+      }
+    }
+    foreach ($field in @('id','path')) {
+      foreach ($shape in @('singleton','nested','empty','null','object')) {
+        Test-Case "selected job $field must be a raw scalar string, not $shape" {
+          $job = New-TestJob (New-TestSource)
+          $original = $job.PSObject.Properties[$field].Value
+          switch ($shape) {
+            'singleton' { $job.$field = @($original) }
+            'nested' { $job.$field = ,@($original) }
+            'empty' { $job.$field = @() }
+            'null' { $job.$field = $null }
+            'object' { $job.$field = [PSCustomObject]@{ value = $original } }
+          }
+          Assert-Throws { New-DataSafeSourceManifest @($job) } 'manifest|source|path|schema|scalar'
+        }
+      }
+    }
+    foreach ($alias in @('c:\source', 'C:/Source', 'C:\Source\', 'c:/source///')) {
+      Test-Case "canonical physical source collision rejects loaded manifests: $alias" {
+        $manifest = New-FixtureManifest
+        $manifest.sources += [PSCustomObject]@{ sourceId = 'other'; path = $alias; relativeDestination = 'Other' }
+        Assert-Throws { Compare-DataSafeManifests $null $manifest } 'duplicate|collision|physical|source'
+        Assert-Throws { Compare-DataSafeManifests $manifest (New-FixtureManifest) } 'duplicate|collision|physical|source'
+        Assert-Throws { New-DataSafeSourceManifest -Jobs @() -PreviousManifest $manifest } 'duplicate|collision|physical|source'
+        Assert-Throws { Read-TestJson (ConvertTo-Json -InputObject $manifest -Depth 32) } 'manifest|JSON|duplicate|collision|physical|source'
+        Assert-Throws { Write-DataSafeManifest $validationRepository $manifest ([guid]::NewGuid().ToString('D')) } 'duplicate|collision|physical|source'
+      }
+    }
+    foreach ($selection in @('directory','file')) {
+      Test-Case "duplicate physical $selection selection aliases reject jobs before any hash" {
+        $directory = New-TestSource; $filePath = Join-Path $directory 'selected.txt'; Write-TestFile $filePath 'abc'
+        $path = if ($selection -eq 'file') { $filePath } else { $directory }
+        foreach ($alias in @($path.ToUpperInvariant(), $path.Replace('\','/'), ($path + '\'))) {
+          $firstJob = New-TestJob $path
+          $secondJob = New-TestJob $alias; $secondJob.id = 'other'; $secondJob.name = 'Other'
+          $script:hashCalls = 0
+          Assert-Throws { New-DataSafeSourceManifest @($firstJob, $secondJob) $null { param($p) $script:hashCalls++; Get-DataSafeSha256 $p } } 'duplicate|collision|physical|source'
+          Assert-True ($script:hashCalls -eq 0) 'Duplicate physical sources were scanned before rejection.'
+        }
+      }
+    }
+    Test-Case 'selected file initial scan uses source basename beneath the browseable destination' {
+      $parent = New-TestSource; $path = Join-Path $parent 'selected.txt'
+      Write-TestFile $path 'abc'; Write-TestFile (Join-Path $parent 'not-selected.txt') 'outside selection'
+      $job = New-TestJob $path; $job | Add-Member type 'file'
+      $manifest = New-DataSafeSourceManifest @($job)
+      Assert-True ($manifest.sourceErrors.Count -eq 0 -and $manifest.entries.Count -eq 1) 'Selected file was unavailable or its parent was traversed.'
+      Assert-True ($manifest.sources[0].path -ceq $path -and $manifest.entries[0].sourceId -ceq 'documents') 'Physical source mapping or identity changed.'
+      Assert-True ($manifest.entries[0].relativePath -ceq 'selected.txt' -and $manifest.entries[0].versionLocation -ceq 'Latest Backup/Documents/selected.txt') 'Selected-file layout differs from Copy-BackupItem.'
+      Assert-True ($manifest.entries[0].sha256 -ceq 'BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD') 'Selected file was not hashed.'
+    }
+    Test-Case 'unchanged selected-file rescan calls the hash provider zero times' {
+      $path = Join-Path (New-TestSource) 'selected.txt'; Write-TestFile $path 'abc'
+      $job = New-TestJob $path; $job | Add-Member type 'file'
+      $first = New-DataSafeSourceManifest @($job)
+      Assert-True ($first.entries.Count -eq 1) 'Initial selected-file scan did not succeed.'
+      $script:hashCalls = 0
+      $second = New-DataSafeSourceManifest @($job) $first { param($p) $script:hashCalls++; Get-DataSafeSha256 $p }
+      $diff = Compare-DataSafeManifests $first $second
+      Assert-True ($script:hashCalls -eq 0 -and $diff.Unchanged.Count -eq 1 -and $diff.UnchangedBytes -eq 3 -and $second.sourceErrors.Count -eq 0) 'Unchanged selected file was rehashed or lost.'
+    }
+    Test-Case 'changed selected file is hashed and classified as changed content' {
+      $path = Join-Path (New-TestSource) 'selected.txt'; Write-TestFile $path 'abc'
+      $job = New-TestJob $path; $job | Add-Member type 'file'
+      $first = New-DataSafeSourceManifest @($job)
+      Assert-True ($first.entries.Count -eq 1) 'Initial selected-file scan did not succeed.'
+      Write-TestFile $path 'longer'
+      $script:hashCalls = 0
+      $second = New-DataSafeSourceManifest @($job) $first { param($p) $script:hashCalls++; Get-DataSafeSha256 $p }
+      $diff = Compare-DataSafeManifests $first $second
+      Assert-True ($script:hashCalls -eq 1 -and $diff.ContentChanged.Count -eq 1 -and $diff.ContentChangedBytes -eq 6) 'Changed selected file was not detected.'
+    }
+    Test-Case 'locked selected file reports an explicit read error and suppresses its deletion inference' {
+      $path = Join-Path (New-TestSource) 'selected.txt'; Write-TestFile $path 'abc'
+      $job = New-TestJob $path; $job | Add-Member type 'file'
+      $first = New-DataSafeSourceManifest @($job)
+      Assert-True ($first.entries.Count -eq 1) 'Initial selected-file scan did not succeed.'
+      [IO.File]::SetLastWriteTimeUtc((ConvertTo-DataSafeExtendedPath $path), [datetime]::UtcNow.AddHours(-1))
+      $held = [IO.File]::Open((ConvertTo-DataSafeExtendedPath $path), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+      try { $second = New-DataSafeSourceManifest @($job) $first } finally { $held.Dispose() }
+      $diff = Compare-DataSafeManifests $first $second
+      Assert-True ($second.entries.Count -eq 0 -and $second.sourceErrors.Count -eq 1 -and $second.sourceErrors[0].path -ceq $path) 'Unreadable selected file was silently accepted.'
+      Assert-True ($diff.SourceErrors.Count -eq 1 -and $diff.Deleted.Count -eq 0) 'Locked selected file became a deletion.'
+    }
+    Test-Case 'selected file scan and unchanged rescan support paths longer than 260 characters' {
+      $deep = New-TestSource
+      1..7 | ForEach-Object { $deep = Join-Path $deep ('file-source-' + ('x' * 30)) }
+      $name = ([string][char]0x00e9) + '-selected.txt'; $path = Join-Path $deep $name
+      Write-TestFile $path 'abc'
+      $job = New-TestJob $path; $job | Add-Member type 'file'
+      $first = New-DataSafeSourceManifest @($job)
+      Assert-True ($path.Length -gt 260 -and $first.entries.Count -eq 1 -and $first.sourceErrors.Count -eq 0) 'Long selected-file scan failed.'
+      Assert-True ($first.entries[0].relativePath -ceq $name -and $first.entries[0].length -eq 3) 'Long selected-file metadata changed.'
+      $second = New-DataSafeSourceManifest @($job) $first { throw 'Unexpected hash of unchanged long selected file.' }
+      Assert-True ((Compare-DataSafeManifests $first $second).Unchanged.Count -eq 1 -and $second.sourceErrors.Count -eq 0) 'Long selected file was not reused.'
+      $loaded = Read-TestJson (ConvertTo-Json -InputObject $first -Depth 12)
+      Assert-True ($loaded.sources[0].path -ceq $path -and $loaded.entries[0].relativePath -ceq $name) 'Long selected-file mapping did not round-trip.'
+    }
+    Test-Case 'mixed successful and failed sources suppress deletions only for the failed selection' {
+      $filePath = Join-Path (New-TestSource) 'selected.txt'; Write-TestFile $filePath 'protected'
+      $fileJob = New-TestJob $filePath; $fileJob | Add-Member type 'file'
+      $directory = New-TestSource; $removedPath = Join-Path $directory 'removed.txt'; Write-TestFile $removedPath 'gone'
+      $directoryJob = New-TestJob $directory; $directoryJob.id = 'accessible'; $directoryJob.name = 'Accessible'
+      $first = New-DataSafeSourceManifest @($fileJob, $directoryJob)
+      Assert-True ($first.entries.Count -eq 2 -and $first.sourceErrors.Count -eq 0) 'Mixed initial scan failed.'
+      [IO.File]::Delete((ConvertTo-DataSafeExtendedPath $filePath)); [IO.File]::Delete((ConvertTo-DataSafeExtendedPath $removedPath))
+      $second = New-DataSafeSourceManifest @($directoryJob, $fileJob) $first
+      $diff = Compare-DataSafeManifests $first $second
+      Assert-True ($diff.SourceErrors.Count -eq 1 -and $diff.SourceErrors[0].sourceId -ceq 'documents') 'Failed file selection was not isolated.'
+      Assert-True ($diff.Deleted.Count -eq 1 -and $diff.Deleted[0].sourceId -ceq 'accessible' -and $diff.Deleted[0].relativePath -ceq 'removed.txt' -and $diff.DeletedBytes -eq 4) 'Failure hid accessible deletions or fabricated a failed-source deletion.'
+    }
     Test-Case 'initial scan is deterministic includes directories Unicode and independently verified SHA256' {
       $source = New-TestSource
       $unicodeName = ([string][char]0x00e9) + '.txt'
