@@ -106,44 +106,7 @@ function Show-BackupNotification(
   [string]$Level,
   [string]$ClickTarget
 ) {
-  try {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    $notify = New-Object System.Windows.Forms.NotifyIcon
-    $notify.Visible = $true
-    $notify.Icon = switch ($Level) {
-      "Error" { [System.Drawing.SystemIcons]::Error }
-      "Warning" { [System.Drawing.SystemIcons]::Warning }
-      default { [System.Drawing.SystemIcons]::Information }
-    }
-    $notify.BalloonTipTitle = $Title
-    $notify.BalloonTipText = $Message
-
-    $subscription = $null
-    if ($ClickTarget) {
-      $subscription = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked -Action {
-        Start-Process $using:ClickTarget | Out-Null
-      }
-    }
-
-    $notify.ShowBalloonTip(15000)
-    Start-Sleep -Seconds 16
-
-    if ($subscription) {
-      Unregister-Event -SourceIdentifier $subscription.Name -ErrorAction SilentlyContinue
-      Remove-Job -Id $subscription.Id -Force -ErrorAction SilentlyContinue
-    }
-
-    $notify.Dispose()
-    return
-  } catch {
-    # Fall back to a traditional popup if the tray balloon cannot be shown.
-  }
-
-  $shell = New-Object -ComObject WScript.Shell
-  $iconCode = if ($Level -eq "Error") { 16 } elseif ($Level -eq "Warning") { 48 } else { 64 }
-  $shell.Popup($Message, 20, $Title, $iconCode) | Out-Null
+  Write-Verbose "DataSafe notification suppressed for the headless worker: $Title - $Message"
 }
 
 function Write-FailedBackupStatus([string]$Path, [string]$Message) {
@@ -244,64 +207,7 @@ function Write-ProgressMarker(
 }
 
 function Get-RobocopyExcludedDirectories([string]$Source) {
-  $normalized = $Source.ToLowerInvariant()
-  $isChromiumUserData =
-    $normalized -like "*\google\chrome\user data" -or
-    $normalized -like "*\microsoft\edge\user data" -or
-    $normalized -like "*\bravesoftware\brave-browser\user data"
-
-  if (-not $isChromiumUserData) {
-    return @("System Volume Information", '$RECYCLE.BIN')
-  }
-
-  $excluded = New-Object System.Collections.Generic.List[string]
-  $excluded.Add("System Volume Information")
-  $excluded.Add('$RECYCLE.BIN')
-
-  $topLevelCandidates = @(
-    "Crashpad",
-    "GrShaderCache",
-    "GraphiteDawnCache",
-    "ShaderCache",
-    "BrowserMetrics",
-    "Component CRX Cache"
-  )
-
-  foreach ($name in $topLevelCandidates) {
-    $candidatePath = Join-Path $Source $name
-    if (Test-Path -LiteralPath $candidatePath) {
-      $excluded.Add($candidatePath)
-    }
-  }
-
-  $profileDirs = @(Get-ChildItem -Path $Source -Directory -ErrorAction SilentlyContinue | Where-Object {
-    $_.Name -eq "Default" -or
-    $_.Name -like "Profile *" -or
-    $_.Name -eq "Guest Profile" -or
-    $_.Name -eq "System Profile"
-  })
-
-  $profileCacheCandidates = @(
-    "Cache",
-    "Code Cache",
-    "GPUCache",
-    "DawnCache",
-    "Media Cache",
-    "Blob Storage",
-    "Service Worker\\CacheStorage",
-    "Service Worker\\ScriptCache"
-  )
-
-  foreach ($profileDir in $profileDirs) {
-    foreach ($relativePath in $profileCacheCandidates) {
-      $candidatePath = Join-Path $profileDir.FullName $relativePath
-      if (Test-Path -LiteralPath $candidatePath) {
-        $excluded.Add($candidatePath)
-      }
-    }
-  }
-
-  return @($excluded)
+  return @("System Volume Information", '$RECYCLE.BIN') + @(Get-DataSafeBrowserExcludedDirectories $Source)
 }
 
 function Test-TruthyJobProperty($Job, [string]$PropertyName) {
@@ -566,7 +472,7 @@ function Prune-Snapshots([string]$SnapshotsRoot, $RetentionPolicy) {
 
   $snapshotsToRemove = @($allSnapshots | Where-Object { -not $retainedNames.Contains($_.Name) })
   foreach ($snapshot in $snapshotsToRemove) {
-    Remove-Item -LiteralPath $snapshot.FullName -Recurse -Force
+    Remove-DataSafeDirectoryTree $snapshot.FullName
   }
 
   return @($retainedSnapshots | Sort-Object Timestamp -Descending)
@@ -574,7 +480,7 @@ function Prune-Snapshots([string]$SnapshotsRoot, $RetentionPolicy) {
 
 function Copy-BackupItem($Job, [string]$RootPath) {
   $source = Resolve-JobSourcePath $Job
-  if (-not (Test-Path -LiteralPath $source)) {
+  if (-not (Test-DataSafeFile $source) -and -not (Test-DataSafeDirectory $source)) {
     throw "Backup source missing: $source"
   }
 
@@ -590,15 +496,16 @@ function Copy-BackupItem($Job, [string]$RootPath) {
     return
   }
 
-  New-Item -ItemType Directory -Force -Path $destination | Out-Null
-  Copy-Item -LiteralPath $source -Destination $destination -Force
+  Ensure-DataSafeDirectory $destination
+  $destinationFile = Join-Path $destination ([System.IO.Path]::GetFileName($source))
+  Copy-DataSafeFile -SourcePath $source -DestinationPath $destinationFile
 }
 
 function Get-BackupPlanSize($Jobs) {
   $total = [int64]0
   foreach ($job in @($Jobs)) {
     $source = Resolve-JobSourcePath $job
-    if (-not (Test-Path -LiteralPath $source)) {
+    if (-not (Test-DataSafeFile $source) -and -not (Test-DataSafeDirectory $source)) {
       throw "Backup source missing: $source"
     }
 
@@ -615,6 +522,7 @@ $lockPath = "$StatusPath.lock"
 $lockHandle = $null
 $configForNotification = $null
 $stagingSnapshotPath = $null
+$operationBusyMessage = "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
 
 try {
   $lockHandle = Acquire-DataSafeOperationLock $lockPath
@@ -703,6 +611,11 @@ try {
   Write-Output $status.lastBackupMessage
 } catch {
   $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
+  if ($message -eq $operationBusyMessage) {
+    Write-Output $message
+    exit 0
+  }
+
   Write-FailedBackupStatus $StatusPath $message
 
   $notificationConfig = $configForNotification
@@ -728,7 +641,7 @@ try {
 } finally {
   if ($stagingSnapshotPath -and (Test-Path -LiteralPath $stagingSnapshotPath)) {
     try {
-      Remove-Item -LiteralPath $stagingSnapshotPath -Recurse -Force -ErrorAction Stop
+      Remove-DataSafeDirectoryTree $stagingSnapshotPath
     } catch {
       Write-Warning "DataSafe could not remove incomplete backup folder '$stagingSnapshotPath': $($_.Exception.Message)"
     }

@@ -6,6 +6,225 @@ $script:DataSafeCompleteFile = ".datasafe-complete.json"
 $script:DataSafeIntegrityFile = ".datasafe-integrity.jsonl"
 $script:DataSafeVerificationFile = ".datasafe-verification.json"
 
+function ConvertTo-DataSafeExtendedPath([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return ""
+  }
+
+  if ($Path.StartsWith("\\?\", [System.StringComparison]::Ordinal)) {
+    return $Path
+  }
+
+  $fullPath = [System.IO.Path]::GetFullPath($Path)
+  if ($fullPath.StartsWith("\\", [System.StringComparison]::Ordinal)) {
+    return "\\?\UNC\$($fullPath.Substring(2))"
+  }
+  return "\\?\$fullPath"
+}
+
+function ConvertFrom-DataSafeExtendedPath([string]$Path) {
+  if ($Path.StartsWith("\\?\UNC\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return "\\$($Path.Substring(8))"
+  }
+  if ($Path.StartsWith("\\?\", [System.StringComparison]::Ordinal)) {
+    return $Path.Substring(4)
+  }
+  return $Path
+}
+
+function Test-DataSafeFile([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return $false
+  }
+  return [System.IO.File]::Exists((ConvertTo-DataSafeExtendedPath $Path))
+}
+
+function Test-DataSafeDirectory([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return $false
+  }
+  return [System.IO.Directory]::Exists((ConvertTo-DataSafeExtendedPath $Path))
+}
+
+function Ensure-DataSafeDirectory([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return
+  }
+  [System.IO.Directory]::CreateDirectory((ConvertTo-DataSafeExtendedPath $Path)) | Out-Null
+}
+
+function Get-DataSafeFileEntry([string]$Path) {
+  $extendedPath = ConvertTo-DataSafeExtendedPath $Path
+  if (-not [System.IO.File]::Exists($extendedPath)) {
+    return $null
+  }
+
+  $file = New-Object System.IO.FileInfo($extendedPath)
+  return [PSCustomObject]@{
+    FullName = ConvertFrom-DataSafeExtendedPath $file.FullName
+    Length = [int64]$file.Length
+    LastWriteTimeUtc = $file.LastWriteTimeUtc
+  }
+}
+
+function Get-DataSafeFileEntries([string]$RootPath, [bool]$IgnoreInaccessible = $false) {
+  $extendedRoot = ConvertTo-DataSafeExtendedPath $RootPath
+  if (-not [System.IO.Directory]::Exists($extendedRoot)) {
+    return @()
+  }
+
+  $pending = New-Object "System.Collections.Generic.Stack[string]"
+  $pending.Push($extendedRoot)
+  while ($pending.Count -gt 0) {
+    $directory = $pending.Pop()
+    try {
+      $files = @([System.IO.Directory]::GetFiles($directory))
+      $directories = @([System.IO.Directory]::GetDirectories($directory))
+    } catch {
+      if ($IgnoreInaccessible) {
+        continue
+      }
+      throw
+    }
+
+    foreach ($filePath in $files) {
+      $file = New-Object System.IO.FileInfo($filePath)
+      [PSCustomObject]@{
+        FullName = ConvertFrom-DataSafeExtendedPath $file.FullName
+        Length = [int64]$file.Length
+        LastWriteTimeUtc = $file.LastWriteTimeUtc
+      }
+    }
+
+    foreach ($childDirectory in $directories) {
+      $attributes = [System.IO.File]::GetAttributes($childDirectory)
+      if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) {
+        $pending.Push($childDirectory)
+      }
+    }
+  }
+}
+
+function Copy-DataSafeFile([string]$SourcePath, [string]$DestinationPath) {
+  $extendedSource = ConvertTo-DataSafeExtendedPath $SourcePath
+  if (-not [System.IO.File]::Exists($extendedSource)) {
+    throw "DataSafe could not find the file to copy: $SourcePath"
+  }
+
+  $destinationFullPath = [System.IO.Path]::GetFullPath($DestinationPath)
+  $destinationParent = [System.IO.Path]::GetDirectoryName($destinationFullPath)
+  Ensure-DataSafeDirectory $destinationParent
+  [System.IO.File]::Copy($extendedSource, (ConvertTo-DataSafeExtendedPath $destinationFullPath), $true)
+}
+
+function Remove-DataSafeDirectoryTree([string]$Path) {
+  $extendedRoot = ConvertTo-DataSafeExtendedPath $Path
+  if (-not [System.IO.Directory]::Exists($extendedRoot)) {
+    return
+  }
+
+  $pending = New-Object "System.Collections.Generic.Stack[string]"
+  $directories = New-Object "System.Collections.Generic.List[string]"
+  $pending.Push($extendedRoot)
+  while ($pending.Count -gt 0) {
+    $directory = $pending.Pop()
+    $directories.Add($directory)
+
+    foreach ($filePath in @([System.IO.Directory]::GetFiles($directory))) {
+      [System.IO.File]::SetAttributes($filePath, [System.IO.FileAttributes]::Normal)
+      [System.IO.File]::Delete($filePath)
+    }
+
+    foreach ($childDirectory in @([System.IO.Directory]::GetDirectories($directory))) {
+      $attributes = [System.IO.File]::GetAttributes($childDirectory)
+      if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        [System.IO.File]::SetAttributes($childDirectory, [System.IO.FileAttributes]::Normal)
+        [System.IO.Directory]::Delete($childDirectory, $false)
+      } else {
+        $pending.Push($childDirectory)
+      }
+    }
+  }
+
+  foreach ($directory in @($directories | Sort-Object Length -Descending)) {
+    [System.IO.File]::SetAttributes($directory, [System.IO.FileAttributes]::Normal)
+    [System.IO.Directory]::Delete($directory, $false)
+  }
+}
+
+function Remove-DataSafePath([string]$Path) {
+  $extendedPath = ConvertTo-DataSafeExtendedPath $Path
+  if ([System.IO.File]::Exists($extendedPath)) {
+    [System.IO.File]::SetAttributes($extendedPath, [System.IO.FileAttributes]::Normal)
+    [System.IO.File]::Delete($extendedPath)
+    return
+  }
+
+  if ([System.IO.Directory]::Exists($extendedPath)) {
+    Remove-DataSafeDirectoryTree $Path
+  }
+}
+
+function Get-DataSafeBrowserExcludedDirectories([string]$Source) {
+  $normalized = [System.IO.Path]::GetFullPath($Source).TrimEnd('\', '/').ToLowerInvariant()
+  $isChromiumUserData =
+    $normalized -like "*\google\chrome\user data" -or
+    $normalized -like "*\microsoft\edge\user data" -or
+    $normalized -like "*\bravesoftware\brave-browser\user data"
+  if (-not $isChromiumUserData -or -not (Test-DataSafeDirectory $Source)) {
+    return @()
+  }
+
+  $excluded = New-Object System.Collections.Generic.List[string]
+  foreach ($name in @(
+    "Crashpad",
+    "GrShaderCache",
+    "GraphiteDawnCache",
+    "ShaderCache",
+    "BrowserMetrics",
+    "Component CRX Cache",
+    "component_crx_cache",
+    "OptGuideOnDeviceModel",
+    "optimization_guide_model_store"
+  )) {
+    $candidatePath = Join-Path $Source $name
+    if (Test-DataSafeDirectory $candidatePath) {
+      $excluded.Add($candidatePath)
+    }
+  }
+
+  foreach ($profilePath in @([System.IO.Directory]::GetDirectories((ConvertTo-DataSafeExtendedPath $Source)))) {
+    $profileName = [System.IO.Path]::GetFileName($profilePath)
+    if (
+      $profileName -ne "Default" -and
+      $profileName -notlike "Profile *" -and
+      $profileName -ne "Guest Profile" -and
+      $profileName -ne "System Profile"
+    ) {
+      continue
+    }
+
+    $normalProfilePath = ConvertFrom-DataSafeExtendedPath $profilePath
+    foreach ($relativePath in @(
+      "Cache",
+      "Code Cache",
+      "GPUCache",
+      "DawnCache",
+      "Media Cache",
+      "Blob Storage",
+      "Service Worker\CacheStorage",
+      "Service Worker\ScriptCache"
+    )) {
+      $candidatePath = Join-Path $normalProfilePath $relativePath
+      if (Test-DataSafeDirectory $candidatePath) {
+        $excluded.Add($candidatePath)
+      }
+    }
+  }
+
+  return @($excluded)
+}
+
 function Read-DataSafeJson([string]$Path) {
   Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
 }
@@ -17,11 +236,12 @@ function Write-DataSafeJson([string]$Path, $Value) {
 }
 
 function Get-DataSafeSha256([string]$Path) {
-  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+  $extendedPath = ConvertTo-DataSafeExtendedPath $Path
+  if ([string]::IsNullOrWhiteSpace($extendedPath) -or -not [System.IO.File]::Exists($extendedPath)) {
     throw "DataSafe could not read a file needed for integrity verification: $Path"
   }
 
-  $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  $stream = [System.IO.File]::Open($extendedPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
   $algorithm = [System.Security.Cryptography.SHA256]::Create()
   try {
     return ([BitConverter]::ToString($algorithm.ComputeHash($stream))).Replace("-", "")
@@ -121,13 +341,22 @@ function Assert-DataSafeAlternateRestoreTarget(
 
 function Acquire-DataSafeOperationLock([string]$LockPath) {
   if (Test-Path -LiteralPath $LockPath) {
-    $existing = Get-Item -LiteralPath $LockPath -ErrorAction SilentlyContinue
-    $ageHours = if ($existing) { ((Get-Date) - $existing.LastWriteTime).TotalHours } else { 0 }
-    if ($ageHours -lt 12) {
+    $staleHandle = $null
+    try {
+      $staleHandle = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+    } catch {
       throw "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
+    } finally {
+      if ($staleHandle) {
+        $staleHandle.Dispose()
+      }
     }
 
-    Remove-Item -LiteralPath $LockPath -Force -ErrorAction SilentlyContinue
+    try {
+      Remove-Item -LiteralPath $LockPath -Force -ErrorAction Stop
+    } catch {
+      throw "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
+    }
   }
 
   try {
@@ -336,17 +565,17 @@ function Get-DataSafeFreeBytes([string]$Path) {
 }
 
 function Get-DataSafePathSize([string]$Path) {
-  if (-not (Test-Path -LiteralPath $Path)) {
+  if (-not (Test-DataSafeFile $Path) -and -not (Test-DataSafeDirectory $Path)) {
     return [int64]0
   }
 
-  $item = Get-Item -LiteralPath $Path
-  if (-not $item.PSIsContainer) {
-    return [int64]$item.Length
+  $file = Get-DataSafeFileEntry $Path
+  if ($null -ne $file) {
+    return [int64]$file.Length
   }
 
   $total = [int64]0
-  Get-ChildItem -LiteralPath $Path -File -Recurse -Force -ErrorAction SilentlyContinue | ForEach-Object {
+  Get-DataSafeFileEntries -RootPath $Path -IgnoreInaccessible $true | ForEach-Object {
     $total += [int64]$_.Length
   }
   return $total
@@ -395,7 +624,7 @@ function New-DataSafeIntegrityIndex([string]$SnapshotPath) {
   $totalBytes = [int64]0
 
   try {
-    $files = @(Get-ChildItem -LiteralPath $SnapshotPath -File -Recurse -Force -ErrorAction Stop | Where-Object {
+    $files = @(Get-DataSafeFileEntries $SnapshotPath | Where-Object {
       [System.IO.Path]::GetFullPath($_.FullName) -notin $metadataPaths
     } | Sort-Object FullName)
 
@@ -592,7 +821,7 @@ function Remove-DataSafeIncompleteSnapshots([string]$SnapshotsRoot) {
     ForEach-Object {
       $incompleteSnapshot = $_
       try {
-        Remove-Item -LiteralPath $incompleteSnapshot.FullName -Recurse -Force -ErrorAction Stop
+        Remove-DataSafeDirectoryTree $incompleteSnapshot.FullName
       } catch {
         Write-Warning "DataSafe could not remove incomplete backup folder '$($incompleteSnapshot.FullName)': $($_.Exception.Message)"
       }
@@ -634,7 +863,7 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
 
   $checked = 0
   $checkedBytes = [int64]0
-  foreach ($line in [System.IO.File]::ReadLines($indexPath)) {
+  foreach ($line in [System.IO.File]::ReadLines((ConvertTo-DataSafeExtendedPath $indexPath))) {
     if ([string]::IsNullOrWhiteSpace($line)) {
       continue
     }
@@ -668,11 +897,11 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
       throw "The snapshot integrity index contains an unsafe file path."
     }
 
-    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+    $file = Get-DataSafeFileEntry $fullPath
+    if ($null -eq $file) {
       throw "A backed up file is missing: $relativePath"
     }
 
-    $file = Get-Item -LiteralPath $fullPath
     if ([int64]$file.Length -ne [int64](Get-DataSafeProperty $entry "length" -1)) {
       throw "A backed up file has changed size: $relativePath"
     }
@@ -690,7 +919,7 @@ function Test-DataSafeIntegrityIndex([string]$SnapshotPath, [string]$RelativePre
     throw "No integrity records were found for the selected backup item."
   }
 
-  foreach ($file in @(Get-ChildItem -LiteralPath $SnapshotPath -File -Recurse -Force -ErrorAction Stop)) {
+  foreach ($file in @(Get-DataSafeFileEntries $SnapshotPath)) {
     $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
     if ($metadataPaths.Contains($fullPath)) {
       continue

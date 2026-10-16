@@ -20,25 +20,7 @@ function Set-IntegrityStatus($Status, $IntegrityStatus) {
 }
 
 function Show-IntegrityWarning([string]$Message) {
-  try {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-    $notify = New-Object System.Windows.Forms.NotifyIcon
-    $notify.Visible = $true
-    $notify.Icon = [System.Drawing.SystemIcons]::Error
-    $notify.BalloonTipTitle = "DataSafe Backup Needs Attention"
-    $notify.BalloonTipText = $Message
-    $notify.ShowBalloonTip(15000)
-    Start-Sleep -Seconds 16
-    $notify.Dispose()
-  } catch {
-    try {
-      $shell = New-Object -ComObject WScript.Shell
-      $shell.Popup($Message, 20, "DataSafe Backup Needs Attention", 16) | Out-Null
-    } catch {
-      # The status file remains the source of truth if Windows cannot show a notification.
-    }
-  }
+  Write-Warning $Message
 }
 
 $config = Read-DataSafeJson $ConfigPath

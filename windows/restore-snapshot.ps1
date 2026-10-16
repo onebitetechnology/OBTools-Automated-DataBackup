@@ -109,11 +109,12 @@ function Get-RunningProcessNames($Job) {
 }
 
 function Get-SourceFile($BackupItemRoot) {
-  if ((Test-Path -LiteralPath $BackupItemRoot) -and -not (Get-Item -LiteralPath $BackupItemRoot).PSIsContainer) {
-    return Get-Item -LiteralPath $BackupItemRoot
+  $sourceFile = Get-DataSafeFileEntry $BackupItemRoot
+  if ($null -ne $sourceFile) {
+    return $sourceFile
   }
 
-  return Get-ChildItem -LiteralPath $BackupItemRoot -File -Recurse -Force -ErrorAction SilentlyContinue |
+  return Get-DataSafeFileEntries -RootPath $BackupItemRoot -IgnoreInaccessible $true |
     Select-Object -First 1
 }
 
@@ -133,7 +134,7 @@ function Get-UniqueAlternateTarget($Job, [string]$ChosenTarget, [string]$Snapsho
 
   $candidate = Join-Path $ChosenTarget "$sourceLeaf - Restored $Snapshot"
   $counter = 2
-  while (Test-Path -LiteralPath $candidate) {
+  while ((Test-DataSafeFile $candidate) -or (Test-DataSafeDirectory $candidate)) {
     $candidate = Join-Path $ChosenTarget "$sourceLeaf - Restored $Snapshot ($counter)"
     $counter += 1
   }
@@ -182,29 +183,24 @@ function Copy-RestoreFolder([string]$SourcePath, [string]$DestinationPath, [swit
 }
 
 function Copy-RestoreFile([string]$SourceFile, [string]$DestinationPath) {
-  $parent = Split-Path -Parent $DestinationPath
-  if (-not [string]::IsNullOrWhiteSpace($parent)) {
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-  }
-
-  Copy-Item -LiteralPath $SourceFile -Destination $DestinationPath -Force
+  Copy-DataSafeFile -SourcePath $SourceFile -DestinationPath $DestinationPath
 }
 
 function Get-FileMap([string]$RootPath, [bool]$IsFolder) {
   $map = @{}
-  if (-not (Test-Path -LiteralPath $RootPath)) {
+  if (-not (Test-DataSafeFile $RootPath) -and -not (Test-DataSafeDirectory $RootPath)) {
     return $map
   }
 
   if (-not $IsFolder) {
-    $item = Get-Item -LiteralPath $RootPath
-    if (-not $item.PSIsContainer) {
+    $item = Get-DataSafeFileEntry $RootPath
+    if ($null -ne $item) {
       $map[""] = $item
     }
     return $map
   }
 
-  foreach ($file in @(Get-ChildItem -LiteralPath $RootPath -File -Recurse -Force -ErrorAction SilentlyContinue)) {
+  foreach ($file in @(Get-DataSafeFileEntries -RootPath $RootPath -IgnoreInaccessible $true)) {
     $map[(Get-DataSafeRelativePath $RootPath $file.FullName)] = $file
   }
   return $map
@@ -230,12 +226,12 @@ function Get-RestorePlan(
     $sourceFile = $sourceMap[$relativePath]
     $sourceBytes += [int64]$sourceFile.Length
     $targetFilePath = if ($IsFolder) { Join-Path $RestoreTarget $relativePath } else { $RestoreTarget }
-    if (-not (Test-Path -LiteralPath $targetFilePath -PathType Leaf)) {
+    $targetFile = Get-DataSafeFileEntry $targetFilePath
+    if ($null -eq $targetFile) {
       $newFiles += 1
       continue
     }
 
-    $targetFile = Get-Item -LiteralPath $targetFilePath
     $sameLength = [int64]$sourceFile.Length -eq [int64]$targetFile.Length
     $sameHash = $false
     if ($sameLength) {
@@ -255,7 +251,7 @@ function Get-RestorePlan(
     }
   }
 
-  $safetyCopyRequired = $Mode -eq "original" -and (Test-Path -LiteralPath $RestoreTarget)
+  $safetyCopyRequired = $Mode -eq "original" -and ((Test-DataSafeFile $RestoreTarget) -or (Test-DataSafeDirectory $RestoreTarget))
   $safetyCopyBytes = if ($safetyCopyRequired) { Get-DataSafePathSize $RestoreTarget } else { [int64]0 }
   $freeBytes = Get-DataSafeFreeBytes $BaseRoot
   $safetyReserve = if ($safetyCopyRequired) {
@@ -297,11 +293,11 @@ function Assert-CopyMatches([string]$SourcePath, [string]$DestinationPath, [bool
   foreach ($relativePath in $sourceMap.Keys) {
     $sourceFile = $sourceMap[$relativePath]
     $destinationFilePath = if ($IsFolder) { Join-Path $DestinationPath $relativePath } else { $DestinationPath }
-    if (-not (Test-Path -LiteralPath $destinationFilePath -PathType Leaf)) {
+    $destinationFile = Get-DataSafeFileEntry $destinationFilePath
+    if ($null -eq $destinationFile) {
       throw "The safety copy is missing $relativePath."
     }
 
-    $destinationFile = Get-Item -LiteralPath $destinationFilePath
     if ([int64]$sourceFile.Length -ne [int64]$destinationFile.Length) {
       throw "The safety copy has a size mismatch for $relativePath."
     }
@@ -454,7 +450,7 @@ try {
 } catch {
   $restoreError = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
   if ($RestoreMode -eq "alternate") {
-    Remove-Item -LiteralPath $restoreTarget -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-DataSafePath $restoreTarget
     throw "The restore could not be completed, so DataSafe removed the incomplete alternate restore folder. $restoreError"
   }
 
@@ -468,7 +464,7 @@ try {
       }
       Update-RestoreJournal $journalPath $journal "rolled-back" "The restore failed, and the original files were restored from the safety copy."
     } else {
-      Remove-Item -LiteralPath $restoreTarget -Recurse -Force -ErrorAction SilentlyContinue
+      Remove-DataSafePath $restoreTarget
     }
   } catch {
     $rollbackError = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }

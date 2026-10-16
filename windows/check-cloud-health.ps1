@@ -26,12 +26,7 @@ function Add-Recommendation([System.Collections.Generic.List[string]]$Recommenda
 }
 
 function Show-CloudWarning([string]$Message) {
-  try {
-    $shell = New-Object -ComObject WScript.Shell
-    $shell.Popup($Message, 20, "DataSafe Cloud Configuration Needs Attention", 48) | Out-Null
-  } catch {
-    # Scheduled-task history retains the warning when an interactive popup is unavailable.
-  }
+  Write-Warning $Message
 }
 
 function Test-ExistingPath([string]$Path) {
@@ -116,7 +111,8 @@ function Get-OneDriveAccounts {
     })
   }
 
-  return @($accounts)
+  # Explicit conversion avoids Windows PowerShell 5.1's List[object] array binder bug.
+  return $accounts.ToArray()
 }
 
 function Get-OneDriveSyncRoots($Accounts) {

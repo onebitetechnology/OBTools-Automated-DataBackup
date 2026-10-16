@@ -87,44 +87,7 @@ function Show-BackupNotification(
   [string]$Level,
   [string]$ClickTarget
 ) {
-  try {
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    $notify = New-Object System.Windows.Forms.NotifyIcon
-    $notify.Visible = $true
-    $notify.Icon = switch ($Level) {
-      "Error" { [System.Drawing.SystemIcons]::Error }
-      "Warning" { [System.Drawing.SystemIcons]::Warning }
-      default { [System.Drawing.SystemIcons]::Information }
-    }
-    $notify.BalloonTipTitle = $Title
-    $notify.BalloonTipText = $Message
-
-    $subscription = $null
-    if ($ClickTarget) {
-      $subscription = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked -Action {
-        Start-Process $using:ClickTarget | Out-Null
-      }
-    }
-
-    $notify.ShowBalloonTip(15000)
-    Start-Sleep -Seconds 16
-
-    if ($subscription) {
-      Unregister-Event -SourceIdentifier $subscription.Name -ErrorAction SilentlyContinue
-      Remove-Job -Id $subscription.Id -Force -ErrorAction SilentlyContinue
-    }
-
-    $notify.Dispose()
-    return
-  } catch {
-    # Fall back to a traditional popup if the tray balloon cannot be shown.
-  }
-
-  $shell = New-Object -ComObject WScript.Shell
-  $iconCode = if ($Level -eq "Error") { 16 } elseif ($Level -eq "Warning") { 48 } else { 64 }
-  $shell.Popup($Message, 20, $Title, $iconCode) | Out-Null
+  Write-Verbose "DataSafe notification suppressed for the headless worker: $Title - $Message"
 }
 
 $config = Read-Json $ConfigPath

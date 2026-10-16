@@ -64,7 +64,7 @@ function findPowerShell() {
   ].filter(Boolean);
 
   return candidates.find((candidate) => {
-    const result = spawnSync(candidate, ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], {
+    const result = spawnSync(candidate, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "$PSVersionTable.PSVersion.ToString()"], {
       encoding: "utf8"
     });
     return result.status === 0;
@@ -77,7 +77,7 @@ function runPowerShellScript(powerShell, script) {
   fs.writeFileSync(scriptPath, script, "utf8");
 
   try {
-    return spawnSync(powerShell, ["-NoProfile", "-File", scriptPath], { encoding: "utf8" });
+    return spawnSync(powerShell, ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath], { encoding: "utf8" });
   } finally {
     fs.rmSync(scriptRoot, { recursive: true, force: true });
   }
@@ -250,6 +250,7 @@ test("PowerShell restore integrity rejects an added unindexed file", (context) =
   const escapedSnapshotPath = snapshotPath.replace(/'/g, "''");
   const result = spawnSync(powerShell, [
     "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
     "-Command",
     `& { $ErrorActionPreference = 'Stop'; . '${safetyModule}'; function Get-FileHash { throw 'Get-FileHash unavailable' }; Test-DataSafeIntegrityIndex -SnapshotPath '${escapedSnapshotPath}' | Out-Null }`
   ], { encoding: "utf8" });
@@ -354,13 +355,16 @@ $ErrorActionPreference = 'Stop'
 $snapshotsRoot = '${snapshotsRoot}'
 $stagingPath = Get-DataSafeStagingSnapshotPath -SnapshotsRoot $snapshotsRoot
 New-Item -ItemType Directory -Force -Path $stagingPath | Out-Null
-function Remove-Item {
-  param([Parameter(ValueFromRemainingArguments = $true)]$Remaining)
+function Remove-DataSafeDirectoryTree {
+  param([string]$Path)
+  if ($Path -ne $stagingPath) { throw "unexpected cleanup target: $Path" }
   throw 'simulated locked staging folder'
 }
 $warnings = @(& { Remove-DataSafeIncompleteSnapshots -SnapshotsRoot $snapshotsRoot } 3>&1)
 if ($warnings.Count -eq 0) { throw 'staging cleanup did not report the deletion failure' }
 if ("$warnings" -notmatch 'could not remove incomplete backup folder') { throw "unexpected cleanup warning: $warnings" }
+if ("$warnings" -notmatch 'simulated locked staging folder') { throw "cleanup did not surface the removal error: $warnings" }
+if (-not (Test-Path -LiteralPath $stagingPath)) { throw 'locked staging folder was unexpectedly removed' }
 `);
 
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
@@ -530,6 +534,7 @@ test("catch-up skips a recent completed backup that only has a retention warning
 
   const result = spawnSync(powerShell, [
     "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
     "-File",
     path.join(__dirname, "..", "windows", "check-backup-catchup.ps1"),
     "-ConfigPath",
@@ -560,6 +565,7 @@ test("cloud checks identify local configuration rather than verified provider ba
 
   const result = spawnSync(powerShell, [
     "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
     "-File",
     path.join(__dirname, "..", "windows", "check-cloud-health.ps1"),
     "-ConfigPath",
@@ -572,6 +578,19 @@ test("cloud checks identify local configuration rather than verified provider ba
   const status = JSON.parse(fs.readFileSync(statusPath, "utf8"));
   assert.equal(status.cloud.verificationScope, "local-configuration");
   assert.match(status.cloud.summary, /does not verify cloud uploads, quota, or provider errors/i);
+});
+
+test("scheduled-task registration uses a hidden windowless launcher for every worker", () => {
+  const installer = fs.readFileSync(path.join(__dirname, "..", "windows", "install-scheduled-backup.ps1"), "utf8");
+  assert.match(installer, /DataSafeTaskRunner\.vbs/);
+  assert.match(installer, /New-ScheduledTaskSettingsSet[^\r\n]*-Hidden\b/);
+  const actions = installer.match(/New-ScheduledTaskAction[^\r\n]*/g) || [];
+  assert.equal(actions.length, 5);
+  for (const action of actions) {
+    assert.match(action, /-Execute "wscript\.exe"/);
+    assert.match(action, /\/\/B \/\/NoLogo/);
+    assert.match(action, /\$taskRunnerScript/);
+  }
 });
 
 test("preview server refuses asset traversal outside the assets folder", async (context) => {
