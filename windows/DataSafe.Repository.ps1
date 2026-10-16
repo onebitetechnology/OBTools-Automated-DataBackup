@@ -26,10 +26,10 @@ function Read-DataSafeStrictJsonValue($Tokens, $Cursor, [int]$Depth) {
     while ($Cursor.Position -lt $Tokens.Count) {
       $keyToken = $Tokens[$Cursor.Position]
       if (-not $keyToken.StartsWith('"')) { throw $invalid }
-      if ($Depth -eq 0) {
-        $key = ConvertFrom-Json -InputObject $keyToken -ErrorAction Stop
-        if (-not $keys.Add($key)) { throw "DataSafe identity metadata contains a duplicate JSON property: $key" }
-      }
+      # Manifests reuse the strict parser and contain nested source/entry
+      # objects. Reject ambiguous keys before ConvertFrom-Json at every depth.
+      $key = ConvertFrom-Json -InputObject $keyToken -ErrorAction Stop
+      if (-not $keys.Add($key)) { throw "DataSafe identity metadata contains a duplicate JSON property: $key" }
       $Cursor.Position++
       if ($Cursor.Position -ge $Tokens.Count -or $Tokens[$Cursor.Position] -ne ':') { throw $invalid }
       $Cursor.Position++
