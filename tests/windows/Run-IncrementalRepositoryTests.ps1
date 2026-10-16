@@ -18,6 +18,11 @@ function Assert-Throws([scriptblock]$Action, [string]$Pattern) {
 function Test-Case([string]$Name, [scriptblock]$Action) {
   try { & $Action; $passes.Add($Name) } catch { $failures.Add("${Name}: $($_.Exception.Message)") }
 }
+function New-TestRepositoryLayout([string]$Root) {
+  foreach ($relative in @('Latest Backup', 'Earlier Versions', '.datasafe/manifests', '.datasafe/transactions', '.datasafe/staging')) {
+    Ensure-DataSafeDirectory (Join-Path $Root $relative)
+  }
+}
 
 . (Join-Path $WindowsRoot 'DataSafe.Safety.ps1')
 $library = Join-Path $WindowsRoot 'DataSafe.Repository.ps1'
@@ -93,13 +98,62 @@ if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
       Assert-True ([IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath $statePath)) -ceq '{broken') 'Corrupt identity was overwritten.'
     }
     Test-Case 'repository reader rejects missing corrupt wrong-version and invalid-UUID metadata' {
-      foreach ($value in @('{broken', '{"formatVersion":1,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}', '{"formatVersion":"2","computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}', '{"formatVersion":2,"computerId":"bad","computerName":"PC"}', '{"formatVersion":2,"computerId":"00000000-0000-0000-0000-000000000000","computerName":"PC"}', '{"formatVersion":2,"computerId":"00112233-4455-4677-8899-aabbccddeeff"}')) {
+      foreach ($row in @(
+        @{ Json = '{broken'; Error = 'JSON is invalid' },
+        @{ Json = '{"formatVersion":1,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'schema is invalid' },
+        @{ Json = '{"formatVersion":"2","computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'schema is invalid' },
+        @{ Json = '{"formatVersion":2,"computerId":"bad","computerName":"PC"}'; Error = 'computer identity must' },
+        @{ Json = '{"formatVersion":2,"computerId":"00000000-0000-0000-0000-000000000000","computerName":"PC"}'; Error = 'computer identity must' },
+        @{ Json = '{"formatVersion":2,"computerId":"00112233-4455-4677-8899-aabbccddeeff"}'; Error = 'computer-name schema is invalid' }
+      )) {
         $root = Join-Path $tempRoot ([guid]::NewGuid().ToString('N'))
-        Ensure-DataSafeDirectory (Join-Path $root '.datasafe')
-        [IO.File]::WriteAllText((ConvertTo-DataSafeExtendedPath (Join-Path $root '.datasafe/repository.json')), $value)
-        Assert-Throws { Read-DataSafeRepository $root } 'repository|JSON|schema|identity'
+        New-TestRepositoryLayout $root
+        [IO.File]::WriteAllText((ConvertTo-DataSafeExtendedPath (Join-Path $root '.datasafe/repository.json')), $row.Json)
+        Assert-Throws { Read-DataSafeRepository $root } $row.Error
       }
-      Assert-Throws { Read-DataSafeRepository (Join-Path $tempRoot 'missing') } 'repository|missing'
+      Assert-Throws { Read-DataSafeRepository (Join-Path $tempRoot 'missing') } 'JSON is missing'
+    }
+    foreach ($case in @(
+      @{ Name = 'duplicate UUID'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerId":"10112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'duplicate' },
+      @{ Name = 'escaped duplicate UUID key'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computer\u0049d":"10112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'duplicate' },
+      @{ Name = 'duplicate schema version'; Json = '{"formatVersion":0,"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'duplicate' },
+      @{ Name = 'duplicate friendly name'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"Original","computerName":"PC"}'; Error = 'duplicate' },
+      @{ Name = 'singleton object array'; Json = '[{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}]'; Error = 'top-level JSON object' }
+    )) {
+      Test-Case "$($case.Name) rejected for complete repository" {
+        $root = Join-Path $tempRoot ([guid]::NewGuid().ToString('N'))
+        New-TestRepositoryLayout $root
+        $repositoryJson = $case.Json.Replace('VERSION', '2')
+        [IO.File]::WriteAllText((ConvertTo-DataSafeExtendedPath (Join-Path $root '.datasafe/repository.json')), $repositoryJson)
+        Assert-Throws { Read-DataSafeRepository $root } $case.Error
+      }
+      Test-Case "$($case.Name) rejected for local identity state" {
+        $statePath = Join-Path $tempRoot ([guid]::NewGuid().ToString('N') + '.json')
+        $stateJson = $case.Json.Replace('VERSION', '1')
+        [IO.File]::WriteAllText((ConvertTo-DataSafeExtendedPath $statePath), $stateJson)
+        Assert-Throws { Get-DataSafeComputerId $statePath } $case.Error
+        Assert-True ([IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath $statePath)) -ceq $stateJson) 'Ambiguous local state was changed.'
+      }
+    }
+    Test-Case 'superscript serial and printer device names are browseable with original metadata preserved' {
+      foreach ($prefix in @('COM','LPT')) {
+        foreach ($digit in @([char]0x00b9, [char]0x00b2, [char]0x00b3)) {
+          foreach ($extension in @('', '.files')) {
+            $name = $prefix + $digit + $extension
+            $result = Initialize-DataSafeRepository $driveRoot $name ([guid]::NewGuid().ToString('D'))
+            Assert-True ((Split-Path -Leaf $result.Root) -ceq ('_' + $name)) "Reserved device segment was not protected: $name"
+            Assert-True ((Read-DataSafeRepository $result.Root).ComputerName -ceq $name) 'Original device-like name was changed in metadata.'
+            Assert-True ([IO.Directory]::Exists($result.LatestRoot)) 'Protected repository cannot be browsed through ordinary Windows paths.'
+          }
+        }
+      }
+    }
+    Test-Case 'console device names are protected for ordinary Windows browsing' {
+      foreach ($name in @('CONIN$', 'CONOUT$', 'conin$.files', 'conout$.files')) {
+        $result = Initialize-DataSafeRepository $driveRoot $name ([guid]::NewGuid().ToString('D'))
+        Assert-True ((Split-Path -Leaf $result.Root) -ceq ('_' + $name)) "Console device segment was not protected: $name"
+        Assert-True ((Read-DataSafeRepository $result.Root).ComputerName -ceq $name) 'Console-like friendly name was changed in metadata.'
+      }
     }
     Test-Case 'invalid initializer arguments create no repository' {
       $target = Join-Path $tempRoot 'invalid'
@@ -178,6 +232,26 @@ if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
         Assert-Throws { Move-DataSafeSameVolume $outside (Join-Path $junction 'moved') } 'reparse'
         Assert-True (@([IO.Directory]::GetFileSystemEntries($outside)).Count -eq 0) 'Junction target was changed.'
       } finally { [IO.Directory]::Delete((ConvertTo-DataSafeExtendedPath $junction)) }
+    }
+    Test-Case 'reparse validation never queries metadata beneath a real junction' {
+      $outside = Join-Path $tempRoot 'no-traversal-target'
+      $junction = Join-Path $tempRoot 'no-traversal-junction'
+      Ensure-DataSafeDirectory $outside
+      [IO.File]::WriteAllText((Join-Path $outside 'state.json'), 'outside')
+      New-Item -ItemType Junction -Path $junction -Target $outside | Out-Null
+      $observedPaths = New-Object 'System.Collections.Generic.List[string]'
+      $originalConverter = (Get-Item Function:ConvertTo-DataSafeExtendedPath).ScriptBlock
+      # Forward every conversion to the real helper. The paths record the
+      # actual attribute-query boundary; no filesystem operation is mocked.
+      function ConvertTo-DataSafeExtendedPath([string]$Path) {
+        $observedPaths.Add($Path)
+        & $originalConverter $Path
+      }
+      try {
+        Assert-Throws { Assert-DataSafeNoReparsePath (Join-Path $junction 'state.json') } 'reparse'
+        Assert-True ($observedPaths -contains $junction) 'The junction itself was not inspected.'
+        Assert-True (@($observedPaths | Where-Object { $_.StartsWith($junction + '\', [StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) 'An attribute query traversed the junction before rejection.'
+      } finally { [IO.Directory]::Delete((& $originalConverter $junction)) }
     }
   } finally { Remove-DataSafeDirectoryTree $tempRoot }
 } else { Write-Host 'SKIP: Windows filesystem integration cases (pure capability cases still run).' }

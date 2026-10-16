@@ -15,12 +15,41 @@ function Assert-DataSafeComputerId([string]$ComputerId) {
   }
 }
 
+function Assert-DataSafeIdentityJsonShape([string]$Json) {
+  $document = $Json.Trim()
+  if (-not $document.StartsWith('{') -or -not $document.EndsWith('}')) {
+    throw 'DataSafe identity metadata requires one top-level JSON object.'
+  }
+  # ConvertFrom-Json loses duplicate keys and can unwrap singleton arrays.
+  # Inspect decoded top-level property names before that conversion. Quoted
+  # string tokens keep braces and escaped quotes inside values out of the depth
+  # calculation. ConvertFrom-Json still performs the full JSON syntax check.
+  $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+  $depth = 0
+  foreach ($token in [regex]::Matches($document, '"(?:\\.|[^"\\])*"|[{}\[\]]')) {
+    $text = $token.Value
+    if ($text -eq '{' -or $text -eq '[') { $depth++; continue }
+    if ($text -eq '}' -or $text -eq ']') {
+      $depth--
+      if ($depth -eq 0 -and $token.Index -ne $document.Length - 1) {
+        throw 'DataSafe identity metadata requires one top-level JSON object.'
+      }
+      continue
+    }
+    if ($depth -eq 1 -and $document.Substring($token.Index + $token.Length).TrimStart().StartsWith(':')) {
+      $key = ConvertFrom-Json -InputObject $text -ErrorAction Stop
+      if (-not $keys.Add($key)) { throw "DataSafe identity metadata contains a duplicate JSON property: $key" }
+    }
+  }
+}
+
 function Read-DataSafeRepositoryJson([string]$Path) {
   Assert-DataSafeNoReparsePath $Path
   if (-not (Test-DataSafeFile $Path)) { throw "DataSafe repository or identity state JSON is missing: $Path" }
   try {
     $encoding = New-Object System.Text.UTF8Encoding($false, $true)
     $json = [System.IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath $Path), $encoding)
+    Assert-DataSafeIdentityJsonShape $json
     $result = ConvertFrom-Json -InputObject $json -ErrorAction Stop
     if ($null -eq $result -or $result -isnot [PSCustomObject]) { throw 'Expected a JSON object.' }
     return $result
@@ -79,7 +108,7 @@ function ConvertTo-DataSafeComputerSegment([string]$ComputerName) {
   if ([string]::IsNullOrWhiteSpace($segment)) { $segment = 'Computer' }
   # Reserve enough component space for the deterministic full UUID suffix.
   if ($segment.Length -gt 100) { $segment = $segment.Substring(0, 100).TrimEnd('.', ' ') }
-  if ($segment -match '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)') { $segment = '_' + $segment }
+  if ($segment -match '^(?i:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)') { $segment = '_' + $segment }
   return $segment
 }
 

@@ -240,7 +240,14 @@ function Write-DataSafeJson([string]$Path, $Value) {
 function Assert-DataSafeNoReparsePath([string]$Path) {
   if ([string]::IsNullOrWhiteSpace($Path)) { throw 'DataSafe requires a filesystem path.' }
   $current = [System.IO.Path]::GetFullPath((ConvertFrom-DataSafeExtendedPath $Path))
+  $ancestors = New-Object 'System.Collections.Generic.Stack[string]'
   while (-not [string]::IsNullOrEmpty($current)) {
+    $ancestors.Push($current)
+    $current = [System.IO.Path]::GetDirectoryName($current)
+  }
+  # Build the chain without I/O, then reject a link before querying descendants.
+  while ($ancestors.Count -gt 0) {
+    $current = $ancestors.Pop()
     try {
       $attributes = [System.IO.File]::GetAttributes((ConvertTo-DataSafeExtendedPath $current))
       if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
@@ -250,7 +257,6 @@ function Assert-DataSafeNoReparsePath([string]$Path) {
       # Missing descendants are allowed, but their existing ancestors are checked.
     } catch [System.IO.DirectoryNotFoundException] {
     }
-    $current = [System.IO.Path]::GetDirectoryName($current)
   }
 }
 
