@@ -24,6 +24,7 @@ function New-DataSafeIncrementalPlan($Repository, $PreviousManifest, $CurrentMan
     Operations = @(); StageBytes = [long]0; PeakRequiredBytes = [long]0
     DeletionReviewRequired = $false; DeletionCountsBySource = @(); BlockingErrors = @()
     OperationSchemaVersion = 1; MetadataOverheadBytes = [long]0; ReserveBytes = [long]0
+    PreviousManifest = $null; CurrentManifest = $null
   }
   $errors = New-Object 'System.Collections.Generic.List[string]'
   $actual = $null; $current = $null; $previous = $null; $capabilityValid = $false
@@ -195,5 +196,9 @@ function New-DataSafeIncrementalPlan($Repository, $PreviousManifest, $CurrentMan
   }
   $plan.BlockingErrors = $errors.ToArray()
   if ($errors.Count -gt 0) { $plan.Operations = @() }
+  # Complete validated snapshots are required for Task 5 to publish/recover
+  # unchanged entries. Validation above already detached caller-owned entries.
+  $plan.PreviousManifest = $previous
+  $plan.CurrentManifest = $current
   return $plan
 }

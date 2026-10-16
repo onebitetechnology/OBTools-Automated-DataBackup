@@ -40,6 +40,17 @@ function Assert-Blocked($Plan, [string]$Pattern) {
 }
 try {
   $repository = Initialize-DataSafeRepository $tempRoot 'Plan PC' '00112233-4455-4677-8899-aabbccddeeff'
+  Test-Case 'executable plan carries complete validated manifests including unchanged entries for durable commit' {
+    $previous = New-Fixture 3; $current = New-Fixture 3; $current.entries[0].sha256 = 'B' * 64
+    $plan = New-Plan $previous $current
+    Assert-True ($null -ne $plan.PSObject.Properties['PreviousManifest'] -and $null -ne $plan.PSObject.Properties['CurrentManifest']) 'Full manifests are absent from transaction input.'
+    Assert-True ($plan.PreviousManifest.entries.Count -eq 3 -and $plan.CurrentManifest.entries.Count -eq 3 -and $plan.Operations.Count -eq 1) 'Unchanged entries were lost from transaction input.'
+    Assert-True ($plan.PreviousManifest.entries[0].sha256 -ceq ('A' * 64) -and $plan.CurrentManifest.entries[0].sha256 -ceq ('B' * 64)) 'Manifest snapshots do not preserve previous/current state.'
+    $current.entries[0].sha256 = 'C' * 64
+    Assert-True ($plan.CurrentManifest.entries[0].sha256 -ceq ('B' * 64)) 'Plan retained a mutable input manifest alias.'
+    $initial = New-Plan $null (New-Fixture)
+    Assert-True ($null -eq $initial.PreviousManifest -and $initial.CurrentManifest.entries.Count -eq 1) 'Initial manifest contract is invalid.'
+  }
   Test-Case 'initial plan stages files and is serializable without history timestamp' {
     $plan = New-Plan $null (New-Fixture)
     Assert-True ($plan.BlockingErrors.Count -eq 0 -and $plan.StageBytes -eq 3 -and $plan.Operations.Count -eq 1) 'Initial plan failed.'
