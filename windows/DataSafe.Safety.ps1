@@ -235,6 +235,70 @@ function Write-DataSafeJson([string]$Path, $Value) {
   [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
 }
 
+# Check every existing ancestor, not just the leaf: a junction in a parent can
+# redirect otherwise well-formed repository paths onto another volume or PC.
+function Assert-DataSafeNoReparsePath([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) { throw 'DataSafe requires a filesystem path.' }
+  $current = [System.IO.Path]::GetFullPath((ConvertFrom-DataSafeExtendedPath $Path))
+  while (-not [string]::IsNullOrEmpty($current)) {
+    try {
+      $attributes = [System.IO.File]::GetAttributes((ConvertTo-DataSafeExtendedPath $current))
+      if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "DataSafe refuses a reparse point in the filesystem path: $current"
+      }
+    } catch [System.IO.FileNotFoundException] {
+      # Missing descendants are allowed, but their existing ancestors are checked.
+    } catch [System.IO.DirectoryNotFoundException] {
+    }
+    $current = [System.IO.Path]::GetDirectoryName($current)
+  }
+}
+
+function Move-DataSafeSameVolume([string]$SourcePath, [string]$DestinationPath) {
+  Assert-DataSafeNoReparsePath $SourcePath
+  Assert-DataSafeNoReparsePath $DestinationPath
+  $source = [System.IO.Path]::GetFullPath((ConvertFrom-DataSafeExtendedPath $SourcePath))
+  $destination = [System.IO.Path]::GetFullPath((ConvertFrom-DataSafeExtendedPath $DestinationPath))
+  if (-not [System.IO.Path]::GetPathRoot($source).Equals([System.IO.Path]::GetPathRoot($destination), [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw 'DataSafe requires a same-volume move; copying across volumes is not allowed.'
+  }
+  if ((Test-DataSafeFile $destination) -or (Test-DataSafeDirectory $destination)) {
+    throw "DataSafe will not overwrite an existing move destination: $destination"
+  }
+  if (Test-DataSafeFile $source) {
+    [System.IO.File]::Move((ConvertTo-DataSafeExtendedPath $source), (ConvertTo-DataSafeExtendedPath $destination))
+  } elseif (Test-DataSafeDirectory $source) {
+    [System.IO.Directory]::Move((ConvertTo-DataSafeExtendedPath $source), (ConvertTo-DataSafeExtendedPath $destination))
+  } else { throw "DataSafe move source is missing: $source" }
+}
+
+function Write-DataSafeAtomicJson([string]$Path, $Value, [switch]$CreateOnly) {
+  Assert-DataSafeNoReparsePath $Path
+  $fullPath = [System.IO.Path]::GetFullPath((ConvertFrom-DataSafeExtendedPath $Path))
+  $parent = [System.IO.Path]::GetDirectoryName($fullPath)
+  Ensure-DataSafeDirectory $parent
+  $temporaryPath = Join-Path $parent ('.datasafe-' + [guid]::NewGuid().ToString('N') + '.tmp')
+  $json = ConvertTo-Json -InputObject $Value -Depth 32
+  $encoding = New-Object System.Text.UTF8Encoding($false, $true)
+  $bytes = $encoding.GetBytes($json)
+  try {
+    $stream = New-Object System.IO.FileStream((ConvertTo-DataSafeExtendedPath $temporaryPath), [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 4096, [System.IO.FileOptions]::WriteThrough)
+    try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+    # Read back before publishing; never delete the old document as a fallback.
+    $verifiedJson = [System.IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath $temporaryPath), $encoding)
+    if ($verifiedJson -cne $json) { throw 'DataSafe atomic JSON verification failed.' }
+    $null = ConvertFrom-Json -InputObject $verifiedJson -ErrorAction Stop
+    Assert-DataSafeNoReparsePath $fullPath
+    if (-not $CreateOnly -and (Test-DataSafeFile $fullPath)) {
+      [System.IO.File]::Replace((ConvertTo-DataSafeExtendedPath $temporaryPath), (ConvertTo-DataSafeExtendedPath $fullPath), [System.Management.Automation.Language.NullString]::Value)
+    } else {
+      Move-DataSafeSameVolume $temporaryPath $fullPath
+    }
+  } finally {
+    if (Test-DataSafeFile $temporaryPath) { [System.IO.File]::Delete((ConvertTo-DataSafeExtendedPath $temporaryPath)) }
+  }
+}
+
 function Get-DataSafeSha256([string]$Path) {
   $extendedPath = ConvertTo-DataSafeExtendedPath $Path
   if ([string]::IsNullOrWhiteSpace($extendedPath) -or -not [System.IO.File]::Exists($extendedPath)) {
