@@ -118,6 +118,14 @@ if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
       @{ Name = 'escaped duplicate UUID key'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computer\u0049d":"10112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'duplicate' },
       @{ Name = 'duplicate schema version'; Json = '{"formatVersion":0,"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}'; Error = 'duplicate' },
       @{ Name = 'duplicate friendly name'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"Original","computerName":"PC"}'; Error = 'duplicate' },
+      @{ Name = 'unquoted duplicate UUID'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC",computerId:"10112233-4455-4677-8899-aabbccddeeff"}'; Error = 'standard JSON' },
+      @{ Name = 'single-quoted duplicate UUID'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC",''computerId'':"10112233-4455-4677-8899-aabbccddeeff"}'; Error = 'standard JSON' },
+      @{ Name = 'single-quoted escaped duplicate UUID'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC",''computer\u0049d'':"10112233-4455-4677-8899-aabbccddeeff"}'; Error = 'standard JSON' },
+      @{ Name = 'comment-depth duplicate UUID'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC", /* [ */ "computerId":"10112233-4455-4677-8899-aabbccddeeff" /* ] */}'; Error = 'standard JSON' },
+      @{ Name = 'comment-depth escaped duplicate UUID'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC", /* [ */ "computer\u0049d":"10112233-4455-4677-8899-aabbccddeeff" /* ] */}'; Error = 'standard JSON' },
+      @{ Name = 'unquoted duplicate schema version'; Json = '{"formatVersion":0,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC",formatVersion:VERSION}'; Error = 'standard JSON' },
+      @{ Name = 'nonstandard trailing comma'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC",}'; Error = 'standard JSON' },
+      @{ Name = 'unquoted keyword property'; Json = '{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC",true:0}'; Error = 'standard JSON' },
       @{ Name = 'singleton object array'; Json = '[{"formatVersion":VERSION,"computerId":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC"}]'; Error = 'top-level JSON object' }
     )) {
       Test-Case "$($case.Name) rejected for complete repository" {
@@ -134,6 +142,19 @@ if ([System.IO.Path]::DirectorySeparatorChar -eq '\') {
         Assert-Throws { Get-DataSafeComputerId $statePath } $case.Error
         Assert-True ([IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath $statePath)) -ceq $stateJson) 'Ambiguous local state was changed.'
       }
+    }
+    Test-Case 'standard JSON whitespace Unicode escapes nested extensions and BOM remain valid for both readers' {
+      $root = Join-Path $tempRoot 'strict-json-positive'
+      New-TestRepositoryLayout $root
+      $template = " `t`r`n" + '{"formatVersion":VERSION,"computer\u0049d":"00112233-4455-4677-8899-aabbccddeeff","computerName":"PC \u00e9 \\\"quote\\\"","extension":{"list":[null,true,false,-12.5e+2,{},[],{"text":"/* [ ] */ } { \\ \/ \b \f \n \r \t"}]}}' + "`r`n"
+      $encoding = New-Object Text.UTF8Encoding($true)
+      $repositoryPath = Join-Path $root '.datasafe/repository.json'
+      [IO.File]::WriteAllText((ConvertTo-DataSafeExtendedPath $repositoryPath), $template.Replace('VERSION', '2'), $encoding)
+      $result = Read-DataSafeRepository $root
+      Assert-True ($result.ComputerId -ceq $id1 -and $result.ComputerName.Contains([string][char]0x00e9)) 'Valid standard JSON metadata was not preserved.'
+      $statePath = Join-Path $root 'state.json'
+      [IO.File]::WriteAllText((ConvertTo-DataSafeExtendedPath $statePath), $template.Replace('VERSION', '1'), $encoding)
+      Assert-True ((Get-DataSafeComputerId $statePath) -ceq $id1) 'Valid standard JSON identity state was rejected.'
     }
     Test-Case 'superscript serial and printer device names are browseable with original metadata preserved' {
       foreach ($prefix in @('COM','LPT')) {

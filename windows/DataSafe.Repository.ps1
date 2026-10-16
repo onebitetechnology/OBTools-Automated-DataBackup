@@ -15,32 +15,66 @@ function Assert-DataSafeComputerId([string]$ComputerId) {
   }
 }
 
-function Assert-DataSafeIdentityJsonShape([string]$Json) {
-  $document = $Json.Trim()
-  if (-not $document.StartsWith('{') -or -not $document.EndsWith('}')) {
-    throw 'DataSafe identity metadata requires one top-level JSON object.'
-  }
-  # ConvertFrom-Json loses duplicate keys and can unwrap singleton arrays.
-  # Inspect decoded top-level property names before that conversion. Quoted
-  # string tokens keep braces and escaped quotes inside values out of the depth
-  # calculation. ConvertFrom-Json still performs the full JSON syntax check.
-  $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-  $depth = 0
-  foreach ($token in [regex]::Matches($document, '"(?:\\.|[^"\\])*"|[{}\[\]]')) {
-    $text = $token.Value
-    if ($text -eq '{' -or $text -eq '[') { $depth++; continue }
-    if ($text -eq '}' -or $text -eq ']') {
-      $depth--
-      if ($depth -eq 0 -and $token.Index -ne $document.Length - 1) {
-        throw 'DataSafe identity metadata requires one top-level JSON object.'
+function Read-DataSafeStrictJsonValue($Tokens, $Cursor, [int]$Depth) {
+  $invalid = 'DataSafe identity metadata requires standard JSON syntax.'
+  if ($Cursor.Position -ge $Tokens.Count -or $Depth -gt 64) { throw $invalid }
+  $token = $Tokens[$Cursor.Position]
+  $Cursor.Position++
+  if ($token -eq '{') {
+    $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    if ($Cursor.Position -lt $Tokens.Count -and $Tokens[$Cursor.Position] -eq '}') { $Cursor.Position++; return }
+    while ($Cursor.Position -lt $Tokens.Count) {
+      $keyToken = $Tokens[$Cursor.Position]
+      if (-not $keyToken.StartsWith('"')) { throw $invalid }
+      if ($Depth -eq 0) {
+        $key = ConvertFrom-Json -InputObject $keyToken -ErrorAction Stop
+        if (-not $keys.Add($key)) { throw "DataSafe identity metadata contains a duplicate JSON property: $key" }
       }
-      continue
+      $Cursor.Position++
+      if ($Cursor.Position -ge $Tokens.Count -or $Tokens[$Cursor.Position] -ne ':') { throw $invalid }
+      $Cursor.Position++
+      Read-DataSafeStrictJsonValue $Tokens $Cursor ($Depth + 1)
+      if ($Cursor.Position -ge $Tokens.Count) { throw $invalid }
+      $separator = $Tokens[$Cursor.Position]
+      $Cursor.Position++
+      if ($separator -eq '}') { return }
+      if ($separator -ne ',') { throw $invalid }
     }
-    if ($depth -eq 1 -and $document.Substring($token.Index + $token.Length).TrimStart().StartsWith(':')) {
-      $key = ConvertFrom-Json -InputObject $text -ErrorAction Stop
-      if (-not $keys.Add($key)) { throw "DataSafe identity metadata contains a duplicate JSON property: $key" }
-    }
+    throw $invalid
   }
+  if ($token -eq '[') {
+    if ($Cursor.Position -lt $Tokens.Count -and $Tokens[$Cursor.Position] -eq ']') { $Cursor.Position++; return }
+    while ($Cursor.Position -lt $Tokens.Count) {
+      Read-DataSafeStrictJsonValue $Tokens $Cursor ($Depth + 1)
+      if ($Cursor.Position -ge $Tokens.Count) { throw $invalid }
+      $separator = $Tokens[$Cursor.Position]
+      $Cursor.Position++
+      if ($separator -eq ']') { return }
+      if ($separator -ne ',') { throw $invalid }
+    }
+    throw $invalid
+  }
+  # The lexer already validated complete strings, numbers, and literals.
+  if ($token -notmatch '^(?:"|-|[0-9]|true$|false$|null$)') { throw $invalid }
+}
+
+function Assert-DataSafeIdentityJsonShape([string]$Json) {
+  # ConvertFrom-Json accepts nonstandard syntax on both supported engines.
+  # Tokenize every character strictly before conversion can collapse keys or
+  # ignore comments. Only JSON whitespace, escapes, numbers and literals pass.
+  $lexer = New-Object regex('\G(?:[ \t\r\n]+|(?<token>"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?|true|false|null|[{}\[\]:,]))')
+  $tokens = New-Object 'System.Collections.Generic.List[string]'
+  $position = 0
+  while ($position -lt $Json.Length) {
+    $match = $lexer.Match($Json, $position)
+    if (-not $match.Success) { throw 'DataSafe identity metadata requires standard JSON syntax.' }
+    if ($match.Groups['token'].Success) { $tokens.Add($match.Groups['token'].Value) }
+    $position += $match.Length
+  }
+  if ($tokens.Count -eq 0 -or $tokens[0] -ne '{') { throw 'DataSafe identity metadata requires one top-level JSON object.' }
+  $cursor = @{ Position = 0 }
+  Read-DataSafeStrictJsonValue $tokens $cursor 0
+  if ($cursor.Position -ne $tokens.Count) { throw 'DataSafe identity metadata requires one top-level JSON object.' }
 }
 
 function Read-DataSafeRepositoryJson([string]$Path) {
