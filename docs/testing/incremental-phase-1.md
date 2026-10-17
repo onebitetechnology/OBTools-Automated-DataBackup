@@ -90,7 +90,13 @@ make a qualification pass.
 
 `-KeepArtifacts` retains only successful disposable fixture roots for browsing
 ordinary `Latest Backup` and `Earlier Versions` files. It does not retain locks or
-transaction staging. Failed runs are cleaned. JSON evidence uses create-new and
+transaction staging. Failed runs are cleaned only after owned launch completion is
+proven. If termination cannot be confirmed, the matrix stops immediately and keeps
+all exact `OwnedRoots` regardless of `KeepArtifacts`, with `CleanupBlocked=true`,
+`UnresolvedLaunch` PID/fixture/destination/reason evidence and a manual-handling
+warning. Do not delete those roots or their locks/staging until that launch tree is
+confirmed stopped; this safety preservation is not successful qualification.
+JSON evidence uses create-new and
 will never overwrite a prior result; choose a fresh `-ResultPath` with an existing
 parent. Evidence can contain local fixture paths, so sanitize it before sharing.
 Clean retained fixtures only by the exact `OwnedRoots` list after review; never
@@ -169,6 +175,7 @@ powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/wi
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalRecoveryRegressionTests.ps1
 pwsh -NoProfile -NonInteractive -File tests/windows/Run-IncrementalRecoveryRegressionTests.ps1
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-HotfixRegressionTests.ps1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalMediaMatrixFailureTests.ps1
 npm test
 npm run dist:win
 git diff --check
@@ -176,6 +183,9 @@ git diff --check
 
 Expected counts: integration10/0, recovery11/0 each runtime, hotfix64/0, Node19/0
 with no skips, build exit0; matrix counts explicitly separate PASS/FAIL/NOT RUN.
+The focused matrix failure runner expects6/0: it controls the launcher/taskkill
+boundary (never killing real processes), with real disposable filesystem cleanup
+and four normally completed packaged prerequisites for the logical-offline case.
 Sandbox atomic-rename/hidden-launch restrictions may require approved native
 execution; a restricted-environment failure is not media qualification.
 

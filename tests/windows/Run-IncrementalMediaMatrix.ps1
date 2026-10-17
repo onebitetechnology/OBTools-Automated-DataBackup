@@ -26,6 +26,7 @@ $mediaInventory = New-Object 'System.Collections.Generic.List[object]'
 $runId = [guid]::NewGuid().ToString('N')
 $control = Join-Path ([IO.Path]::GetTempPath()) ('datasafe-media-' + $runId)
 $allPassed = $false
+$unresolvedLaunch = $null
 function Assert-Matrix([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message } }
 function Add-Result([string]$Fs, [string]$Case, [string]$Result, [string]$Evidence) {
   $rows.Add([PSCustomObject]@{FileSystem=$Fs;Case=$Case;Result=$Result;Evidence=$Evidence})
@@ -76,13 +77,25 @@ function Invoke-PackagedWorker($Fixture, [int]$ExpectedExit = 0) {
   Write-DataSafeJson $Fixture.ConfigPath $Fixture.Config
   # The packaged VBS is unmodified and owns the real hidden PowerShell launch.
   $arguments = '//B //NoLogo "{0}" "{1}" -ConfigPath "{2}" -StatusPath "{3}" -AllowNewDestination' -f (Join-Path $Fixture.Bin 'DataSafeTaskRunner.vbs'), (Join-Path $Fixture.Bin 'backup-engine.ps1'), $Fixture.ConfigPath, $Fixture.StatusPath
+  # Fail closed until this owned launch is proven finished. A failed process
+  # start/wait/termination must never authorize cleanup under a possible writer.
+  $script:unresolvedLaunch = [PSCustomObject]@{LauncherProcessId=$null;FixtureRoot=$Fixture.Root;DestinationRoot=$Fixture.Drive;Reason='Owned launch completion has not been confirmed.'}
   $p = Start-Process (Join-Path $env:SystemRoot 'System32/wscript.exe') -WindowStyle Hidden -ArgumentList $arguments -PassThru
+  $script:unresolvedLaunch.LauncherProcessId = $p.Id
   if (-not $p.WaitForExit(180000)) {
     # Stop this owned launch tree, not just WScript while its worker keeps writing.
-    $kill = Start-Process (Join-Path $env:SystemRoot 'System32/taskkill.exe') -WindowStyle Hidden -ArgumentList ('/PID {0} /T /F' -f $p.Id) -Wait -PassThru -RedirectStandardOutput (Join-Path $Fixture.Root 'timeout-out.txt') -RedirectStandardError (Join-Path $Fixture.Root 'timeout-err.txt')
-    if ($kill.ExitCode -ne 0) { throw 'Owned worker tree could not be stopped after timeout; manual process inspection required.' }
+    try {
+      $kill = Start-Process (Join-Path $env:SystemRoot 'System32/taskkill.exe') -WindowStyle Hidden -ArgumentList ('/PID {0} /T /F' -f $p.Id) -Wait -PassThru -RedirectStandardOutput (Join-Path $Fixture.Root 'timeout-out.txt') -RedirectStandardError (Join-Path $Fixture.Root 'timeout-err.txt')
+      if ($kill.ExitCode -ne 0) { throw "Owned tree termination exit $($kill.ExitCode)." }
+      if (-not $p.WaitForExit(10000)) { throw 'Owned launcher exit was not confirmed after tree termination.' }
+    } catch {
+      $script:unresolvedLaunch.Reason = "Timeout termination unconfirmed: $($_.Exception.Message)"
+      throw ($script:unresolvedLaunch.Reason + ' Manual process inspection required; fixture cleanup is blocked.')
+    }
+    $script:unresolvedLaunch = $null
     throw 'Packaged launcher timed out; owned worker tree was stopped.'
   }
+  $script:unresolvedLaunch = $null
   $p.Refresh()
   $s = Read-DataSafeJson $Fixture.StatusPath
   Assert-Matrix ($p.ExitCode -eq $ExpectedExit) "Packaged launcher exit $($p.ExitCode), expected $ExpectedExit : $($s.lastBackupMessage)"
@@ -193,8 +206,14 @@ try {
         $pointerPath = Join-Path $repo.MetadataRoot 'current-manifest.json'; $before=Get-DataSafeSha256 $pointerPath
         $offline = $destination + '-offline'
         [IO.Directory]::Move((ConvertTo-DataSafeExtendedPath $destination), (ConvertTo-DataSafeExtendedPath $offline))
+        $owned.Add($offline)
         try { $null=Invoke-PackagedWorker $f 1 }
-        finally { [IO.Directory]::Move((ConvertTo-DataSafeExtendedPath $offline), (ConvertTo-DataSafeExtendedPath $destination)) }
+        finally {
+          if ($null -eq $unresolvedLaunch) {
+            [IO.Directory]::Move((ConvertTo-DataSafeExtendedPath $offline), (ConvertTo-DataSafeExtendedPath $destination))
+            [void]$owned.Remove($offline)
+          }
+        }
         Assert-Matrix ((Get-DataSafeSha256 $pointerPath) -ceq $before) 'Unavailable destination changed authority.'
         Assert-Latest $f $repo
         $s=Invoke-PackagedWorker $f
@@ -268,19 +287,23 @@ try {
       Add-Result $fs 'zero visible PowerShell windows' 'NOT RUN' 'Packaged VBS executed successfully; interactive desktop observation still required (static/runtime launch is not a visible-window observation).'
     } catch {
       if (-not @($rows | Where-Object { $_.FileSystem -eq $fs -and $_.Result -eq 'FAIL' }).Count) { Add-Result $fs 'media setup/run' 'FAIL' $_.Exception.Message }
+      if ($null -ne $unresolvedLaunch) { break }
       # Continue independent filesystems, preserving failure in the final exit code.
     }
   }
   $allPassed = @($rows | Where-Object { $_.Result -eq 'FAIL' }).Count -eq 0
 } finally {
-  # Never retain a failed transaction's locks/staging for a browsable demo.
-  # Retention is opt-in AND all executed assertions must have passed.
-  $retain = $KeepArtifacts -and $allPassed
+  # An unconfirmed writer blocks ALL cleanup and further media execution.
+  # This is manual safety preservation, not a passing browsable demo; neither
+  # the default nor KeepArtifacts may delete its locks/staging/source evidence.
+  $cleanupBlocked = $null -ne $unresolvedLaunch
+  $retain = $cleanupBlocked -or ($KeepArtifacts -and $allPassed)
   $report = [PSCustomObject]@{
     Schema='datasafe.media-matrix';FormatVersion=1;RunId=$runId;CreatedUtc=[datetime]::UtcNow.ToString('o')
     OS=[Environment]::OSVersion.VersionString;PowerShell=$PSVersionTable.PSVersion.ToString()
     PackageVersion=(Read-DataSafeJson (Join-Path $PSScriptRoot '../../package.json')).version
     PackagedHashes=$hashes.ToArray();MediaInventory=$mediaInventory.ToArray();Results=$rows.ToArray();ArtifactsRetained=[bool]$retain
+    CleanupBlocked=$cleanupBlocked;UnresolvedLaunch=$unresolvedLaunch
     OwnedRoots=@(if($retain){$owned.ToArray()})
     Phase1Complete=$false
   }
@@ -297,7 +320,10 @@ try {
     }
     $report | ConvertTo-Json -Depth 8 | Write-Output
   } finally {
-    if ($retain) { foreach($path in $owned){Write-Host "RETAINED disposable fixture: $path"} }
+    if ($retain) {
+      if ($cleanupBlocked) { Write-Host "MANUAL HANDLING REQUIRED: owned launcher PID=$($unresolvedLaunch.LauncherProcessId); $($unresolvedLaunch.Reason) Do not remove roots until the owned launch tree is confirmed stopped." }
+      foreach($path in $owned){Write-Host "RETAINED disposable fixture: $path"}
+    }
     else {
       foreach ($path in @($owned | Sort-Object Length -Descending)) {
         # Every target is the exact absolute GUID child created above, never a supplied parent.
