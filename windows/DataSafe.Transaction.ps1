@@ -8,6 +8,15 @@ if ($null -eq (Get-Variable DataSafeTransactionOwners -Scope Script -ErrorAction
   $script:DataSafeTransactionOwners = @{}
 }
 
+function Get-DataSafeTransactionOwnerKey([string]$RepositoryRoot, [string]$ComputerId, [string]$TransactionId) {
+  Assert-DataSafeComputerId $ComputerId
+  Assert-DataSafeComputerId $TransactionId
+  $ordinary = (ConvertFrom-DataSafeExtendedPath $RepositoryRoot).Replace('/', '\')
+  Assert-DataSafeManifestSourcePath $ordinary
+  $canonical = [IO.Path]::GetFullPath($ordinary).TrimEnd('\').ToUpperInvariant()
+  return $canonical + [char]0 + ([guid]$ComputerId).ToString('D') + [char]0 + ([guid]$TransactionId).ToString('D')
+}
+
 function Assert-DataSafeTransactionFields($Value, [string[]]$Names) {
   if ($Value -isnot [PSCustomObject]) { throw 'DataSafe transaction schema requires an object.' }
   foreach ($name in $Names) {
@@ -15,6 +24,19 @@ function Assert-DataSafeTransactionFields($Value, [string[]]$Names) {
   }
   foreach ($property in $Value.PSObject.Properties) {
     if ($property.Name -cnotin $Names) { throw "DataSafe transaction schema has an unknown field: $($property.Name)" }
+  }
+}
+
+function Assert-DataSafeTransactionManifestFields($Manifest) {
+  Assert-DataSafeTransactionFields $Manifest @('schema','formatVersion','createdUtc','sources','entries','sourceErrors')
+  foreach ($source in $Manifest.sources) {
+    Assert-DataSafeTransactionFields $source @('sourceId','path','relativeDestination')
+  }
+  foreach ($entry in $Manifest.entries) {
+    Assert-DataSafeTransactionFields $entry @('sourceId','relativePath','entryType','length','modifiedUtc','attributes','sha256','versionLocation')
+  }
+  foreach ($sourceError in $Manifest.sourceErrors) {
+    Assert-DataSafeTransactionFields $sourceError @('sourceId','path','message')
   }
 }
 
@@ -80,15 +102,20 @@ function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
   }
   $failure = Get-DataSafeManifestScalar $Transaction 'failure' -AllowNull
   if ($null -ne $failure -and $failure.Length -gt 4096) { throw 'DataSafe transaction failure diagnostic is too large.' }
+  if ($state -cin @('prepared','applying','committed') -and $null -ne $failure) { throw 'DataSafe transaction prepared/applying/committed state cannot contain a failure.' }
   foreach ($name in @('stageBytes','peakRequiredBytes','metadataOverheadBytes','reserveBytes')) {
     if ((Get-DataSafeManifestScalar $Transaction $name 'integer') -lt 0) { throw 'DataSafe transaction byte allowance is invalid.' }
   }
   if ($Transaction.metadataOverheadBytes -lt 1048576 -or $Transaction.reserveBytes -lt 5368709120 -or
       [decimal]$Transaction.peakRequiredBytes -ne ([decimal]$Transaction.stageBytes + $Transaction.metadataOverheadBytes + $Transaction.reserveBytes)) { throw 'DataSafe transaction metadata/space allowance is invalid.' }
   if ($Transaction.operations -isnot [array]) { throw 'DataSafe transaction operations schema requires an array.' }
+  Assert-DataSafeTransactionManifestFields $Transaction.currentManifest
   $current = ConvertTo-DataSafeValidatedManifest $Transaction.currentManifest
   $previous = $null
-  if ($null -ne $Transaction.previousManifest) { $previous = ConvertTo-DataSafeValidatedManifest $Transaction.previousManifest }
+  if ($null -ne $Transaction.previousManifest) {
+    Assert-DataSafeTransactionManifestFields $Transaction.previousManifest
+    $previous = ConvertTo-DataSafeValidatedManifest $Transaction.previousManifest
+  }
   if ($current.sourceErrors.Count -ne 0 -or ($null -ne $previous -and $previous.sourceErrors.Count -ne 0)) { throw 'DataSafe transaction manifest contains source errors.' }
   if ($prior -cne $(if ($null -ne $previous) { $previous.createdUtc } else { $null })) { throw 'DataSafe transaction previous manifest timestamp does not match.' }
   $oldEntries = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
@@ -130,7 +157,7 @@ function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
     if ($kind -cnotin @('add','replace','metadata','delete') -or $status -cnotin @('pending','copying','verified','failed')) { throw 'DataSafe transaction operation kind/status is invalid.' }
     $errorText = Get-DataSafeManifestScalar $op 'error' -AllowNull
     if ($null -ne $errorText -and $errorText.Length -gt 4096) { throw 'DataSafe transaction operation diagnostic is too large.' }
-    if ($state -cin @('prepared','applying','committed') -and ($status -cne 'verified' -or $null -ne $errorText -or $null -ne $failure)) { throw 'DataSafe transaction prepared state requires verified operations without failures.' }
+    if ($state -cin @('prepared','applying','committed') -and ($status -cne 'verified' -or $null -ne $errorText)) { throw 'DataSafe transaction prepared state requires verified operations without failures.' }
     $sourceId = Get-DataSafeManifestScalar $op 'sourceId'
     $relative = ConvertTo-DataSafeManifestRelativePath (Get-DataSafeManifestScalar $op 'relativePath')
     $key = $sourceId + [char]0 + $relative
@@ -153,8 +180,10 @@ function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
         $newHash -cne $(if ($null -ne $new) { $new.sha256 } else { $null })) { throw 'DataSafe transaction expected hash does not match its entry.' }
     $entry = if ($null -ne $new) { $new } else { $old }
     Assert-DataSafeTransactionPath $op.currentPath (Join-Path $root $entry.versionLocation)
-    if ($currentPaths.ContainsKey($op.currentPath)) { throw 'DataSafe transaction duplicate current path.' }
-    $currentPaths.Add($op.currentPath, $entry)
+    if ($null -ne $new) {
+      if ($currentPaths.ContainsKey($op.currentPath)) { throw 'DataSafe transaction duplicate current path.' }
+      $currentPaths.Add($op.currentPath, $new)
+    }
     $expectedOld = if ($null -ne $old) { Join-Path $root $old.versionLocation } else { $null }
     Assert-DataSafeTransactionPath $op.oldCurrentPath $expectedOld -AllowNull
     if ($null -ne $old) {
@@ -304,6 +333,12 @@ function New-DataSafeTransaction($Repository, $Plan) {
     $copy
   })
   $null = Assert-DataSafeTransactionSchema $transaction $path
+  $ownerKey = Get-DataSafeTransactionOwnerKey $repo.Root $repo.ComputerId $id
+  if ($script:DataSafeTransactionOwners.ContainsKey($ownerKey)) {
+    $existing = $script:DataSafeTransactionOwners[$ownerKey]
+    if ($null -ne $existing.Handle -and $existing.Handle.CanWrite) { throw 'A DataSafe backup or restore is already running. Wait for it to finish before starting another operation.' }
+    throw 'DataSafe transaction UUID/path is already occupied; existing ownership will not be overwritten.'
+  }
   $lockPath = Join-Path $repo.MetadataRoot 'operation.lock'
   Assert-DataSafeNoReparsePath $lockPath
   $handle = Acquire-DataSafeOperationLock (ConvertTo-DataSafeExtendedPath $lockPath)
@@ -316,7 +351,7 @@ function New-DataSafeTransaction($Repository, $Plan) {
     }
     Write-DataSafeTransactionJournal $transaction $path -CreateOnly
     Ensure-DataSafeDirectory $staging
-    $script:DataSafeTransactionOwners[$id] = [PSCustomObject]@{
+    $script:DataSafeTransactionOwners[$ownerKey] = [PSCustomObject]@{
       Transaction = $transaction; Repository = $repo; Path = $path; LockPath = $lockPath; Handle = $handle
       Json = ConvertTo-Json -InputObject $transaction -Depth 32 -Compress
     }
@@ -329,8 +364,9 @@ function New-DataSafeTransaction($Repository, $Plan) {
 
 function Get-DataSafeTransactionOwner($Transaction) {
   $id = Get-DataSafeManifestScalar $Transaction 'transactionId'
-  if (-not $script:DataSafeTransactionOwners.ContainsKey($id)) { throw 'DataSafe transaction requires its live lock owner; disk reads do not restore authority.' }
-  $owner = $script:DataSafeTransactionOwners[$id]
+  $ownerKey = Get-DataSafeTransactionOwnerKey (Get-DataSafeManifestScalar $Transaction 'repositoryRoot') (Get-DataSafeManifestScalar $Transaction 'computerId') $id
+  if (-not $script:DataSafeTransactionOwners.ContainsKey($ownerKey)) { throw 'DataSafe transaction requires its live lock owner; disk reads do not restore authority.' }
+  $owner = $script:DataSafeTransactionOwners[$ownerKey]
   if (-not [object]::ReferenceEquals($owner.Transaction, $Transaction) -or $null -eq $owner.Handle -or -not $owner.Handle.CanWrite) { throw 'DataSafe transaction requires its live lock owner.' }
   if ((ConvertTo-Json -InputObject $Transaction -Depth 32 -Compress) -cne $owner.Json) { throw 'DataSafe transaction in-memory metadata was changed outside its journal writer.' }
   $disk = Read-DataSafeTransaction $owner.Path
@@ -436,11 +472,17 @@ function Stage-DataSafeTransaction($Transaction, [scriptblock]$HashProvider = $n
 function Set-DataSafeTransactionState($Transaction, [string]$State) {
   if ($State -cnotin @('prepared','applying','committed','rollingBack','rolledBack')) { throw 'DataSafe transaction state is invalid.' }
   $id = Get-DataSafeManifestScalar $Transaction 'transactionId'
+  $ownerKey = Get-DataSafeTransactionOwnerKey (Get-DataSafeManifestScalar $Transaction 'repositoryRoot') (Get-DataSafeManifestScalar $Transaction 'computerId') $id
   # Idempotence is allowed on the original terminal object, but must not
   # dispose/delete a newer transaction's repository lock.
-  if ($script:DataSafeTransactionOwners.ContainsKey($id)) {
-    $existing = $script:DataSafeTransactionOwners[$id]
-    if ([object]::ReferenceEquals($existing.Transaction, $Transaction) -and $null -eq $existing.Handle -and $Transaction.state -ceq $State -and $State -cin @('committed','rolledBack')) { return }
+  if ($script:DataSafeTransactionOwners.ContainsKey($ownerKey)) {
+    $existing = $script:DataSafeTransactionOwners[$ownerKey]
+    if ([object]::ReferenceEquals($existing.Transaction, $Transaction) -and $null -eq $existing.Handle -and $Transaction.state -ceq $State -and $State -cin @('committed','rolledBack')) {
+      if ((ConvertTo-Json -InputObject $Transaction -Depth 32 -Compress) -cne $existing.Json) { throw 'DataSafe terminal transaction caller metadata no longer matches its durable state.' }
+      $disk = Read-DataSafeTransaction $existing.Path
+      if ($disk.state -cne $State -or (ConvertTo-Json -InputObject $disk -Depth 32 -Compress) -cne $existing.Json) { throw 'DataSafe terminal transaction durable metadata no longer matches its owner.' }
+      return
+    }
   }
   $owner = Get-DataSafeTransactionOwner $Transaction
   if ($Transaction.state -ceq $State) { return }

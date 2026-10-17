@@ -68,6 +68,174 @@ function Get-JournalPath($Fixture) { Join-Path $Fixture.Repo.TransactionRoot ($F
 function Read-JournalText($Fixture) { [IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath (Get-JournalPath $Fixture))) }
 function Write-JournalObject($Fixture, $Value) { Write-TestFile (Get-JournalPath $Fixture) (ConvertTo-Json -InputObject $Value -Depth 32) }
 try {
+  foreach ($direction in @('directory-to-file','file-to-directory')) {
+    Test-Case "review type replacement $direction keeps old and new descendant trees separate" {
+      $f = New-Fixture
+      foreach ($name in @('keep1.txt','keep2.txt','keep3.txt')) { Write-TestFile (Join-Path $f.Source $name) 'keep' }
+      $foo = Join-Path $f.Source 'foo'
+      if ($direction -ceq 'directory-to-file') { Write-TestFile (Join-Path $foo 'bar.txt') 'child' }
+      else { Write-TestFile $foo 'old file' }
+      $job = [PSCustomObject]@{ id = 'docs'; path = $f.Source; name = 'Documents' }
+      $old = New-DataSafeSourceManifest @($job)
+      if ($direction -ceq 'directory-to-file') { Remove-DataSafeDirectoryTree $foo; Write-TestFile $foo 'new file' }
+      else { [IO.File]::Delete($foo); Write-TestFile (Join-Path $foo 'bar.txt') 'child' }
+      $new = New-DataSafeSourceManifest @($job) $old
+      $cap = Get-DataSafeFilesystemCapabilities 'NTFS'; $cap | Add-Member TotalBytes ([long]20GB)
+      $f.Plan = New-DataSafeIncrementalPlan $f.Repo $old $new $cap 100GB
+      Assert-True ($f.Plan.BlockingErrors.Count -eq 0 -and -not $f.Plan.DeletionReviewRequired) 'Valid type-replacement plan was blocked.'
+      Assert-True (($f.Plan.Operations.relativePath -join ',') -ceq 'foo,foo/bar.txt' -and ($f.Plan.Operations.sequence -join ',') -ceq '1,2') 'Operation order/schema correspondence changed.'
+      Assert-True (($f.Plan.Operations.kind -join ',') -ceq $(if ($direction -ceq 'directory-to-file') { 'replace,delete' } else { 'replace,add' })) 'Wrong type-change operations.'
+      $tx = Start-Transaction $f; $null = Stage-DataSafeTransaction $tx
+      $disk = Read-DataSafeTransaction (Get-JournalPath $f)
+      Assert-True ($disk.state -ceq 'prepared' -and ($disk.operations.status -join ',') -ceq 'verified,verified') 'Valid replacement could not prepare.'
+      Assert-True (@($disk.operations | Where-Object { $_.stagedPath }).Count -eq 1) 'Directory or deletion staged content.'
+      Assert-True ([IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $f.Repo.LatestRoot)).Count -eq 0 -and [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $f.Repo.HistoryRoot)).Count -eq 0) 'Staging modified current/history roots.'
+    }
+  }
+  Test-Case 'review duplicate UUID in independent repositories preserves both live owners and locks' {
+    $one = New-Fixture; $two = New-Fixture
+    $two.Plan.TransactionId = $one.Plan.TransactionId
+    foreach ($op in $two.Plan.Operations) {
+      if ($op.stagedPath) { $op.stagedPath = Join-Path (Join-Path $two.Repo.StagingRoot $two.Plan.TransactionId) $op.newEntry.versionLocation.Substring(14) }
+    }
+    $owners = New-Object 'System.Collections.Generic.List[object]'
+    try {
+      $first = Start-Transaction $one; $owners.Add((Get-DataSafeTransactionOwner $first))
+      $second = Start-Transaction $two; $owners.Add((Get-DataSafeTransactionOwner $second))
+      $null = Stage-DataSafeTransaction $first; $null = Stage-DataSafeTransaction $second
+      Assert-True ($first.state -ceq 'prepared' -and $second.state -ceq 'prepared') 'Duplicate UUID stranded an independent live owner.'
+      Set-DataSafeTransactionState $first rollingBack; Set-DataSafeTransactionState $first rolledBack
+      Assert-Throws { New-DataSafeTransaction $two.Repo $two.Plan } 'already running'
+      Set-DataSafeTransactionState $first rolledBack
+      Assert-Throws { New-DataSafeTransaction $two.Repo $two.Plan } 'already running'
+      Set-DataSafeTransactionState $second rollingBack; Set-DataSafeTransactionState $second rolledBack
+      foreach ($f in @($one,$two)) {
+        $lock = Join-Path $f.Repo.MetadataRoot 'operation.lock'
+        $handle = Acquire-DataSafeOperationLock (ConvertTo-DataSafeExtendedPath $lock)
+        Release-DataSafeOperationLock $handle (ConvertTo-DataSafeExtendedPath $lock)
+      }
+    } finally {
+      # Retain these exact handles for RED cleanup even if the old UUID-only
+      # registry loses the first context. Never release another owner's path.
+      foreach ($owner in $owners) {
+        if ($null -ne $owner.Handle -and $owner.Handle.CanWrite) {
+          Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath)
+          $owner.Handle = $null
+        }
+      }
+      $script:live.Clear()
+    }
+  }
+  Test-Case 'review ownership canonicalizes case slash extended aliases without granting forged authority' {
+    $f = New-Fixture; $tx = Start-Transaction $f
+    $key = Get-DataSafeTransactionOwnerKey $f.Repo.Root $f.Repo.ComputerId $tx.transactionId
+    foreach ($alias in @($f.Repo.Root.ToUpperInvariant(), $f.Repo.Root.Replace('\','/'), (ConvertTo-DataSafeExtendedPath $f.Repo.Root))) {
+      Assert-True ((Get-DataSafeTransactionOwnerKey $alias $f.Repo.ComputerId.ToUpperInvariant() $tx.transactionId.ToUpperInvariant()) -ceq $key) 'A physical root/UUID alias changed the ownership key.'
+    }
+    $aliasRepo = Read-DataSafeRepository $f.Repo.Root.ToUpperInvariant()
+    Assert-Throws { New-DataSafeTransaction $aliasRepo $f.Plan } 'already running'
+    $aliasRepo.Root = $f.Repo.Root.Replace('\','/')
+    Assert-Throws { New-DataSafeTransaction $aliasRepo $f.Plan } 'already running|repository.*mismatch'
+    $aliasRepo.Root = ConvertTo-DataSafeExtendedPath $f.Repo.Root
+    Assert-Throws { New-DataSafeTransaction $aliasRepo $f.Plan } 'repository.*mismatch|prefix|path'
+    $bad = Read-DataSafeRepository $f.Repo.Root; $bad.ComputerId = [guid]::NewGuid().ToString('D')
+    Assert-Throws { New-DataSafeTransaction $bad $f.Plan } 'repository.*mismatch|identity'
+    $forged = Read-DataSafeTransaction (Get-JournalPath $f); $forged.computerId = $bad.ComputerId
+    Assert-Throws { Stage-DataSafeTransaction $forged } 'live|owner|identity'
+    $null = Stage-DataSafeTransaction $tx
+  }
+  foreach ($state in @('staging','prepared','applying','committed','rollingBack','rolledBack')) {
+    Test-Case "review empty-operation $state journal enforces transaction-level failure invariant" {
+      $f = New-Fixture; $cap = Get-DataSafeFilesystemCapabilities 'NTFS'; $cap | Add-Member TotalBytes ([long]20GB)
+      $f.Plan = New-DataSafeIncrementalPlan $f.Repo $f.Manifest $f.Manifest $cap 100GB
+      $tx = Start-Transaction $f; $j = Read-DataSafeTransaction (Get-JournalPath $f)
+      try {
+        $j.state = $state; Write-JournalObject $f $j
+        Assert-True ((Read-DataSafeTransaction (Get-JournalPath $f)).state -ceq $state) 'Valid empty journal failed round-trip.'
+        $j.failure = 'failed'; Write-JournalObject $f $j
+        if ($state -cin @('prepared','applying','committed')) {
+          Assert-Throws { Read-DataSafeTransaction (Get-JournalPath $f) } 'failure|state|prepared'
+        } else {
+          Assert-True ((Read-DataSafeTransaction (Get-JournalPath $f)).failure -ceq 'failed') 'Failure-bearing non-success journal could not round-trip.'
+        }
+      } finally { Write-JournalObject $f $tx }
+    }
+  }
+  foreach ($terminal in @('rolledBack','committed')) {
+    Test-Case "review terminal $terminal idempotence rejects caller detached and durable state mutations" {
+      $f = New-Fixture; $tx = Start-Transaction $f; $null = Stage-DataSafeTransaction $tx
+      $other = if ($terminal -ceq 'rolledBack') { 'committed' } else { 'rolledBack' }
+      $preparedJson = Read-JournalText $f
+      try {
+        $tx.state = $other
+        Assert-Throws { Set-DataSafeTransactionState $tx $other } 'metadata|state|live|owner'
+      } finally { $tx.state = 'prepared' }
+      Assert-True ((Read-JournalText $f) -ceq $preparedJson) 'Mutated live caller changed durable state.'
+      Assert-Throws { New-DataSafeTransaction $f.Repo $f.Plan } 'already running'
+      if ($terminal -ceq 'committed') { Set-DataSafeTransactionState $tx applying; Set-DataSafeTransactionState $tx committed }
+      else { Set-DataSafeTransactionState $tx rollingBack; Set-DataSafeTransactionState $tx rolledBack }
+      $terminalJson = Read-JournalText $f
+      try {
+        $tx.state = $other
+        Assert-Throws { Set-DataSafeTransactionState $tx $other } 'metadata|state|live|owner|terminal'
+      } finally { $tx.state = $terminal }
+      $detached = Read-DataSafeTransaction (Get-JournalPath $f)
+      Assert-Throws { Set-DataSafeTransactionState $detached $terminal } 'live|owner|terminal'
+      $detached.state = $other
+      Assert-Throws { Set-DataSafeTransactionState $detached $other } 'live|owner|terminal'
+      Assert-True ((Read-JournalText $f) -ceq $terminalJson) 'Detached or mutated terminal caller changed disk.'
+      try {
+        $disk = Read-DataSafeTransaction (Get-JournalPath $f); $disk.state = $other
+        Write-JournalObject $f $disk
+        Assert-Throws { Set-DataSafeTransactionState $tx $terminal } 'metadata|state|durable|terminal'
+        Assert-True ((Read-DataSafeTransaction (Get-JournalPath $f)).state -ceq $other) 'Terminal validation rewrote tampered disk.'
+      } finally { Write-TestFile (Get-JournalPath $f) $terminalJson }
+      Set-DataSafeTransactionState $tx $terminal
+      Assert-True ((Read-JournalText $f) -ceq $terminalJson) 'Valid terminal idempotence rewrote the journal.'
+    }
+  }
+  foreach ($manifestName in @('previousManifest','currentManifest')) {
+    foreach ($depth in @('manifest','source','entry','sourceError')) {
+      Test-Case "review strict $manifestName rejects unknown nested field at $depth depth" {
+        $f = New-Fixture -Mixed; $tx = Start-Transaction $f; $j = Read-DataSafeTransaction (Get-JournalPath $f)
+        try {
+          $manifest = $j.$manifestName
+          switch ($depth) {
+            manifest { $target = $manifest }
+            source { $target = $manifest.sources[0] }
+            entry { $target = $manifest.entries[0] }
+            sourceError {
+              $manifest.entries = @()
+              $manifest.sourceErrors = @([PSCustomObject]@{ sourceId = 'docs'; path = $f.Source; message = 'unavailable' })
+              $target = $manifest.sourceErrors[0]
+            }
+          }
+          $target | Add-Member -NotePropertyName unrecognized -NotePropertyValue 'must not survive a strict read'
+          Write-JournalObject $f $j
+          $before = Read-JournalText $f
+          Assert-Throws { Read-DataSafeTransaction (Get-JournalPath $f) } 'unknown field: unrecognized'
+          Assert-True ((Read-JournalText $f) -ceq $before) 'Reader rewrote rejected nested metadata.'
+        } finally { Write-JournalObject $f $tx }
+      }
+    }
+  }
+  Test-Case 'review canonical manifest creation and round-trip preserve only documented nested fields' {
+    $f = New-Fixture -Mixed
+    foreach ($name in @('PreviousManifest','CurrentManifest')) {
+      $f.Plan.$name | Add-Member extension 'discard top extension'
+      $f.Plan.$name.sources[0] | Add-Member extension 'discard source extension'
+      # Use an unchanged entry: changed entries also belong to the already
+      # strict operation snapshots and are not an extensible input boundary.
+      @($f.Plan.$name.entries | Where-Object { $_.relativePath -ceq 'd.txt' })[0] | Add-Member extension 'discard entry extension'
+    }
+    $tx = Start-Transaction $f; $disk = Read-DataSafeTransaction (Get-JournalPath $f)
+    foreach ($name in @('previousManifest','currentManifest')) {
+      Assert-True (($disk.$name.PSObject.Properties.Name -join ',') -ceq 'schema,formatVersion,createdUtc,sources,entries,sourceErrors') 'Manifest extension survived canonical persistence.'
+      Assert-True (($disk.$name.sources[0].PSObject.Properties.Name -join ',') -ceq 'sourceId,path,relativeDestination') 'Source extension survived canonical persistence.'
+      Assert-True (($disk.$name.entries[0].PSObject.Properties.Name -join ',') -ceq 'sourceId,relativePath,entryType,length,modifiedUtc,attributes,sha256,versionLocation') 'Entry extension survived canonical persistence.'
+    }
+    Assert-True ((Read-JournalText $f) -notmatch 'discard .* extension') 'Unknown metadata was serialized.'
+  }
   Test-Case 'complete manifests round-trip unchanged entries and are isolated from caller mutation' {
     $f = New-Fixture -Mixed; $tx = Start-Transaction $f
     Assert-True ($null -ne $tx.PSObject.Properties['currentManifest'] -and $null -ne $tx.PSObject.Properties['previousManifest']) 'Durable full manifests are absent.'
