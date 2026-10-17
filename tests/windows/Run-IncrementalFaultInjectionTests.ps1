@@ -76,6 +76,11 @@ function New-Fixture([switch]$Initial, [string]$Transition = '') {
   if ($Transition -eq 'directory-file') { Write-File (Join-Path $source 'node/child') 'child' }
   if ($Transition -eq 'file-directory') { Write-File (Join-Path $source node) 'old-node' }
   $job = [PSCustomObject]@{ id='docs'; path=$source; name='Documents' }
+  if ($Transition -like 'implicit-*') {
+    Write-File (Join-Path $source Sub) 'old-sub'
+    $job | Add-Member relativeDestination @('Folder')
+    if ($Transition -in @('implicit-directory-file','implicit-directory-directory')) { $job.relativeDestination=@('Folder','Sub') }
+  }
   $old = $null
   if (-not $Initial) {
     $old = New-DataSafeSourceManifest @($job)
@@ -97,6 +102,13 @@ function New-Fixture([switch]$Initial, [string]$Transition = '') {
     Ensure-DataSafeDirectory (Join-Path $source empty)
     if ($Transition -eq 'directory-file') { Remove-DataSafeDirectoryTree (Join-Path $source node); Write-File (Join-Path $source node) 'new-node' }
     if ($Transition -eq 'file-directory') { [IO.File]::Delete((Join-Path $source node)); Write-File (Join-Path $source 'node/child') 'new-child' }
+    if ($Transition -eq 'implicit-directory-file') { $job.relativeDestination=@('Folder') }
+    if ($Transition -eq 'implicit-file-directory') { $job.relativeDestination=@('Folder','Sub') }
+    if ($Transition -eq 'implicit-directory-directory') {
+      $job.relativeDestination=@('Folder'); [IO.File]::Delete((Join-Path $source Sub)); Write-File (Join-Path $source 'Sub/child') 'new-child'
+    }
+    if ($Transition -eq 'case-relative') { [IO.File]::Move((Join-Path $source a.txt),(Join-Path $source A.TXT)) }
+    if ($Transition -eq 'case-source') { $job.id='DOCS' }
   }
   $new = New-DataSafeSourceManifest @($job) $old
   $tx = New-DataSafeTransaction $repo (New-Plan $repo $old $new)
@@ -115,6 +127,18 @@ function Assert-New($f) {
   }
   Assert-True (-not (Test-DataSafeFile (Join-Path $f.Repo.LatestRoot 'Documents/c.txt'))) 'Deleted file remains.'
   Assert-True (-not (Test-DataSafeFile (Join-Path $f.Repo.MetadataRoot operation.lock))) 'Terminal lock remains.'
+}
+function Write-LegacyRelocation($f) {
+  $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=1
+  foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $j.PSObject.Properties.Remove($name) }
+  foreach ($op in $j.operations) {
+    foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) }
+    if ($op.kind -ceq 'replace' -and $op.oldEntry.sha256 -ceq $op.newEntry.sha256) {
+      $j.stageBytes-=$op.newEntry.length; $j.peakRequiredBytes-=$op.newEntry.length
+      [IO.File]::Delete($op.stagedPath); $op.kind='metadata'; $op.historyPath=$null; $op.stagedPath=$null
+    }
+  }
+  Write-File $f.Path (ConvertTo-Json $j -Depth 32); $null=Read-DataSafeTransaction $f.Path
 }
 try {
   Test-Case 'destination timestamp verification accepts only fixed media tolerance without hash weakening' {
@@ -154,6 +178,74 @@ try {
       Assert-Throws { Undo-DataSafeTransaction $f.Tx } 'commit|live|owner'
       Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Terminal recovery failed.'
     }
+  }
+  foreach ($transition in @('implicit-directory-file','implicit-file-directory','case-relative','case-source')) {
+    Test-Case "review identity dependency apply $transition" {
+      $f=New-Fixture -Transition $transition
+      $null=Invoke-DataSafeTransaction $f.Tx
+      Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Repeat identity recovery failed.'
+    }
+    Test-Case "review identity dependency interrupted rollback $transition" {
+      $f=New-Fixture -Transition $transition
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { throw 'crash' } } } crash
+      $r=Undo-DataSafeTransaction $f.Tx
+      Assert-True ($r.FinalState -ceq 'rolledBack') 'Identity dependency rollback failed.'
+      Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Repeat rollback failed.'
+    }
+    Test-Case "review identity dependency fault sweep $transition" {
+      $probe=New-Fixture -Transition $transition
+      $target=$(if ($transition -like 'implicit-*') { 'Sub' } else { 'a.txt' })
+      $script:targetSequence=@($probe.Tx.operations | Where-Object { $_.relativePath -ieq $target })[0].sequence
+      $script:points=New-Object 'System.Collections.Generic.List[string]'
+      $null=Invoke-DataSafeTransaction $probe.Tx {
+        param($c)
+        if ($c.Sequence -eq $script:targetSequence -or $c.Phase -in @('applying','remove-parents-filesystem','pointer')) { $script:points.Add($c.Phase) }
+      }
+      for ($fault=1;$fault -le $script:points.Count;$fault++) {
+        $f=New-Fixture -Transition $transition; $script:at=0; $script:failAt=$fault
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx {
+          param($c)
+          if ($c.Sequence -eq $script:targetSequence -or $c.Phase -in @('applying','remove-parents-filesystem','pointer')) {
+            $script:at++; if ($script:at -eq $script:failAt) { throw 'identity crash' }
+          }
+        } } 'identity crash'
+        Close-TestOwners
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Transition fault recovery failed.'
+        Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Transition repeat recovery failed.'
+      }
+      Write-Host "Identity boundaries checked ${transition}: $($script:points.Count)"
+    }
+    if ($transition -like 'implicit-*') {
+      Test-Case "implicit ancestor rollback restore-before-journal gap $transition" {
+        $f=New-Fixture -Transition $transition
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { throw 'crash' } } } crash
+        $oldSub=@($f.Old.entries | Where-Object relativePath -eq Sub)[0]
+        $script:oldSubPath=Join-Path $f.Repo.Root $oldSub.versionLocation; $script:oldSubEntry=$oldSub
+        $originalRestoreWriter=${function:Write-DataSafeTransactionJournal}; $script:restoreFaulted=$false
+        try {
+          function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
+            if ($Transaction.state -ceq 'rollingBack' -and -not $script:restoreFaulted -and
+                (Test-DataSafeTransactionObject $script:oldSubPath $script:oldSubEntry)) {
+              $script:restoreFaulted=$true; throw 'restore journal crash'
+            }
+            & $originalRestoreWriter $Transaction $Path -CreateOnly:$CreateOnly
+          }
+          Assert-Throws { Undo-DataSafeTransaction $f.Tx } 'restore journal crash'
+        } finally { ${function:Write-DataSafeTransactionJournal}=$originalRestoreWriter }
+        Close-TestOwners
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Implicit restore gap lost rollback.'
+        Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Implicit restore gap not repeatable.'
+      }
+    }
+  }
+  Test-Case 'metadata exposes a filesystem and durable boundary for every entry' {
+    $f=New-Fixture; $script:metadataFs=0; $script:metadataJournal=0
+    $null=Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { $script:metadataFs++ }; if ($c.Phase -eq 'metadata') { $script:metadataJournal++ } }
+    Assert-True ($script:metadataFs -eq $f.New.entries.Count -and $script:metadataJournal -eq $f.New.entries.Count) 'Metadata entries share only one fault boundary.'
   }
   foreach ($damage in @('edited','missing','metadata','staged','applying')) {
     Test-Case "preapply rejects $damage before any history mutation" {
@@ -310,6 +402,15 @@ try {
     $null = Stage-DataSafeTransaction $tx; $null = Invoke-DataSafeTransaction $tx
     Assert-True ([IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0 -and (Test-DataSafeTransactionObject $tx.operations[0].currentPath $tx.operations[0].newEntry -Metadata)) 'Metadata/history incorrect.'
   }
+  Test-Case 'metadata-only filesystem-before-journal gap proves actual progress' {
+    $f=New-Fixture -Initial; $null=Invoke-DataSafeTransaction $f.Tx
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $f.Source a.txt),[datetime]'2018-01-01Z')
+    $current=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $f.New
+    $tx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $f.New $current); $null=Stage-DataSafeTransaction $tx
+    Assert-Throws { Invoke-DataSafeTransaction $tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { throw 'crash' } } } crash
+    Close-TestOwners; $path=Join-Path $f.Repo.TransactionRoot ($tx.transactionId+'.json')
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $path).FinalState -ceq 'committed') 'Metadata gap mistaken for untouched baseline.'
+  }
   Test-Case 'post-pointer corruption blocks rather than undoing durable commit authority' {
     $f = New-Fixture
     Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'pointer') { throw 'crash' } } } crash
@@ -340,6 +441,111 @@ try {
     Assert-True ([IO.File]::ReadAllText($unknown) -ceq 'preserve-unknown' -and $result.Warnings.Count -eq 1 -and $result.Warnings[0].Code -ceq 'StagingCleanupFailed') 'Unknown staging evidence/warning missing.'
     Assert-New $f
     Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).Warnings.Count -eq 1 -and (Test-DataSafeFile $unknown)) 'Repeated terminal cleanup deleted evidence.'
+  }
+  Test-Case 'reserved staging substitution survives terminal cleanup and repeated recovery' {
+    $f=New-Fixture; $op=@($f.Tx.operations | Where-Object stagedPath)[0]
+    $script:substitutePath=$op.stagedPath
+    $r=Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'pointer') { Write-File $script:substitutePath 'unowned-reserved-bytes' } }
+    Assert-True ((Test-DataSafeFile $op.stagedPath) -and $r.Warnings.Count -eq 1) 'Reserved-path unowned bytes deleted.'
+    $again=Recover-DataSafeTransaction $f.Repo $f.Path
+    Assert-True ($again.Warnings.Count -eq 1 -and [IO.File]::ReadAllText($op.stagedPath) -ceq 'unowned-reserved-bytes') 'Repeated cleanup deleted substitution.'
+  }
+  Test-Case 'initial reserved staging collision survives failed stage undo and terminal recovery' {
+    $f=New-Fixture -Initial; $null=Undo-DataSafeTransaction $f.Tx
+    $tx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $null $f.New)
+    $op=@($tx.operations | Where-Object stagedPath)[0]; Write-File $op.stagedPath 'initial-unowned-collision'
+    Assert-Throws { Stage-DataSafeTransaction $tx } 'exist|collision|used'
+    $r=Undo-DataSafeTransaction $tx
+    Assert-True ($r.Warnings.Count -eq 1 -and [IO.File]::ReadAllText($op.stagedPath) -ceq 'initial-unowned-collision') 'Failed stage cleanup lost unowned bytes.'
+    $path=Join-Path $f.Repo.TransactionRoot ($tx.transactionId+'.json')
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $path).Warnings.Count -eq 1 -and (Test-DataSafeFile $op.stagedPath)) 'Terminal cleanup lost initial collision.'
+  }
+  Test-Case 'public rolledBack publication requires restored previous tree' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'archive-filesystem') { throw 'crash' } } } crash
+    Set-DataSafeTransactionState $f.Tx rollingBack
+    Assert-Throws { Set-DataSafeTransactionState $f.Tx rolledBack } 'verif|missing|restor'
+    Assert-True ($f.Tx.state -ceq 'rollingBack' -and (Test-DataSafeFile (Join-Path $f.Repo.MetadataRoot operation.lock))) 'Unrestored tree published terminal.'
+    $null=Undo-DataSafeTransaction $f.Tx
+  }
+  Test-Case 'public rolledBack publication requires exact captured previous pointer' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'applying') { throw 'crash' } } } crash
+    $before=[IO.File]::ReadAllText($f.Pointer); $otherId=[guid]::NewGuid().ToString('D')
+    $otherManifest=Write-DataSafeManifest $f.Repo $f.Old $otherId
+    Write-DataSafeAtomicJson $f.Pointer ([PSCustomObject]@{schema='datasafe.current-manifest';formatVersion=1;transactionId=$otherId;manifestPath=('manifests/'+$otherId+'.json');sha256=(Get-DataSafeSha256 $otherManifest)})
+    Set-DataSafeTransactionState $f.Tx rollingBack
+    Assert-Throws { Set-DataSafeTransactionState $f.Tx rolledBack } 'pointer|outside'
+    Assert-True ($f.Tx.state -ceq 'rollingBack') 'Wrong previous authority published terminal.'
+    Write-File $f.Pointer $before; $null=Undo-DataSafeTransaction $f.Tx
+  }
+  Test-Case 'captured applying recovery rechecks actual free space before mutation' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'applying') { throw 'crash' } } } crash
+    Close-TestOwners; $free=${function:Get-DataSafeFreeBytes}
+    try {
+      function Get-DataSafeFreeBytes([string]$Path) { return [long]0 }
+      Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'space'
+      Assert-True ([IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0) 'Recovery mutated before space gate.'
+    } finally { ${function:Get-DataSafeFreeBytes}=$free }
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Space rejection lost recoverability.'
+  }
+  Test-Case 'resumed apply after archive progress rechecks space without losing old bytes' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'archived') { throw 'crash' } } } crash
+    Close-TestOwners; $free=${function:Get-DataSafeFreeBytes}; $pointer=[IO.File]::ReadAllText($f.Pointer)
+    try {
+      function Get-DataSafeFreeBytes([string]$Path) { return [long]0 }
+      Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'space'
+      Assert-True ([IO.File]::ReadAllText($f.Pointer) -ceq $pointer) 'Space gate published pointer.'
+    } finally { ${function:Get-DataSafeFreeBytes}=$free }
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Post-progress space failure lost recovery.'
+  }
+  Test-Case 'captured applying no-progress recovery retains strict old metadata gate' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'applying') { throw 'crash' } } } crash
+    $path=Join-Path $f.Repo.LatestRoot 'Documents/keep1'; [IO.File]::SetLastWriteTimeUtc($path,[datetime]'2010-01-01Z')
+    Close-TestOwners
+    Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'metadata|verif'
+    Assert-True ([IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0) 'Metadata gate ran after mutation.'
+    $entry=@($f.Old.entries | Where-Object relativePath -eq keep1)[0]; Set-DataSafeTransactionMetadata $path $entry
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Baseline metadata rejection lost recovery.'
+  }
+  foreach ($state in @('prepared','applying')) {
+    Test-Case "duplicate staged and current bytes do not prove apply progress $state" {
+      $f=New-Fixture
+      if ($state -eq 'applying') {
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'applying') { throw 'crash' } } } crash
+      }
+      $op=@($f.Tx.operations | Where-Object { $_.kind -ceq 'add' -and $null -ne $_.stagedPath })[0]
+      Ensure-DataSafeDirectory ([IO.Path]::GetDirectoryName($op.currentPath)); [IO.File]::Copy($op.stagedPath,$op.currentPath)
+      if ($state -eq 'prepared') { Assert-Throws { Invoke-DataSafeTransaction $f.Tx } 'unknown|duplicate|verif' }
+      else { Close-TestOwners; Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'unknown|duplicate|verif' }
+      Assert-True ([IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0) 'Duplicate bytes bypassed no-progress baseline gate.'
+      Assert-True ((Test-DataSafeTransactionObject $op.stagedPath $op.newEntry) -and (Test-DataSafeTransactionObject $op.currentPath $op.newEntry)) 'Duplicate proof rejection deleted evidence.'
+    }
+  }
+  Test-Case 'preexisting implicit directory is not proof of new directory promotion' {
+    $f=New-Fixture -Transition implicit-directory-directory
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'applying') { throw 'crash' } } } crash
+    $entry=@($f.Old.entries | Where-Object relativePath -eq keep1)[0]
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $f.Repo.Root $entry.versionLocation),[datetime]'2010-01-01Z')
+    Close-TestOwners
+    Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'metadata|verif'
+    Assert-True ([IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0) 'Preexisting structural directory bypassed strict baseline.'
+  }
+  foreach ($phase in @('applying','archived')) {
+    Test-Case "resumed history ownership gate preserves unknown collision $phase" {
+      $f=New-Fixture; $script:stopPhase=$phase
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq $script:stopPhase) { throw 'crash' } } } crash
+      $unknown=Join-Path (Join-Path $f.Repo.HistoryRoot $f.Tx.displayHistoryFolder) unknown
+      Write-File $unknown 'unknown-history'; Close-TestOwners
+      Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'history|occupied|collision|unknown'
+      Assert-True ([IO.File]::ReadAllText($unknown) -ceq 'unknown-history') 'History gate deleted evidence.'
+      [IO.File]::Delete($unknown)
+      if ($phase -eq 'applying') { [IO.Directory]::Delete([IO.Path]::GetDirectoryName($unknown)) }
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'History collision lost recoverability.'
+    }
   }
   Test-Case 'strict v2 prior-pointer snapshot and substeps reject tampering without rewrite' {
     $f = New-Fixture
@@ -374,6 +580,59 @@ try {
     $upgraded=Read-DataSafeTransaction $f.Path
     Assert-True ($upgraded.formatVersion -eq 2 -and $upgraded.pointerCaptured -and $upgraded.destinationFileSystem -ceq 'NTFS' -and $upgraded.timestampToleranceTicks -eq 0) 'Owned upgrade lost strict destination/pointer authority.'
   }
+  foreach ($legacyAttribute in @(128,256,2048)) {
+    Test-Case "legacy v1 raw attribute $legacyAttribute validates before owned normalization" {
+      $f=New-Fixture -Initial; $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=1
+      foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $j.PSObject.Properties.Remove($name) }
+      foreach ($e in $j.currentManifest.entries) { $e.attributes=$legacyAttribute }
+      foreach ($op in $j.operations) {
+        foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) }
+        $op.newEntry.attributes=$legacyAttribute
+      }
+      Write-File $f.Path (ConvertTo-Json $j -Depth 32)
+      $null=Read-DataSafeTransaction $f.Path; Close-TestOwners
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Legacy attribute upgrade failed.'
+    }
+  }
+  Test-Case 'legacy v1 previous and current snapshots normalize together without losing portable flags' {
+    $f=New-Fixture; $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=1
+    foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $j.PSObject.Properties.Remove($name) }
+    foreach ($manifest in @($j.previousManifest,$j.currentManifest)) { foreach ($e in $manifest.entries) { $e.attributes=[long]$e.attributes -bor 2304 } }
+    foreach ($op in $j.operations) {
+      foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) }
+      foreach ($e in @($op.oldEntry,$op.newEntry)) { if ($null -ne $e) { $e.attributes=[long]$e.attributes -bor 2304 } }
+    }
+    Write-File $f.Path (ConvertTo-Json $j -Depth 32); $null=Read-DataSafeTransaction $f.Path; Close-TestOwners
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Complete legacy snapshot normalization failed.'
+    Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+  }
+  Test-Case 'legacy v1 metadata relocation upgrades from verified ordinary old bytes' {
+    $f=New-Fixture -Transition implicit-file-directory; Write-LegacyRelocation $f
+    # Mutable source is deliberately unavailable: upgrade must use the old backup.
+    Remove-DataSafeDirectoryTree $f.Source; Close-TestOwners
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Legacy relocation failed.'
+    Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+  }
+  foreach ($copyGap in @('partial','verified')) {
+    Test-Case "legacy relocation upgrade copy interruption remains recoverable $copyGap" {
+      $f=New-Fixture -Transition implicit-file-directory; Write-LegacyRelocation $f; Close-TestOwners
+      $originalUpgradeCopy=${function:Copy-DataSafeTransactionFile}; $script:copyGap=$copyGap
+      try {
+        function Copy-DataSafeTransactionFile($Operation) {
+          if ($script:copyGap -eq 'partial') { Write-File $Operation.stagedPath 'partial-upgrade' }
+          else { & $originalUpgradeCopy $Operation }
+          throw 'upgrade copy crash'
+        }
+        Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'upgrade copy crash'
+      } finally { ${function:Copy-DataSafeTransactionFile}=$originalUpgradeCopy }
+      $journal=Read-DataSafeTransaction $f.Path
+      Assert-True ($journal.formatVersion -eq 2 -and $journal.pointerCaptured) 'Copy preceded durable captured upgrade.'
+      $r=Recover-DataSafeTransaction $f.Repo $f.Path
+      Assert-True ($r.FinalState -ceq 'rolledBack') 'Incomplete legacy upgrade did not restore old authority.'
+      Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Upgrade rollback not repeatable.'
+    }
+  }
   Test-Case 'rollback journal-write boundaries reconcile repeated failures idempotently' {
     $originalWriter = ${function:Write-DataSafeTransactionJournal}
     $script:rollbackWrites = 0; $script:rollbackFault = 0
@@ -404,6 +663,22 @@ try {
       }
       Write-Host "Rollback boundaries checked: $total"
     } finally { ${function:Write-DataSafeTransactionJournal} = $originalWriter }
+  }
+  Test-Case 'rollback metadata entries each persist a faultable journal boundary' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { throw 'crash' } } } crash
+    $setter=${function:Set-DataSafeTransactionMetadata}; $writer=${function:Write-DataSafeTransactionJournal}; $script:pendingMetadata=$false
+    try {
+      function Set-DataSafeTransactionMetadata([string]$Path,$Entry) {
+        Assert-True (-not $script:pendingMetadata) 'Rollback metadata mutation lacks its own durable boundary.'
+        & $setter $Path $Entry; $script:pendingMetadata=$true
+      }
+      function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
+        & $writer $Transaction $Path -CreateOnly:$CreateOnly; $script:pendingMetadata=$false
+      }
+      $null=Undo-DataSafeTransaction $f.Tx
+      Assert-True (-not $script:pendingMetadata) 'Final rollback metadata not persisted.'
+    } finally { ${function:Set-DataSafeTransactionMetadata}=$setter; ${function:Write-DataSafeTransactionJournal}=$writer }
   }
   foreach ($transition in @('directory-file','file-directory')) {
     Test-Case "partial new directory rollback restores dependency tree $transition" {

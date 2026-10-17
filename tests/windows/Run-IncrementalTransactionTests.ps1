@@ -16,10 +16,12 @@ function Test-Case([string]$Name, [scriptblock]$Action) {
   if ($Name -notmatch $CasePattern) { return }
   try { & $Action; $passes.Add($Name) } catch { $failures.Add("${Name}: $($_.Exception.Message)") }
   finally {
-    foreach ($tx in $script:live) {
-      if ($tx.state -notin @('committed','rolledBack')) {
-        Set-DataSafeTransactionState $tx rollingBack
-        Set-DataSafeTransactionState $tx rolledBack
+    foreach ($owner in @($script:DataSafeTransactionOwners.Values)) {
+      # Test-only process-loss cleanup: invalid schema/absent-baseline fixtures
+      # must not manufacture a rolledBack journal just to close their handles.
+      if ($null -ne $owner.Handle) {
+        Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath)
+        $owner.Handle=$null
       }
     }
     $script:live.Clear()
