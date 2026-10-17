@@ -1,6 +1,52 @@
-param([string]$WindowsRoot = (Join-Path $PSScriptRoot '../../windows'), [string]$CasePattern = '.')
+param([string]$WindowsRoot = (Join-Path $PSScriptRoot '../../windows'), [string]$CasePattern = '.', [switch]$QualificationRepeat)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+if ($QualificationRepeat -and $PSBoundParameters.ContainsKey('CasePattern')) { throw 'QualificationRepeat cannot be combined with CasePattern.' }
+# Exact approved repeat contract; the default full 124-case suite is unchanged.
+$script:qualificationRepeatNames = @(
+  'fault every durable boundary reconciles filesystem journal gaps idempotently',
+  'rollback journal-write boundaries reconcile repeated failures idempotently',
+  'internal structural intent boundary sweep archive',
+  'internal structural intent boundary sweep promote',
+  'internal metadata clear before time remains recoverable',
+  'internal metadata intent substep recovery intent-clear-write',
+  'internal rollback metadata substep recovery metadata-attributes-cleared',
+  'internal rollback metadata substep recovery metadata-time-filesystem',
+  'implicit ancestor rollback restore-before-journal gap implicit-directory-file',
+  'implicit ancestor rollback restore-before-journal gap implicit-file-directory',
+  'implicit ancestor rollback restore-before-journal gap implicit-directory-directory',
+  'zero-file directory forward internal fault sweep directory-only-nested',
+  'zero-file rollback internal directory deletion sweep directory-only-nested',
+  'zero-file directory retraction gap directory-only-nested unknown-directory',
+  'zero-file unowned external directories are not rollback proof directory-only-nested',
+  'unowned planned directory cannot prove progress empty',
+  'unowned planned directory after archive progress is not adopted',
+  'unowned planned directory cannot prove progress reparse',
+  'internal structural intent rejects reparse substitution without traversing target',
+  'owned empty-directory promotion remains recoverable promote-filesystem',
+  'owned implicit directory after final leaf retraction remains recoverable implicit-file-directory',
+  'reserved staging substitution survives terminal cleanup and repeated recovery',
+  'initial reserved staging collision survives failed stage undo and terminal recovery',
+  'captured applying recovery rechecks actual free space before mutation',
+  'resumed history ownership gate preserves unknown collision archived',
+  'duplicate staged and current bytes do not prove apply progress applying',
+  'public rolledBack publication requires restored previous tree',
+  'public rolledBack publication requires exact captured previous pointer',
+  'review identity dependency interrupted rollback case-relative',
+  'review identity dependency interrupted rollback case-source',
+  'legacy v1 raw attribute 256 validates before owned normalization',
+  'legacy v1 metadata relocation upgrades from verified ordinary old bytes',
+  'legacy relocation upgrade copy interruption remains recoverable partial',
+  'legacy relocation upgrade copy interruption remains recoverable verified',
+  'partial identical-byte relocation rolls back using old and new path identity',
+  'post-pointer corruption blocks rather than undoing durable commit authority'
+)
+$script:qualificationRepeatSet=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
+foreach ($name in $script:qualificationRepeatNames) {
+  if (-not $script:qualificationRepeatSet.Add($name)) { throw 'Duplicate qualification repeat whitelist name.' }
+}
+if ($script:qualificationRepeatSet.Count -ne 36) { throw 'Qualification repeat whitelist must contain exactly 36 names.' }
+$script:qualificationRepeatObserved=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 . (Join-Path $WindowsRoot 'DataSafe.Transaction.ps1')
 $passes = 0; $failures = New-Object 'System.Collections.Generic.List[string]'
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('datasafe-fault-tests-' + [guid]::NewGuid().ToString('N'))
@@ -26,7 +72,15 @@ function Close-TestOwners {
     }
   }
 }
+function Assert-QualificationRepeatSelection($Expected,$Observed) {
+  foreach ($name in $Expected) { if (-not $Observed.Contains($name)) { throw "Qualification repeat selection missing expected case: $name" } }
+  if ($Expected.Count -ne 36 -or $Observed.Count -ne 36) { throw 'Qualification repeat selection must execute exactly 36 distinct expected cases.' }
+}
 function Test-Case([string]$Name, [scriptblock]$Action) {
+  if ($QualificationRepeat) {
+    if (-not $script:qualificationRepeatSet.Contains($Name)) { return }
+    if (-not $script:qualificationRepeatObserved.Add($Name)) { throw "Duplicate qualification repeat case: $Name" }
+  }
   if ($Name -notmatch $CasePattern) { return }
   try { & $Action; $script:passes++; Write-Host "PASS: $Name" }
   catch { $script:failures.Add("${Name}: $($_.Exception.Message)"); Write-Host "FAIL: $Name : $($_.Exception.Message)" }
@@ -1039,6 +1093,12 @@ try {
     }
   }
 } finally { Close-TestOwners; Remove-DataSafeDirectoryTree $tempRoot }
+if ($QualificationRepeat) {
+  try {
+    Assert-QualificationRepeatSelection $script:qualificationRepeatNames $script:qualificationRepeatObserved
+    Write-Host 'Qualification repeat selection: 36/36 exact expected names.'
+  } catch { $failures.Add($_.Exception.Message) }
+}
 foreach ($failure in $failures) { Write-Host "FAIL: $failure" }
 Write-Host "Result: $passes passed; $($failures.Count) failed."
 if ($failures.Count) { exit 1 }
