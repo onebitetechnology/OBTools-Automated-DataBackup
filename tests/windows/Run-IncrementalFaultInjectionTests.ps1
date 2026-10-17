@@ -130,7 +130,7 @@ function Assert-New($f) {
 }
 function Write-LegacyRelocation($f) {
   $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=1
-  foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $j.PSObject.Properties.Remove($name) }
+  foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks','mutationIntent')) { $j.PSObject.Properties.Remove($name) }
   foreach ($op in $j.operations) {
     foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) }
     if ($op.kind -ceq 'replace' -and $op.oldEntry.sha256 -ceq $op.newEntry.sha256) {
@@ -179,7 +179,7 @@ try {
       Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Terminal recovery failed.'
     }
   }
-  foreach ($transition in @('implicit-directory-file','implicit-file-directory','case-relative','case-source')) {
+  foreach ($transition in @('implicit-directory-file','implicit-file-directory','implicit-directory-directory','case-relative','case-source','directory-file','file-directory')) {
     Test-Case "review identity dependency apply $transition" {
       $f=New-Fixture -Transition $transition
       $null=Invoke-DataSafeTransaction $f.Tx
@@ -196,7 +196,7 @@ try {
     }
     Test-Case "review identity dependency fault sweep $transition" {
       $probe=New-Fixture -Transition $transition
-      $target=$(if ($transition -like 'implicit-*') { 'Sub' } else { 'a.txt' })
+      $target=$(if ($transition -like 'implicit-*') { 'Sub' } elseif ($transition -in @('directory-file','file-directory')) { 'node' } else { 'a.txt' })
       $script:targetSequence=@($probe.Tx.operations | Where-Object { $_.relativePath -ieq $target })[0].sequence
       $script:points=New-Object 'System.Collections.Generic.List[string]'
       $null=Invoke-DataSafeTransaction $probe.Tx {
@@ -242,10 +242,200 @@ try {
       }
     }
   }
+  foreach ($role in @('archive','promote')) {
+    Test-Case "internal parent ensure before move remains recoverable $role" {
+      $f=New-Fixture -Initial:($role -ceq 'promote')
+      $originalMove=${function:Move-DataSafeSameVolume}; $script:moveGap=$false
+      $script:moveGapPrefix=$(if ($role -ceq 'archive') { $f.Repo.HistoryRoot } else { $f.Repo.LatestRoot })
+      try {
+        function Move-DataSafeSameVolume([string]$From,[string]$To) {
+          if (-not $script:moveGap -and (ConvertFrom-DataSafeExtendedPath $To).StartsWith($script:moveGapPrefix+'\',[StringComparison]::OrdinalIgnoreCase)) { $script:moveGap=$true; throw 'ensure move crash' }
+          & $originalMove $From $To
+        }
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx } 'ensure move crash'
+      } finally { ${function:Move-DataSafeSameVolume}=$originalMove }
+      if ($role -ceq 'archive') { Assert-True (Test-DataSafeDirectory (Join-Path $f.Repo.HistoryRoot $f.Tx.displayHistoryFolder)) 'Archive parent gap was not reached.' }
+      else { Assert-True (Test-DataSafeDirectory ([IO.Path]::GetDirectoryName($f.Tx.operations[0].currentPath))) 'Promotion parent gap was not reached.' }
+      Assert-True (-not (Test-DataSafeTransactionProgress (Get-DataSafeTransactionOwner $f.Tx))) 'Gap fixture already has unrelated progress.'
+      Close-TestOwners
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Owned empty scaffolding blocked recovery.'
+      Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Scaffolding recovery not repeatable.'
+    }
+  }
+  Test-Case 'internal metadata clear before time remains recoverable' {
+    # Keep fixture construction real; commit the changed flags as the baseline.
+    $f=New-Fixture -Initial; $null=Invoke-DataSafeTransaction $f.Tx
+    $path=Join-Path $f.Source a.txt; [IO.File]::SetAttributes($path,[IO.FileAttributes]::Hidden)
+    $first=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $f.New
+    $firstTx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $f.New $first); $null=Stage-DataSafeTransaction $firstTx; $null=Invoke-DataSafeTransaction $firstTx
+    [IO.File]::SetAttributes($path,[IO.FileAttributes]::ReadOnly); [IO.File]::SetLastWriteTimeUtc($path,[datetime]'2018-01-01Z')
+    $current=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $first
+    $tx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $first $current); $null=Stage-DataSafeTransaction $tx
+    Assert-Throws { Invoke-DataSafeTransaction $tx { param($c) if ($c.Phase -ceq 'metadata-attributes-cleared') { throw 'metadata clear crash' } } } 'metadata clear crash'
+    Close-TestOwners; $journal=Join-Path $f.Repo.TransactionRoot ($tx.transactionId+'.json')
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $journal).FinalState -ceq 'committed') 'Metadata intermediate state blocked recovery.'
+    Assert-DataSafeTransactionTree $f.Repo $current -Metadata
+  }
   Test-Case 'metadata exposes a filesystem and durable boundary for every entry' {
     $f=New-Fixture; $script:metadataFs=0; $script:metadataJournal=0
     $null=Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { $script:metadataFs++ }; if ($c.Phase -eq 'metadata') { $script:metadataJournal++ } }
     Assert-True ($script:metadataFs -eq $f.New.entries.Count -and $script:metadataJournal -eq $f.New.entries.Count) 'Metadata entries share only one fault boundary.'
+  }
+  foreach ($role in @('archive','promote')) {
+    Test-Case "internal structural intent boundary sweep $role" {
+      $probe=New-Fixture -Initial:($role -ceq 'promote'); $script:intentRole=$role
+      $script:intentPoints=New-Object 'System.Collections.Generic.List[string]'
+      $script:intentSequence=0
+      $null=Invoke-DataSafeTransaction $probe.Tx {
+        param($c)
+        if ($script:intentSequence -eq 0 -and $c.Phase -ceq ($script:intentRole+'-intent')) { $script:intentSequence=$c.Sequence }
+        if ($c.Sequence -eq $script:intentSequence -and $c.Phase -cin @(($script:intentRole+'-intent'),($script:intentRole+'-parent-filesystem'))) { $script:intentPoints.Add($c.Phase) }
+      }
+      Assert-True ($script:intentPoints.Count -ge 2) 'Intent/create boundaries not exercised.'
+      for ($point=1;$point -le $script:intentPoints.Count;$point++) {
+        $f=New-Fixture -Initial:($role -ceq 'promote'); $script:intentAt=0; $script:intentFault=$point
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx {
+          param($c)
+          if ($c.Sequence -eq $script:intentSequence -and $c.Phase -cin @(($script:intentRole+'-intent'),($script:intentRole+'-parent-filesystem'))) {
+            $script:intentAt++; if ($script:intentAt -eq $script:intentFault) { throw 'internal structural crash' }
+          }
+        } } 'internal structural crash'
+        Close-TestOwners
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Structural internal boundary blocked recovery.'
+        Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Structural repeat recovery failed.'
+      }
+      Write-Host "Internal structural boundaries checked ${role}: $($script:intentPoints.Count)"
+    }
+  }
+  foreach ($damage in @('unknown-child','unexpected-type','old-metadata','zero-space')) {
+    Test-Case "internal structural intent preserves unowned changes $damage" {
+      $f=New-Fixture; $script:parentCrash=$false
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'archive-parent-filesystem') { throw 'parent crash' } } } 'parent crash'
+      $intent=(Read-DataSafeTransaction $f.Path).mutationIntent
+      $dir=$intent.directories[0]; $unknown=Join-Path $dir 'unowned'
+      $free=${function:Get-DataSafeFreeBytes}
+      if ($damage -ceq 'unknown-child') { Write-File $unknown 'preserve' }
+      if ($damage -ceq 'unexpected-type') { [IO.Directory]::Delete($dir); Write-File $dir 'preserve' }
+      if ($damage -ceq 'old-metadata') { $e=@($f.Old.entries | Where-Object relativePath -eq keep1)[0]; [IO.File]::SetLastWriteTimeUtc((Join-Path $f.Repo.Root $e.versionLocation),[datetime]'2010-01-01Z') }
+      try {
+        if ($damage -ceq 'zero-space') { function Get-DataSafeFreeBytes([string]$Path) { return [long]0 } }
+        Close-TestOwners; Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'unknown|type|metadata|space|collision|intent|structural'
+      } finally { ${function:Get-DataSafeFreeBytes}=$free }
+      if ($damage -ceq 'unknown-child') { Assert-True ([IO.File]::ReadAllText($unknown) -ceq 'preserve') 'Unknown child removed.' }
+      if ($damage -ceq 'unexpected-type') { Assert-True ([IO.File]::ReadAllText($dir) -ceq 'preserve') 'Unknown type removed.' }
+      Assert-True ((Read-DataSafeTransaction $f.Path).state -ceq 'applying') 'Rejected intent was mislabeled terminal.'
+    }
+  }
+  Test-Case 'strict v3 intent rejects detached reserved paths identities and metadata states' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'archive-intent') { throw 'intent crash' } } } 'intent crash'
+    Close-TestOwners; $valid=[IO.File]::ReadAllText($f.Path)
+    foreach ($change in @(
+      {param($j) $j.mutationIntent | Add-Member extra 1},
+      {param($j) $j.mutationIntent.transactionId=[guid]::NewGuid().ToString('D')},
+      {param($j) $j.mutationIntent.sequence=0},
+      {param($j) $j.mutationIntent.sourceId='wrong'},
+      {param($j) $j.mutationIntent.targetPath=$f.Pointer},
+      {param($j) $j.mutationIntent.directories=@($f.Repo.LatestRoot)},
+      {param($j) $j.mutationIntent.before=[PSCustomObject]@{entryType='file';attributes=0;modifiedUtc='2020-01-01T00:00:00.0000000Z'}}
+    )) {
+      $j=ConvertFrom-DataSafeTransactionJson $valid; & $change $j; Write-File $f.Path (ConvertTo-Json $j -Depth 32)
+      Assert-Throws { Read-DataSafeTransaction $f.Path } 'intent|schema|field|path|identity'
+    }
+    Write-File $f.Path $valid
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Strict rejection damaged valid intent.'
+  }
+  Test-Case 'strict v2 journal upgrades only under owned recovery before v3 mutation' {
+    $f=New-Fixture -Initial; Close-TestOwners
+    $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=2; $j.PSObject.Properties.Remove('mutationIntent')
+    Write-File $f.Path (ConvertTo-Json $j -Depth 32)
+    Assert-True ((Read-DataSafeTransaction $f.Path).formatVersion -eq 2) 'Strict v2 read rejected.'
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Owned v2 recovery failed.'
+    $final=Read-DataSafeTransaction $f.Path
+    Assert-True ($final.formatVersion -eq 3 -and $null -eq $final.mutationIntent) 'V2 mutated without durable v3 upgrade.'
+  }
+  Test-Case 'strict terminal v2 journal upgrades under lock before cleanup' {
+    $f=New-Fixture -Initial; $null=Invoke-DataSafeTransaction $f.Tx
+    $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=2; $j.PSObject.Properties.Remove('mutationIntent')
+    Write-File $f.Path (ConvertTo-Json $j -Depth 32)
+    Assert-True ((Read-DataSafeTransaction $f.Path).formatVersion -eq 2) 'Terminal v2 read rejected.'
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Terminal v2 recovery failed.'
+    Assert-True ((Read-DataSafeTransaction $f.Path).formatVersion -eq 3) 'Terminal cleanup preceded owned upgrade.'
+  }
+  Test-Case 'internal metadata intent rejects arbitrary target drift without rewriting evidence' {
+    $f=New-Fixture -Initial; $null=Invoke-DataSafeTransaction $f.Tx
+    [IO.File]::SetLastWriteTimeUtc((Join-Path $f.Source a.txt),[datetime]'2018-01-01Z')
+    $current=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $f.New
+    $tx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $f.New $current); $null=Stage-DataSafeTransaction $tx
+    Assert-Throws { Invoke-DataSafeTransaction $tx { param($c) if ($c.Phase -ceq 'metadata-attributes-cleared') { throw 'metadata crash' } } } 'metadata crash'
+    $path=$tx.operations[0].currentPath; $unexpectedTime=[datetime]::ParseExact('2011-01-01T00:00:00.0000000Z','o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+    [IO.File]::SetLastWriteTimeUtc($path,$unexpectedTime)
+    $journal=Join-Path $f.Repo.TransactionRoot ($tx.transactionId+'.json'); $before=[IO.File]::ReadAllText($journal)
+    Close-TestOwners; Assert-Throws { Recover-DataSafeTransaction $f.Repo $journal } 'intent|intermediate|metadata'
+    Assert-True ([IO.File]::GetLastWriteTimeUtc($path).Ticks -eq $unexpectedTime.Ticks -and [IO.File]::ReadAllText($journal) -ceq $before) 'Unexpected metadata drift or its journal evidence was rewritten.'
+  }
+  Test-Case 'internal structural intent rejects reparse substitution without traversing target' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'archive-parent-filesystem') { throw 'parent crash' } } } 'parent crash'
+    $intent=(Read-DataSafeTransaction $f.Path).mutationIntent; $dir=$intent.directories[0]
+    $target=Join-Path $f.Root 'link-target'; Ensure-DataSafeDirectory $target; Write-File (Join-Path $target preserve) 'preserve'
+    [IO.Directory]::Delete($dir)
+    New-Item -ItemType Junction -Path $dir -Target $target | Out-Null
+    try {
+      Close-TestOwners; Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'reparse|junction'
+      Assert-True ([IO.File]::ReadAllText((Join-Path $target preserve)) -ceq 'preserve') 'Intent recovery traversed its substituted junction.'
+    } finally { [IO.Directory]::Delete($dir) }
+  }
+  foreach ($phase in @('metadata-intent','metadata-attributes-cleared','metadata-time-filesystem','metadata-filesystem','intent-clear-write')) {
+    Test-Case "internal metadata intent substep recovery $phase" {
+      $f=New-Fixture -Initial; $null=Invoke-DataSafeTransaction $f.Tx
+      $source=Join-Path $f.Source a.txt
+      [IO.File]::SetLastWriteTimeUtc($source,[datetime]'2018-01-01Z'); [IO.File]::SetAttributes($source,[IO.FileAttributes]::ReadOnly)
+      $current=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $f.New
+      $tx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $f.New $current); $null=Stage-DataSafeTransaction $tx
+      $script:internalMetadataPhase=$phase; $script:internalMetadataSequence=$tx.operations[0].sequence
+      $intentWriter=${function:Write-DataSafeTransactionJournal}; $script:clearWriteFailed=$false
+      try {
+        function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
+          if ($script:internalMetadataPhase -ceq 'intent-clear-write' -and $Transaction.state -ceq 'applying' -and
+              $null -eq $Transaction.mutationIntent -and $Transaction.operations[0].metadataState -ceq 'done' -and -not $script:clearWriteFailed) {
+            $script:clearWriteFailed=$true; throw 'internal metadata crash'
+          }
+          & $intentWriter $Transaction $Path -CreateOnly:$CreateOnly
+        }
+        Assert-Throws { Invoke-DataSafeTransaction $tx {
+          param($c) if ($c.Sequence -eq $script:internalMetadataSequence -and $c.Phase -ceq $script:internalMetadataPhase) { throw 'internal metadata crash' }
+        } } 'internal metadata crash'
+      } finally { ${function:Write-DataSafeTransactionJournal}=$intentWriter }
+      $journal=Join-Path $f.Repo.TransactionRoot ($tx.transactionId+'.json')
+      Assert-True ($null -ne (Read-DataSafeTransaction $journal).mutationIntent) 'Intent cleared before verified durable publication.'
+      Close-TestOwners
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $journal).FinalState -ceq 'committed') 'Metadata substep blocked recovery.'
+      Assert-DataSafeTransactionTree $f.Repo $current -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $journal).FinalState -ceq 'committed') 'Metadata substep repeat recovery failed.'
+    }
+  }
+  foreach ($phase in @('rollbackMetadata-intent','metadata-attributes-cleared','metadata-time-filesystem','metadata-filesystem')) {
+    Test-Case "internal rollback metadata substep recovery $phase" {
+      $f=New-Fixture -Transition implicit-directory-directory
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'metadata-filesystem') { throw 'apply crash' } } } 'apply crash'
+      $boundarySender=${function:Send-DataSafeTransactionBoundary}; $script:rollbackInternalPhase=$phase; $script:rollbackInternalFailed=$false
+      try {
+        function Send-DataSafeTransactionBoundary($Owner,$Operation,[string]$Phase,[scriptblock]$AfterOperation) {
+          & $boundarySender $Owner $Operation $Phase $AfterOperation
+          if ($Owner.Transaction.state -ceq 'rollingBack' -and $Phase -ceq $script:rollbackInternalPhase -and -not $script:rollbackInternalFailed) {
+            $script:rollbackInternalFailed=$true; throw 'rollback internal crash'
+          }
+        }
+        Assert-Throws { Undo-DataSafeTransaction $f.Tx } 'rollback internal crash'
+      } finally { ${function:Send-DataSafeTransactionBoundary}=$boundarySender }
+      Close-TestOwners
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Rollback metadata internal state blocked recovery.'
+      Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Rollback metadata repeated recovery failed.'
+    }
   }
   foreach ($damage in @('edited','missing','metadata','staged','applying')) {
     Test-Case "preapply rejects $damage before any history mutation" {
@@ -569,7 +759,7 @@ try {
   Test-Case 'legacy v1 detached journal requires owned strict upgrade before recovery apply' {
     $f=New-Fixture -Initial
     $legacy=Read-DataSafeTransaction $f.Path; $legacy.formatVersion=1
-    foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $legacy.PSObject.Properties.Remove($name) }
+    foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks','mutationIntent')) { $legacy.PSObject.Properties.Remove($name) }
     foreach ($op in $legacy.operations) { foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) } }
     Write-File $f.Path (ConvertTo-Json $legacy -Depth 32)
     $detached=Read-DataSafeTransaction $f.Path
@@ -578,12 +768,12 @@ try {
     Close-TestOwners
     Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Legacy recovery failed.'
     $upgraded=Read-DataSafeTransaction $f.Path
-    Assert-True ($upgraded.formatVersion -eq 2 -and $upgraded.pointerCaptured -and $upgraded.destinationFileSystem -ceq 'NTFS' -and $upgraded.timestampToleranceTicks -eq 0) 'Owned upgrade lost strict destination/pointer authority.'
+    Assert-True ($upgraded.formatVersion -eq 3 -and $upgraded.pointerCaptured -and $upgraded.destinationFileSystem -ceq 'NTFS' -and $upgraded.timestampToleranceTicks -eq 0) 'Owned upgrade lost strict destination/pointer authority.'
   }
   foreach ($legacyAttribute in @(128,256,2048)) {
     Test-Case "legacy v1 raw attribute $legacyAttribute validates before owned normalization" {
       $f=New-Fixture -Initial; $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=1
-      foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $j.PSObject.Properties.Remove($name) }
+      foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks','mutationIntent')) { $j.PSObject.Properties.Remove($name) }
       foreach ($e in $j.currentManifest.entries) { $e.attributes=$legacyAttribute }
       foreach ($op in $j.operations) {
         foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) }
@@ -596,7 +786,7 @@ try {
   }
   Test-Case 'legacy v1 previous and current snapshots normalize together without losing portable flags' {
     $f=New-Fixture; $j=Read-DataSafeTransaction $f.Path; $j.formatVersion=1
-    foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks')) { $j.PSObject.Properties.Remove($name) }
+    foreach ($name in @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks','mutationIntent')) { $j.PSObject.Properties.Remove($name) }
     foreach ($manifest in @($j.previousManifest,$j.currentManifest)) { foreach ($e in $manifest.entries) { $e.attributes=[long]$e.attributes -bor 2304 } }
     foreach ($op in $j.operations) {
       foreach ($name in @('archiveState','promoteState','metadataState')) { $op.PSObject.Properties.Remove($name) }
@@ -626,7 +816,7 @@ try {
         Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'upgrade copy crash'
       } finally { ${function:Copy-DataSafeTransactionFile}=$originalUpgradeCopy }
       $journal=Read-DataSafeTransaction $f.Path
-      Assert-True ($journal.formatVersion -eq 2 -and $journal.pointerCaptured) 'Copy preceded durable captured upgrade.'
+      Assert-True ($journal.formatVersion -eq 3 -and $journal.pointerCaptured) 'Copy preceded durable captured upgrade.'
       $r=Recover-DataSafeTransaction $f.Repo $f.Path
       Assert-True ($r.FinalState -ceq 'rolledBack') 'Incomplete legacy upgrade did not restore old authority.'
       Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
@@ -667,18 +857,18 @@ try {
   Test-Case 'rollback metadata entries each persist a faultable journal boundary' {
     $f=New-Fixture
     Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { throw 'crash' } } } crash
-    $setter=${function:Set-DataSafeTransactionMetadata}; $writer=${function:Write-DataSafeTransactionJournal}; $script:pendingMetadata=$false
+    $setter=${function:Set-DataSafeTransactionMetadataSteps}; $writer=${function:Write-DataSafeTransactionJournal}; $script:pendingMetadata=$false; $script:rollbackMetadataCount=0
     try {
-      function Set-DataSafeTransactionMetadata([string]$Path,$Entry) {
+      function Set-DataSafeTransactionMetadataSteps([string]$Path,$Entry,$Owner,$Operation,[scriptblock]$AfterOperation) {
         Assert-True (-not $script:pendingMetadata) 'Rollback metadata mutation lacks its own durable boundary.'
-        & $setter $Path $Entry; $script:pendingMetadata=$true
+        & $setter $Path $Entry $Owner $Operation $AfterOperation; $script:pendingMetadata=$true; $script:rollbackMetadataCount++
       }
       function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
         & $writer $Transaction $Path -CreateOnly:$CreateOnly; $script:pendingMetadata=$false
       }
       $null=Undo-DataSafeTransaction $f.Tx
-      Assert-True (-not $script:pendingMetadata) 'Final rollback metadata not persisted.'
-    } finally { ${function:Set-DataSafeTransactionMetadata}=$setter; ${function:Write-DataSafeTransactionJournal}=$writer }
+      Assert-True (-not $script:pendingMetadata -and $script:rollbackMetadataCount -ge $f.Old.entries.Count) 'Final rollback metadata not persisted/exercised.'
+    } finally { ${function:Set-DataSafeTransactionMetadataSteps}=$setter; ${function:Write-DataSafeTransactionJournal}=$writer }
   }
   foreach ($transition in @('directory-file','file-directory')) {
     Test-Case "partial new directory rollback restores dependency tree $transition" {

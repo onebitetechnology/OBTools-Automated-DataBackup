@@ -85,7 +85,7 @@ try {
     $cap=Get-DataSafeFilesystemCapabilities NTFS; $cap | Add-Member TotalBytes ([long]20GB)
     $f.Plan=New-DataSafeIncrementalPlan $f.Repo $null $f.Manifest $cap 100GB
     $tx=Start-Transaction $f
-    Assert-True ($tx.formatVersion -eq 2 -and $tx.destinationFileSystem -ceq 'NTFS' -and $tx.timestampToleranceTicks -eq 0 -and -not $tx.pointerCaptured) 'Strict media policy missing from v2 journal.'
+    Assert-True ($tx.formatVersion -eq 3 -and $null -eq $tx.mutationIntent -and $tx.destinationFileSystem -ceq 'NTFS' -and $tx.timestampToleranceTicks -eq 0 -and -not $tx.pointerCaptured) 'Strict media policy/nullable mutation intent missing from v3 journal.'
     Assert-True (($tx.currentManifest.entries[0].attributes -band 256) -eq 0) 'Temporary source flag persisted.'
     $null=Stage-DataSafeTransaction $tx
     $j=Read-DataSafeTransaction (Get-JournalPath $f); $j.timestampToleranceTicks=1
