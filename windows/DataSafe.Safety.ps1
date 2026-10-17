@@ -194,6 +194,8 @@ function Get-DataSafeBrowserExcludedDirectories([string]$Source) {
   }
 
   foreach ($profilePath in @([System.IO.Directory]::GetDirectories((ConvertTo-DataSafeExtendedPath $Source)))) {
+    # Discovery itself must not walk redirected/reparse browser profiles.
+    if (([IO.File]::GetAttributes($profilePath) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
     $profileName = [System.IO.Path]::GetFileName($profilePath)
     if (
       $profileName -ne "Default" -and
@@ -216,6 +218,7 @@ function Get-DataSafeBrowserExcludedDirectories([string]$Source) {
       "Service Worker\ScriptCache"
     )) {
       $candidatePath = Join-Path $normalProfilePath $relativePath
+      try { Assert-DataSafeNoReparsePath $candidatePath } catch { continue }
       if (Test-DataSafeDirectory $candidatePath) {
         $excluded.Add($candidatePath)
       }
@@ -223,6 +226,14 @@ function Get-DataSafeBrowserExcludedDirectories([string]$Source) {
   }
 
   return @($excluded)
+}
+
+function Test-DataSafeScanExcludedDirectory([string]$Path, [string[]]$BrowserExcludedDirectories) {
+  if ([IO.Path]::GetFileName($Path) -iin @('System Volume Information', '$RECYCLE.BIN')) { return $true }
+  foreach ($excluded in $BrowserExcludedDirectories) {
+    if ($Path.Equals($excluded, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+  }
+  return $false
 }
 
 function Read-DataSafeJson([string]$Path) {

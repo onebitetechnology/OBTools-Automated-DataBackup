@@ -11,6 +11,10 @@ $ErrorActionPreference = "Stop"
 
 $safetyModulePath = Join-Path $PSScriptRoot "DataSafe.Safety.ps1"
 . $safetyModulePath
+. (Join-Path $PSScriptRoot 'DataSafe.Repository.ps1')
+. (Join-Path $PSScriptRoot 'DataSafe.Manifest.ps1')
+. (Join-Path $PSScriptRoot 'DataSafe.IncrementalPlan.ps1')
+. (Join-Path $PSScriptRoot 'DataSafe.Transaction.ps1')
 
 function Read-Json([string]$Path) {
   Get-Content -Raw -Path $Path | ConvertFrom-Json
@@ -115,6 +119,7 @@ function Write-FailedBackupStatus([string]$Path, [string]$Message) {
   } catch {
     $status = New-DefaultStatus
   }
+  if ($null -ne $script:incrementalStatus) { $status = $script:incrementalStatus }
 
   if ($null -eq $status.PSObject.Properties["lastBackupAttemptAt"]) {
     $status | Add-Member -NotePropertyName "lastBackupAttemptAt" -NotePropertyValue $null
@@ -518,17 +523,139 @@ function Get-BackupPlanSize($Jobs) {
   return $total
 }
 
+function Invoke-IncrementalBackup($Config, $Status) {
+  $script:incrementalStatus = $Status
+  foreach ($field in @{
+    backupFormatVersion = 2; scanCounts = [PSCustomObject]@{ files=0; directories=0; sourceErrors=0 }
+    copyBytes = [long]0; historyCounts = [PSCustomObject]@{ previousVersions=0; deletedFiles=0 }
+    transactionId = $null; recoveryAction = 'none'; warnings = @()
+  }.GetEnumerator()) { $Status | Add-Member -NotePropertyName $field.Key -NotePropertyValue $field.Value -Force }
+  $jobs = @($Config.jobs | Where-Object { $_.enabled })
+  Test-BackupJobPlan $jobs
+  $resolvedJobs = @(foreach ($job in $jobs) {
+    # The manifest intentionally has no overlay/precedence semantics. Refuse
+    # legacy merged sources explicitly; never quietly leave Public data out.
+    if (-not [string]::IsNullOrWhiteSpace("$(Get-DataSafeProperty $job 'includePublicFolder' '')") -or
+        (Test-TruthyJobProperty $job 'includePublicDesktop')) {
+      throw 'Development incremental format does not support merged Public-folder jobs. Use the legacy backup format for this configuration.'
+    }
+    [PSCustomObject]@{ id=$job.id; path=(Resolve-JobSourcePath $job); relativeDestination=@(Get-BackupDestinationSegments $job) }
+  })
+  $driveRoot = Resolve-DataSafeDestination $Config.destination
+  $capabilities = Get-DataSafeDestinationCapabilities $driveRoot
+  if (-not $capabilities.Supported) { throw 'DataSafe destination filesystem is unsupported.' }
+  # Identity belongs beside the local config, not in the friendly PC name or
+  # on removable media. The repository API atomically creates/validates it.
+  $identityPath = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ConfigPath))) 'incremental-computer-id.json'
+  $computerId = Get-DataSafeComputerId $identityPath
+  $computerName = [string](Get-DataSafeProperty $Config 'computerName' $env:COMPUTERNAME)
+  $repo = Initialize-DataSafeRepository $driveRoot $computerName $computerId
+  $pending = New-Object 'System.Collections.Generic.List[object]'
+  $null = Read-DataSafeCurrentPointer $repo
+  foreach ($extended in [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $repo.TransactionRoot))) {
+    $path = ConvertFrom-DataSafeExtendedPath $extended
+    Assert-DataSafeNoReparsePath $path
+    $tx = Read-DataSafeTransaction $path
+    $retainedStaging = Join-Path $repo.StagingRoot $tx.transactionId
+    Assert-DataSafeNoReparsePath $retainedStaging
+    if ($tx.state -cnotin @('committed','rolledBack') -or
+        (Test-DataSafeDirectory $retainedStaging) -or (Test-DataSafeFile $retainedStaging)) {
+      $pending.Add([PSCustomObject]@{ Transaction=$tx; Path=$path })
+    }
+  }
+  if ($pending.Count -gt 1) { throw 'DataSafe found multiple unresolved journals; review is required before another transaction.' }
+  foreach ($item in $pending) {
+    $Status.transactionId = $item.Transaction.transactionId
+    $Status.recoveryAction = 'recovering'
+    $recovered = Recover-DataSafeTransaction $repo $item.Path
+    $Status.recoveryAction = $recovered.FinalState
+    $Status.warnings = @($recovered.Warnings)
+    # Pointer authority is re-read even when journal finalization warns. Never
+    # start a second transaction over unresolved retained journal evidence.
+    $pointer = Read-DataSafeCurrentPointer $repo
+    $durable = Read-DataSafeTransaction $item.Path
+    if ($recovered.Warnings.Count -gt 0) {
+      if ($recovered.FinalState -cne 'committed' -or $null -eq $pointer -or $pointer.transactionId -ine $durable.transactionId) {
+        throw "DataSafe recovery needs attention: $($recovered.Warnings.Message -join '; ')"
+      }
+      Complete-IncrementalStatus $Status $repo $recovered
+      return
+    }
+    if ($durable.state -cnotin @('committed','rolledBack')) { throw 'DataSafe previous journal remains unresolved; refusing a new transaction.' }
+  }
+  $pointer = Read-DataSafeCurrentPointer $repo
+  $previous = if ($null -ne $pointer) { Read-DataSafeManifest (Join-Path $repo.MetadataRoot $pointer.manifestPath) } else { $null }
+  Write-ProgressMarker -Phase 'scanning' -JobName '' -Step 1 -TotalSteps 4 -Detail 'Scanning selected sources for the incremental development format.'
+  $current = New-DataSafeSourceManifest $resolvedJobs $previous -ApplyWorkerExclusions
+  $Status.scanCounts = [PSCustomObject]@{
+    files=@($current.entries | Where-Object { $_.entryType -ceq 'file' }).Count
+    directories=@($current.entries | Where-Object { $_.entryType -ceq 'directory' }).Count
+    sourceErrors=$current.sourceErrors.Count
+  }
+  $plan = New-DataSafeIncrementalPlan $repo $previous $current $capabilities (Get-DataSafeFreeBytes $repo.Root)
+  if ($plan.BlockingErrors.Count -gt 0) { throw ($plan.BlockingErrors -join '; ') }
+  if ($plan.DeletionReviewRequired) { throw 'DataSafe deletion review is required. Development incremental backups cannot bypass this safety check.' }
+  $Status.transactionId = $plan.TransactionId
+  $Status.historyCounts = [PSCustomObject]@{
+    previousVersions=@($plan.Operations | Where-Object { $_.kind -ceq 'replace' -and $_.oldEntry.entryType -ceq 'file' }).Count
+    deletedFiles=@($plan.Operations | Where-Object { $_.kind -ceq 'delete' -and $_.oldEntry.entryType -ceq 'file' }).Count
+  }
+  $transaction = New-DataSafeTransaction $repo $plan
+  $script:incrementalOwner = Get-DataSafeTransactionOwner $transaction
+  Write-ProgressMarker -Phase 'staging' -JobName '' -Step 2 -TotalSteps 4 -Detail 'Copying and verifying changed files before any latest-tree mutation.'
+  $null = Stage-DataSafeTransaction $transaction
+  $Status.copyBytes = $plan.StageBytes
+  Write-ProgressMarker -Phase 'applying' -JobName '' -Step 3 -TotalSteps 4 -Detail 'Applying the verified journaled transaction.'
+  try { $result = Invoke-DataSafeTransaction $transaction }
+  catch {
+    # A terminal journal write can fail AFTER pointer publication. Only the
+    # public recovery verifier may classify that as committed-with-warning.
+    $committedPointer = Read-DataSafeCurrentPointer $repo
+    if ($null -eq $committedPointer -or $committedPointer.transactionId -ine $transaction.transactionId) { throw }
+    if ($null -ne $script:incrementalOwner.Handle) {
+      Release-DataSafeOperationLock $script:incrementalOwner.Handle (ConvertTo-DataSafeExtendedPath $script:incrementalOwner.LockPath)
+      $script:incrementalOwner.Handle = $null
+    }
+    $result = Recover-DataSafeTransaction $repo (Join-Path $repo.TransactionRoot ($transaction.transactionId + '.json'))
+    $Status.recoveryAction = $result.FinalState
+    $null = Read-DataSafeCurrentPointer $repo
+  }
+  $Status.warnings = @($Status.warnings) + @($result.Warnings)
+  Complete-IncrementalStatus $Status $repo $result
+}
+
+function Complete-IncrementalStatus($Status, $Repository, $Result) {
+  if ($Result.FinalState -cne 'committed') { throw 'DataSafe incremental transaction did not commit.' }
+  $Status.lastBackupAt = (Get-Date).ToString('o')
+  $Status | Add-Member lastBackupAttemptAt $Status.lastBackupAt -Force
+  $Status.lastBackupResult = if ($Status.warnings.Count) { 'warning' } else { 'success' }
+  $Status.lastBackupMessage = "Incremental backup completed and verified to $($Repository.LatestRoot)"
+  if ($Status.warnings.Count) {
+    $Status.lastBackupMessage += ". Recovery attention required: " + (($Status.warnings | ForEach-Object { "$($_.Code): $($_.Message)" }) -join '; ')
+  }
+  $Status.destinationStatus = 'Connected'
+}
+
 $lockPath = "$StatusPath.lock"
 $lockHandle = $null
 $configForNotification = $null
 $stagingSnapshotPath = $null
 $operationBusyMessage = "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
+$script:incrementalStatus = $null
+$script:incrementalOwner = $null
 
 try {
   $lockHandle = Acquire-DataSafeOperationLock $lockPath
   $config = Read-Json $ConfigPath
   $configForNotification = $config
   $status = Read-Json $StatusPath
+
+  if ((Get-DataSafeProperty $config 'incrementalFormatVersion') -ceq 2) {
+    Invoke-IncrementalBackup $config $status
+    Write-Json $StatusPath $status
+    Write-ProgressMarker -Phase 'complete' -JobName '' -Step 4 -TotalSteps 4 -Detail $status.lastBackupMessage
+    Write-Output $status.lastBackupMessage
+  } else {
 
   $baseRoot = Get-DataSafeBaseRoot $config
   $snapshotsRoot = Join-Path $baseRoot "snapshots"
@@ -609,6 +736,7 @@ try {
   $notificationTitle = if ($retentionWarning) { "DataSafe Backup Completed With a Warning" } else { "DataSafe Backup Complete" }
   Show-BackupNotification -Title $notificationTitle -Message $status.lastBackupMessage -Level $notificationLevel -ClickTarget $null
   Write-Output $status.lastBackupMessage
+  }
 } catch {
   $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
   if ($message -eq $operationBusyMessage) {
@@ -639,6 +767,10 @@ try {
   Write-Error $message
   exit 1
 } finally {
+  if ($null -ne $script:incrementalOwner -and $null -ne $script:incrementalOwner.Handle) {
+    Release-DataSafeOperationLock $script:incrementalOwner.Handle (ConvertTo-DataSafeExtendedPath $script:incrementalOwner.LockPath)
+    $script:incrementalOwner.Handle = $null
+  }
   if ($stagingSnapshotPath -and (Test-Path -LiteralPath $stagingSnapshotPath)) {
     try {
       Remove-DataSafeDirectoryTree $stagingSnapshotPath

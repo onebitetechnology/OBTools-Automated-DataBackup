@@ -192,7 +192,7 @@ function Get-DataSafeManifestDestination($Job) {
   return ConvertTo-DataSafeManifestRelativePath ($segments -join '/')
 }
 
-function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, [scriptblock]$HashProvider = $null) {
+function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, [scriptblock]$HashProvider = $null, [switch]$ApplyWorkerExclusions) {
   $previousEntries = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   $previousSources = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   if ($null -ne $PreviousManifest) {
@@ -218,6 +218,7 @@ function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, 
       Assert-DataSafeNoReparsePath $source.path
       $sourceAttributes = [IO.File]::GetAttributes((ConvertTo-DataSafeExtendedPath $source.path))
       $selectedFile = ($sourceAttributes -band [IO.FileAttributes]::Directory) -eq 0
+      $browserExcluded = @(if ($ApplyWorkerExclusions -and -not $selectedFile) { Get-DataSafeBrowserExcludedDirectories $source.path })
       $pending = New-Object 'System.Collections.Generic.Stack[string]'
       $pending.Push($source.path)
       $relativeRoot = if ($selectedFile) { [IO.Path]::GetDirectoryName($source.path) } else { $source.path }
@@ -232,6 +233,8 @@ function New-DataSafeSourceManifest([object[]]$Jobs, $PreviousManifest = $null, 
           $attributes = [IO.File]::GetAttributes($extended)
           if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
           $path = ConvertFrom-DataSafeExtendedPath $extended
+          if ($ApplyWorkerExclusions -and ($attributes -band [IO.FileAttributes]::Directory) -ne 0 -and
+              (Test-DataSafeScanExcludedDirectory $path $browserExcluded)) { continue }
           if (-not $path.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase)) { throw [ArgumentException]'DataSafe manifest entry path escapes its source.' }
           # GetFullPath normalizes extended-only names (e.g. trailing dots).
           # Validate the actual enumerated name before any helper can do that.
