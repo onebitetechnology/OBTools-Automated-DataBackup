@@ -63,6 +63,14 @@ function Get-DataSafeManifestScalar($Object, [string]$Name, [string]$Kind = 'str
   return $value
 }
 
+function ConvertTo-DataSafePortableAttributes([long]$Attributes, [bool]$IsDirectory) {
+  # Portable DOS flags only: read-only, hidden, system and archive. Directory
+  # is derived from entry type; storage-specific NTFS flags are not versioned.
+  $result = $Attributes -band 39
+  if ($IsDirectory) { $result = $result -bor 16 }
+  return [long]$result
+}
+
 function ConvertTo-DataSafeValidatedManifest($Manifest) {
   if ($null -eq $Manifest -or $Manifest -isnot [PSCustomObject] -or (Get-DataSafeManifestScalar $Manifest 'schema') -cne 'datasafe.manifest') { throw 'DataSafe manifest schema is invalid.' }
   $version = Get-DataSafeManifestScalar $Manifest 'formatVersion' 'integer'
@@ -129,7 +137,7 @@ function ConvertTo-DataSafeValidatedManifest($Manifest) {
     if (-not $locations.Add($location)) { throw 'DataSafe manifest contains a version-location path collision.' }
     $entries.Add($key, [PSCustomObject][ordered]@{
       sourceId = $id; relativePath = $relative; entryType = $type; length = [long]$length
-      modifiedUtc = $modified; attributes = [long]$attributes; sha256 = $hash; versionLocation = $location
+      modifiedUtc = $modified; attributes = (ConvertTo-DataSafePortableAttributes $attributes ($type -ceq 'directory')); sha256 = $hash; versionLocation = $location
     })
   }
   foreach ($entry in $entries.Values) {
@@ -285,8 +293,8 @@ function Compare-DataSafeManifests($Previous, $Current) {
     $null = $currentKeys.Add($key)
     if (-not $oldEntries.ContainsKey($key)) { $result.Added.Add($entry); continue }
     $old = $oldEntries[$key]
-    if ($old.entryType -cne $entry.entryType -or $old.sha256 -cne $entry.sha256) { $result.ContentChanged.Add($entry) }
-    elseif ($old.length -ne $entry.length -or $old.modifiedUtc -cne $entry.modifiedUtc -or $old.attributes -ne $entry.attributes -or $old.versionLocation -cne $entry.versionLocation) { $result.MetadataChanged.Add($entry) }
+    if ($old.entryType -cne $entry.entryType -or $old.sha256 -cne $entry.sha256 -or $old.versionLocation -cne $entry.versionLocation) { $result.ContentChanged.Add($entry) }
+    elseif ($old.length -ne $entry.length -or $old.modifiedUtc -cne $entry.modifiedUtc -or $old.attributes -ne $entry.attributes) { $result.MetadataChanged.Add($entry) }
     else { $result.Unchanged.Add($entry) }
   }
   foreach ($key in @(Get-DataSafeManifestOrderedKeys $oldEntries)) {

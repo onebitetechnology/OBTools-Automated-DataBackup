@@ -124,6 +124,7 @@ function Get-DataSafeFilesystemCapabilities([string]$FileSystem) {
     Recommended = $name -eq 'NTFS'
     CompatibilityMode = $name -eq 'FAT32'
     MaxFileBytes = $(if ($name -eq 'FAT32') { [long]4294967295 } elseif ($supported) { [long]::MaxValue } else { [long]0 })
+    TimestampToleranceTicks = $(if ($name -eq 'NTFS') { [long]0 } elseif ($name -eq 'EXFAT') { [long]100000 } elseif ($name -eq 'FAT32') { [long]20000000 } else { [long]-1 })
   }
 }
 

@@ -40,6 +40,14 @@ function Assert-Blocked($Plan, [string]$Pattern) {
 }
 try {
   $repository = Initialize-DataSafeRepository $tempRoot 'Plan PC' '00112233-4455-4677-8899-aabbccddeeff'
+  foreach ($row in @(@{Fs='NTFS';Ticks=[long]0},@{Fs='exFAT';Ticks=[long]100000},@{Fs='FAT32';Ticks=[long]20000000})) {
+    Test-Case "executable plan binds $($row.Fs) destination timestamp policy" {
+      $cap=New-Capability $row.Fs; $plan=New-Plan $null (New-Fixture) $cap
+      Assert-True ($plan.DestinationFileSystem -ceq $row.Fs.ToUpperInvariant() -and $plan.TimestampToleranceTicks -eq $row.Ticks) 'Destination timestamp policy missing.'
+      $cap.TimestampToleranceTicks=$row.Ticks+1
+      Assert-Blocked (New-Plan $null (New-Fixture) $cap) 'granularity|timestamp|capabilit'
+    }
+  }
   Test-Case 'executable plan carries complete validated manifests including unchanged entries for durable commit' {
     $previous = New-Fixture 3; $current = New-Fixture 3; $current.entries[0].sha256 = 'B' * 64
     $plan = New-Plan $previous $current

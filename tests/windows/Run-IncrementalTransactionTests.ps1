@@ -68,6 +68,35 @@ function Get-JournalPath($Fixture) { Join-Path $Fixture.Repo.TransactionRoot ($F
 function Read-JournalText($Fixture) { [IO.File]::ReadAllText((ConvertTo-DataSafeExtendedPath (Get-JournalPath $Fixture))) }
 function Write-JournalObject($Fixture, $Value) { Write-TestFile (Get-JournalPath $Fixture) (ConvertTo-Json -InputObject $Value -Depth 32) }
 try {
+  Test-Case 'transaction UUID case normalizes before canonical pointer publication' {
+    $f=New-Fixture; $f.Plan.TransactionId=$f.Plan.TransactionId.ToUpperInvariant()
+    $tx=Start-Transaction $f; $null=Stage-DataSafeTransaction $tx
+    Assert-True ((Invoke-DataSafeTransaction $tx).FinalState -ceq 'committed') 'Uppercase UUID plan could not commit.'
+    Assert-True ($tx.transactionId -ceq $f.Plan.TransactionId.ToLowerInvariant() -and (Read-DataSafeCurrentPointer $f.Repo).transactionId -ceq $tx.transactionId) 'UUID/pointer canonical identity diverged.'
+  }
+  Test-Case 'portable source flags stage and strict journal binds bounded media policy' {
+    $f=New-Fixture
+    $path=Join-Path $f.Source a.txt
+    [IO.File]::SetAttributes($path, [IO.FileAttributes]([long][IO.File]::GetAttributes($path) -bor 256))
+    $job=[PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}
+    $f.Manifest=New-DataSafeSourceManifest @($job)
+    $cap=Get-DataSafeFilesystemCapabilities NTFS; $cap | Add-Member TotalBytes ([long]20GB)
+    $f.Plan=New-DataSafeIncrementalPlan $f.Repo $null $f.Manifest $cap 100GB
+    $tx=Start-Transaction $f
+    Assert-True ($tx.formatVersion -eq 2 -and $tx.destinationFileSystem -ceq 'NTFS' -and $tx.timestampToleranceTicks -eq 0 -and -not $tx.pointerCaptured) 'Strict media policy missing from v2 journal.'
+    Assert-True (($tx.currentManifest.entries[0].attributes -band 256) -eq 0) 'Temporary source flag persisted.'
+    $null=Stage-DataSafeTransaction $tx
+    $j=Read-DataSafeTransaction (Get-JournalPath $f); $j.timestampToleranceTicks=1
+    try { Write-JournalObject $f $j; Assert-Throws { Read-DataSafeTransaction (Get-JournalPath $f) } 'timestamp|granularity|policy' }
+    finally { Write-JournalObject $f $tx }
+  }
+  Test-Case 'apply verifies and commits an extended Unicode-capable long path' {
+    $f = New-Fixture -Long; $tx = Start-Transaction $f
+    $null = Stage-DataSafeTransaction $tx
+    $r = Invoke-DataSafeTransaction $tx
+    Assert-True ($r.FinalState -ceq 'committed' -and (Get-DataSafeSha256 $tx.operations[0].currentPath) -ceq 'BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD') 'Long-path apply lost content.'
+    Assert-True ((Read-DataSafeCurrentPointer $f.Repo).transactionId -ceq $tx.transactionId) 'Long-path pointer absent.'
+  }
   foreach ($direction in @('directory-to-file','file-to-directory')) {
     Test-Case "review type replacement $direction keeps old and new descendant trees separate" {
       $f = New-Fixture
@@ -172,7 +201,7 @@ try {
       } finally { $tx.state = 'prepared' }
       Assert-True ((Read-JournalText $f) -ceq $preparedJson) 'Mutated live caller changed durable state.'
       Assert-Throws { New-DataSafeTransaction $f.Repo $f.Plan } 'already running'
-      if ($terminal -ceq 'committed') { Set-DataSafeTransactionState $tx applying; Set-DataSafeTransactionState $tx committed }
+      if ($terminal -ceq 'committed') { $null = Invoke-DataSafeTransaction $tx }
       else { Set-DataSafeTransactionState $tx rollingBack; Set-DataSafeTransactionState $tx rolledBack }
       $terminalJson = Read-JournalText $f
       try {
@@ -342,7 +371,8 @@ try {
     Assert-Throws { Set-DataSafeTransactionState $tx committed } 'transition'
     Set-DataSafeTransactionState $tx applying; Set-DataSafeTransactionState $tx applying
     Assert-Throws { Set-DataSafeTransactionState $tx prepared } 'transition'
-    Set-DataSafeTransactionState $tx committed; Set-DataSafeTransactionState $tx committed
+    Assert-Throws { Set-DataSafeTransactionState $tx committed } 'pointer'
+    $null = Invoke-DataSafeTransaction $tx; Set-DataSafeTransactionState $tx committed
     Assert-True ((Read-DataSafeTransaction (Get-JournalPath $f)).state -ceq 'committed') 'Legal graph not durable.'
     Assert-Throws { Set-DataSafeTransactionState $tx rollingBack } 'transition|terminal|live|lock'
   }

@@ -1,8 +1,9 @@
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'DataSafe.IncrementalPlan.ps1')
 
-# Journal v1 is UTF-8 JSON metadata only. Task 5 owns apply/recovery and will
-# extend operation statuses. Live handles are NEVER serialized or restored by
+# Journal v2 adds bounded destination media policy, prior-pointer capture and
+# per-operation apply substeps. Legacy v1 is strictly read and upgraded only
+# under a newly validated owned lock. Live handles are NEVER restored by
 # reading a journal. Keep ownership across repeated dot-sourcing of the library.
 if ($null -eq (Get-Variable DataSafeTransactionOwners -Scope Script -ErrorAction SilentlyContinue)) {
   $script:DataSafeTransactionOwners = @{}
@@ -77,9 +78,12 @@ function Assert-DataSafeTransactionEntry($Entry, [string]$SourceId, [string]$Rel
 }
 
 function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
-  Assert-DataSafeTransactionFields $Transaction @('schema','formatVersion','operationSchemaVersion','transactionId','computerId','repositoryRoot','state','createdUtc','previousBackupTimestamp','displayHistoryFolder','previousManifest','currentManifest','stageBytes','peakRequiredBytes','metadataOverheadBytes','reserveBytes','operations','failure')
+  $version = Get-DataSafeManifestScalar $Transaction 'formatVersion' 'integer'
+  $fields = @('schema','formatVersion','operationSchemaVersion','transactionId','computerId','repositoryRoot','state','createdUtc','previousBackupTimestamp','displayHistoryFolder','previousManifest','currentManifest','stageBytes','peakRequiredBytes','metadataOverheadBytes','reserveBytes','operations','failure')
+  if ($version -eq 2) { $fields += @('previousPointer','pointerCaptured','destinationFileSystem','timestampToleranceTicks') }
+  Assert-DataSafeTransactionFields $Transaction $fields
   if ((Get-DataSafeManifestScalar $Transaction 'schema') -cne 'datasafe.transaction' -or
-      (Get-DataSafeManifestScalar $Transaction 'formatVersion' 'integer') -ne 1 -or
+      $version -notin @(1,2) -or
       (Get-DataSafeManifestScalar $Transaction 'operationSchemaVersion' 'integer') -ne 1) { throw 'DataSafe transaction schema version is invalid.' }
   $id = Get-DataSafeManifestScalar $Transaction 'transactionId'; Assert-DataSafeComputerId $id
   $computerId = Get-DataSafeManifestScalar $Transaction 'computerId'; Assert-DataSafeComputerId $computerId
@@ -118,6 +122,18 @@ function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
   }
   if ($current.sourceErrors.Count -ne 0 -or ($null -ne $previous -and $previous.sourceErrors.Count -ne 0)) { throw 'DataSafe transaction manifest contains source errors.' }
   if ($prior -cne $(if ($null -ne $previous) { $previous.createdUtc } else { $null })) { throw 'DataSafe transaction previous manifest timestamp does not match.' }
+  if ($version -eq 2) {
+    $fs = Get-DataSafeManifestScalar $Transaction 'destinationFileSystem'
+    $policy = Get-DataSafeFilesystemCapabilities $fs
+    if (-not $policy.Supported -or $fs -cne $fs.ToUpperInvariant() -or
+        (Get-DataSafeManifestScalar $Transaction 'timestampToleranceTicks' 'integer') -ne $policy.TimestampToleranceTicks) { throw 'DataSafe transaction destination timestamp policy is invalid.' }
+    if ($Transaction.pointerCaptured -isnot [bool]) { throw 'DataSafe transaction pointer capture schema is invalid.' }
+    if (-not $Transaction.pointerCaptured -and $null -ne $Transaction.previousPointer) { throw 'DataSafe transaction uncaptured pointer must be null.' }
+    if ($Transaction.pointerCaptured -and (($null -eq $Transaction.previousPointer) -ne ($null -eq $previous))) { throw 'DataSafe transaction previous pointer/manifest identity is invalid.' }
+    if ($Transaction.pointerCaptured -and $null -ne $Transaction.previousPointer) {
+      $null = Assert-DataSafeCurrentPointer $repo $Transaction.previousPointer $previous
+    }
+  }
   $oldEntries = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   $newEntries = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
   $sources = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
@@ -149,7 +165,14 @@ function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
   $sourcePaths = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
   $total = [decimal]0; $sequence = 0
   foreach ($op in $Transaction.operations) {
-    Assert-DataSafeTransactionFields $op @('sequence','kind','sourceId','relativePath','sourcePath','currentPath','oldCurrentPath','historyPath','stagedPath','expectedOldSha256','expectedNewSha256','oldEntry','newEntry','status','error')
+    $opFields = @('sequence','kind','sourceId','relativePath','sourcePath','currentPath','oldCurrentPath','historyPath','stagedPath','expectedOldSha256','expectedNewSha256','oldEntry','newEntry','status','error')
+    if ($version -eq 2) {
+      $opFields += @('archiveState','promoteState','metadataState')
+      foreach ($substep in @('archiveState','promoteState','metadataState')) {
+        if ((Get-DataSafeManifestScalar $op $substep) -cnotin @('pending','done')) { throw 'DataSafe transaction substep state is invalid.' }
+      }
+    }
+    Assert-DataSafeTransactionFields $op $opFields
     $sequence++
     if ((Get-DataSafeManifestScalar $op 'sequence' 'integer') -ne $sequence) { throw 'DataSafe transaction operation sequence is invalid or duplicate.' }
     $kind = Get-DataSafeManifestScalar $op 'kind'
@@ -172,8 +195,8 @@ function Assert-DataSafeTransactionSchema($Transaction, [string]$Path) {
     $expectedNewEntry = if ($newEntries.ContainsKey($key)) { $newEntries[$key] } else { $null }
     if ((ConvertTo-Json -InputObject $old -Depth 12 -Compress) -cne (ConvertTo-Json -InputObject $expectedOldEntry -Depth 12 -Compress) -or
         (ConvertTo-Json -InputObject $new -Depth 12 -Compress) -cne (ConvertTo-Json -InputObject $expectedNewEntry -Depth 12 -Compress)) { throw 'DataSafe transaction operation entry does not match its complete manifest.' }
-    if ($kind -ceq 'metadata' -and ($old.entryType -cne $new.entryType -or $old.sha256 -cne $new.sha256 -or $old.length -ne $new.length)) { throw 'DataSafe transaction metadata operation changes content.' }
-    if ($kind -ceq 'replace' -and $old.entryType -ceq $new.entryType -and $old.sha256 -ceq $new.sha256) { throw 'DataSafe transaction replace operation has no content change.' }
+    if ($kind -ceq 'metadata' -and ($old.entryType -cne $new.entryType -or $old.sha256 -cne $new.sha256 -or $old.length -ne $new.length -or $old.versionLocation -cne $new.versionLocation)) { throw 'DataSafe transaction metadata operation changes content/location.' }
+    if ($kind -ceq 'replace' -and $old.entryType -ceq $new.entryType -and $old.sha256 -ceq $new.sha256 -and $old.versionLocation -ceq $new.versionLocation) { throw 'DataSafe transaction replace operation has no content/location change.' }
     $oldHash = Get-DataSafeManifestScalar $op 'expectedOldSha256' -AllowNull
     $newHash = Get-DataSafeManifestScalar $op 'expectedNewSha256' -AllowNull
     if ($oldHash -cne $(if ($null -ne $old) { $old.sha256 } else { $null }) -or
@@ -307,10 +330,11 @@ function New-DataSafeTransaction($Repository, $Plan) {
       $Plan.DeletionReviewRequired -isnot [bool] -or $Plan.DeletionReviewRequired) { throw 'DataSafe transaction plan is blocked or requires deletion review.' }
   if ((Get-DataSafeManifestScalar $Plan 'OperationSchemaVersion' 'integer') -ne 1 -or $Plan.Operations -isnot [array]) { throw 'DataSafe transaction plan operation schema is invalid.' }
   $id = Get-DataSafeManifestScalar $Plan 'TransactionId'; Assert-DataSafeComputerId $id
+  $id = ([guid]$id).ToString('D')
   $path = Join-Path $repo.TransactionRoot ($id + '.json')
   $staging = Join-Path $repo.StagingRoot $id
   $transaction = [PSCustomObject][ordered]@{
-    schema = 'datasafe.transaction'; formatVersion = 1; operationSchemaVersion = 1
+    schema = 'datasafe.transaction'; formatVersion = 2; operationSchemaVersion = 1
     transactionId = $id; computerId = $repo.ComputerId; repositoryRoot = $repo.Root; state = 'staging'
     createdUtc = [datetime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
     previousBackupTimestamp = Get-DataSafeManifestScalar $Plan 'PreviousBackupTimestamp' -AllowNull
@@ -322,6 +346,9 @@ function New-DataSafeTransaction($Repository, $Plan) {
     metadataOverheadBytes = Get-DataSafeManifestScalar $Plan 'MetadataOverheadBytes' 'integer'
     reserveBytes = Get-DataSafeManifestScalar $Plan 'ReserveBytes' 'integer'
     operations = @(); failure = $null
+    destinationFileSystem = Get-DataSafeManifestScalar $Plan 'DestinationFileSystem'
+    timestampToleranceTicks = Get-DataSafeManifestScalar $Plan 'TimestampToleranceTicks' 'integer'
+    previousPointer = $null; pointerCaptured = $false
   }
   # Detach all manifest/operation metadata from the caller before retaining it.
   $transaction = ConvertFrom-DataSafeTransactionJson (ConvertTo-Json -InputObject $transaction -Depth 32)
@@ -330,6 +357,7 @@ function New-DataSafeTransaction($Repository, $Plan) {
     if ((Get-DataSafeManifestScalar $op 'status') -cne 'pending') { throw 'DataSafe transaction plan operation must be pending.' }
     $copy = ConvertFrom-DataSafeTransactionJson (ConvertTo-Json -InputObject $op -Depth 32)
     $copy | Add-Member -NotePropertyName error -NotePropertyValue $null
+    foreach ($name in @('archiveState','promoteState','metadataState')) { $copy | Add-Member $name pending }
     $copy
   })
   $null = Assert-DataSafeTransactionSchema $transaction $path
@@ -393,7 +421,7 @@ function Assert-DataSafeTransactionSource($Operation, [scriptblock]$HashProvider
   $attributes = [long][IO.File]::GetAttributes($extended)
   $isDirectory = ($attributes -band 16) -ne 0
   $modified = [IO.File]::GetLastWriteTimeUtc($extended).ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-  if ($isDirectory -ne ($entry.entryType -ceq 'directory') -or $attributes -ne $entry.attributes -or $modified -cne $entry.modifiedUtc) { throw "DataSafe source snapshot changed after scan: $path" }
+  if ($isDirectory -ne ($entry.entryType -ceq 'directory') -or (ConvertTo-DataSafePortableAttributes $attributes $isDirectory) -ne $entry.attributes -or $modified -cne $entry.modifiedUtc) { throw "DataSafe source snapshot changed after scan: $path" }
   if (-not $isDirectory) {
     $info = New-Object IO.FileInfo($extended)
     if ($info.Length -ne $entry.length -or (Get-DataSafeTransactionHash $path $HashProvider) -cne $Operation.expectedNewSha256) { throw "DataSafe source length/hash changed after scan: $path" }
@@ -488,10 +516,458 @@ function Set-DataSafeTransactionState($Transaction, [string]$State) {
   if ($Transaction.state -ceq $State) { return }
   $graph = @{ staging = @('rollingBack'); prepared = @('applying','rollingBack'); applying = @('committed','rollingBack'); rollingBack = @('rolledBack'); committed = @(); rolledBack = @() }
   if ($State -cnotin $graph[$Transaction.state]) { throw "DataSafe transaction illegal state transition: $($Transaction.state) -> $State" }
+  if ($State -ceq 'committed') { Assert-DataSafeTransactionCommit $owner }
+  if ($State -ceq 'rollingBack') {
+    $pointer = Read-DataSafeCurrentPointer $owner.Repository
+    if ($null -ne $pointer -and $pointer.transactionId -ieq $Transaction.transactionId) { throw 'DataSafe committed pointer cannot be rolled back.' }
+  }
   $old = $Transaction.state; $Transaction.state = $State
   try { Save-DataSafeOwnedTransaction $owner } catch { $Transaction.state = $old; throw }
   if ($State -cin @('committed','rolledBack')) {
     Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath)
     $owner.Handle = $null
+  }
+}
+
+# Pointer v1 is the only commit point. Its path is canonical, relative to
+# .datasafe, and derived solely from its UUID; arbitrary paths are never read.
+function Assert-DataSafeCurrentPointer($Repository, $Pointer, $ExpectedManifest = $null) {
+  Assert-DataSafeTransactionFields $Pointer @('schema','formatVersion','transactionId','manifestPath','sha256')
+  if ((Get-DataSafeManifestScalar $Pointer 'schema') -cne 'datasafe.current-manifest' -or
+      (Get-DataSafeManifestScalar $Pointer 'formatVersion' 'integer') -ne 1) { throw 'DataSafe current pointer schema is invalid.' }
+  $id = Get-DataSafeManifestScalar $Pointer 'transactionId'; Assert-DataSafeComputerId $id
+  $canonical = ([guid]$id).ToString('D')
+  if ($id -cne $canonical -or (Get-DataSafeManifestScalar $Pointer 'manifestPath') -cne ('manifests/' + $canonical + '.json')) { throw 'DataSafe current pointer path/UUID is not canonical.' }
+  $hash = Get-DataSafeManifestScalar $Pointer 'sha256'
+  if ($hash -cnotmatch '^[A-F0-9]{64}$') { throw 'DataSafe current pointer hash schema is invalid.' }
+  $path = Join-Path $Repository.MetadataRoot $Pointer.manifestPath
+  Assert-DataSafeNoReparsePath $path
+  if (-not (Test-DataSafeFile $path) -or (Get-DataSafeSha256 $path) -cne $hash) { throw 'DataSafe current pointer manifest hash verification failed.' }
+  $manifest = Read-DataSafeManifest $path
+  if ($null -ne $ExpectedManifest -and (ConvertTo-Json $manifest -Depth 32 -Compress) -cne (ConvertTo-Json (ConvertTo-DataSafeValidatedManifest $ExpectedManifest) -Depth 32 -Compress)) { throw 'DataSafe current pointer does not match the transaction manifest.' }
+  return $path
+}
+
+function Read-DataSafeCurrentPointer($Repository) {
+  $path = Join-Path $Repository.MetadataRoot 'current-manifest.json'
+  Assert-DataSafeNoReparsePath $path
+  if (Test-DataSafeDirectory $path) { throw 'DataSafe current pointer path is occupied by a directory.' }
+  if (-not (Test-DataSafeFile $path)) { return $null }
+  try {
+    $encoding = New-Object Text.UTF8Encoding($false, $true)
+    $pointer = ConvertFrom-DataSafeTransactionJson ($encoding.GetString([IO.File]::ReadAllBytes((ConvertTo-DataSafeExtendedPath $path))))
+    $null = Assert-DataSafeCurrentPointer $Repository $pointer
+    return $pointer
+  } catch { throw "DataSafe current pointer is invalid: $($_.Exception.Message)" }
+}
+
+function Test-DataSafeTransactionObject([string]$Path, $Entry, [switch]$Metadata, [long]$TimestampToleranceTicks = 0) {
+  Assert-DataSafeNoReparsePath $Path
+  if ($null -eq $Entry) { return (-not (Test-DataSafeFile $Path) -and -not (Test-DataSafeDirectory $Path)) }
+  $extended = ConvertTo-DataSafeExtendedPath $Path
+  if ($Entry.entryType -ceq 'directory') { if (-not (Test-DataSafeDirectory $Path)) { return $false } }
+  else {
+    if (-not (Test-DataSafeFile $Path)) { return $false }
+    $info = New-Object IO.FileInfo($extended)
+    if ($info.Length -ne $Entry.length -or (Get-DataSafeSha256 $Path) -cne $Entry.sha256) { return $false }
+  }
+  if ($Metadata) {
+    if ($TimestampToleranceTicks -notin @([long]0,[long]100000,[long]20000000)) { throw 'DataSafe destination timestamp tolerance is invalid.' }
+    $expected = [datetime]::ParseExact($Entry.modifiedUtc, 'o', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+    $actual = [IO.File]::GetLastWriteTimeUtc($extended)
+    if ((ConvertTo-DataSafePortableAttributes ([long][IO.File]::GetAttributes($extended)) ($Entry.entryType -ceq 'directory')) -ne $Entry.attributes -or
+        [Math]::Abs($actual.Ticks - $expected.Ticks) -gt $TimestampToleranceTicks) { return $false }
+  }
+  return $true
+}
+
+function Get-DataSafeTransactionTreePaths($Repository, $Manifest) {
+  $paths = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([StringComparer]::OrdinalIgnoreCase)
+  if ($null -ne $Manifest) {
+    foreach ($entry in $Manifest.entries) {
+      $path = Join-Path $Repository.Root $entry.versionLocation
+      $paths[$path] = $entry
+      $parent = [IO.Path]::GetDirectoryName($path)
+      while ($parent.Length -gt $Repository.LatestRoot.Length) {
+        if (-not $paths.ContainsKey($parent)) { $paths[$parent] = $null }
+        $parent = [IO.Path]::GetDirectoryName($parent)
+      }
+    }
+  }
+  return ,$paths
+}
+
+function Assert-DataSafeTransactionTree($Repository, $Manifest, [switch]$Metadata, [long]$TimestampToleranceTicks = 0) {
+  $paths = Get-DataSafeTransactionTreePaths $Repository $Manifest
+  foreach ($path in $paths.Keys) {
+    $entry = $paths[$path]
+    if ($null -eq $entry) {
+      Assert-DataSafeNoReparsePath $path
+      if (-not (Test-DataSafeDirectory $path)) { throw 'DataSafe manifest parent directory is missing.' }
+    } elseif (-not (Test-DataSafeTransactionObject $path $entry -Metadata:$Metadata -TimestampToleranceTicks $TimestampToleranceTicks)) { throw "DataSafe current tree hash/type/metadata verification failed: $path" }
+  }
+  $pending = New-Object 'System.Collections.Generic.Stack[string]'; $pending.Push($Repository.LatestRoot)
+  while ($pending.Count) {
+    $directory = $pending.Pop(); Assert-DataSafeNoReparsePath $directory
+    foreach ($path in [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $directory))) {
+      $ordinary = ConvertFrom-DataSafeExtendedPath $path
+      Assert-DataSafeNoReparsePath $ordinary
+      if (-not $paths.ContainsKey($ordinary)) { throw "DataSafe current tree has unknown content: $ordinary" }
+      if (Test-DataSafeDirectory $ordinary) { $pending.Push($ordinary) }
+    }
+  }
+}
+
+function Set-DataSafeTransactionMetadata([string]$Path, $Entry) {
+  Assert-DataSafeNoReparsePath $Path
+  $extended = ConvertTo-DataSafeExtendedPath $Path
+  # Clear read-only for time updates, then restore the supported ordinary flags.
+  [IO.File]::SetAttributes($extended, [IO.FileAttributes]::Normal)
+  $time = [datetime]::ParseExact($Entry.modifiedUtc, 'o', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind)
+  if ($Entry.entryType -ceq 'directory') { [IO.Directory]::SetLastWriteTimeUtc($extended, $time) }
+  else { [IO.File]::SetLastWriteTimeUtc($extended, $time) }
+  $portable = ConvertTo-DataSafePortableAttributes $Entry.attributes ($Entry.entryType -ceq 'directory')
+  [IO.File]::SetAttributes($extended, [IO.FileAttributes]$(if ($portable -eq 0) { 128 } else { $portable }))
+}
+
+function Send-DataSafeTransactionBoundary($Owner, $Operation, [string]$Phase, [scriptblock]$AfterOperation) {
+  if ($null -ne $AfterOperation) {
+    & $AfterOperation ([PSCustomObject]@{ TransactionId=$Owner.Transaction.transactionId; Sequence=$(if ($null -eq $Operation) { 0 } else { $Operation.sequence }); Phase=$Phase; State=$Owner.Transaction.state }) | Out-Null
+  }
+}
+
+function Save-DataSafeTransactionBoundary($Owner, $Operation, [string]$Phase, [scriptblock]$AfterOperation) {
+  Save-DataSafeOwnedTransaction $Owner
+  Send-DataSafeTransactionBoundary $Owner $Operation $Phase $AfterOperation
+}
+
+function Initialize-DataSafeApplyJournal($Owner) {
+  $tx = $Owner.Transaction
+  $pointer = Read-DataSafeCurrentPointer $Owner.Repository
+  if ($tx.formatVersion -eq 1) {
+    $capabilities = Get-DataSafeDestinationCapabilities $Owner.Repository.Root
+    if (-not $capabilities.Supported) { throw 'DataSafe legacy journal cannot upgrade on an unsupported filesystem.' }
+    $tx | Add-Member destinationFileSystem $capabilities.FileSystem.ToUpperInvariant()
+    $tx | Add-Member timestampToleranceTicks $capabilities.TimestampToleranceTicks
+    $tx | Add-Member previousPointer $null
+    $tx | Add-Member pointerCaptured $false
+    $tx.transactionId = ([guid]$tx.transactionId).ToString('D')
+    foreach ($op in $tx.operations) { foreach ($name in @('archiveState','promoteState','metadataState')) { $op | Add-Member $name pending } }
+    $tx.formatVersion = 2
+  }
+  if (-not $tx.pointerCaptured) {
+    if (($null -eq $pointer) -ne ($null -eq $tx.previousManifest)) { throw 'DataSafe previous pointer/manifest baseline mismatch.' }
+    if ($null -ne $pointer) { $null = Assert-DataSafeCurrentPointer $Owner.Repository $pointer $tx.previousManifest }
+    $tx.previousPointer = $pointer; $tx.pointerCaptured = $true
+    Save-DataSafeOwnedTransaction $Owner
+  } elseif ((ConvertTo-Json $pointer -Depth 8 -Compress) -cne (ConvertTo-Json $tx.previousPointer -Depth 8 -Compress)) {
+    if ($null -eq $pointer -or $pointer.transactionId -ine $tx.transactionId) { throw 'DataSafe current pointer changed outside the transaction.' }
+    $null = Assert-DataSafeCurrentPointer $Owner.Repository $pointer $tx.currentManifest
+  }
+}
+
+function Assert-DataSafeTransactionCommit($Owner) {
+  $tx = $Owner.Transaction
+  $pointer = Read-DataSafeCurrentPointer $Owner.Repository
+  if ($null -eq $pointer -or $pointer.transactionId -cne $tx.transactionId) { throw 'DataSafe transaction cannot commit without its durable pointer.' }
+  $null = Assert-DataSafeCurrentPointer $Owner.Repository $pointer $tx.currentManifest
+  Assert-DataSafeTransactionTree $Owner.Repository $tx.currentManifest -Metadata -TimestampToleranceTicks $tx.timestampToleranceTicks
+}
+
+function Complete-DataSafeTransactionResult($Owner) {
+  $warnings = @(); $tx = $Owner.Transaction
+  $staging = Join-Path $Owner.Repository.StagingRoot $tx.transactionId
+  # Cleanup only a schema-derived transaction staging root, never history.
+  try {
+    Assert-DataSafeNoReparsePath $staging
+    if (Test-DataSafeFile $staging) { throw 'DataSafe staging cleanup preserved an unknown root type.' }
+    if (Test-DataSafeDirectory $staging) {
+      $known = New-Object 'System.Collections.Generic.Dictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
+      $known.Add($staging, 'directory')
+      foreach ($op in $tx.operations) {
+        if ($null -eq $op.stagedPath) { continue }
+        $known[$op.stagedPath] = 'file'
+        $parent = [IO.Path]::GetDirectoryName($op.stagedPath)
+        while ($parent.Length -gt $staging.Length) {
+          $known[$parent] = 'directory'; $parent = [IO.Path]::GetDirectoryName($parent)
+        }
+      }
+      # Validate the ENTIRE cleanup tree before deleting any evidence. Only
+      # paths reserved by this exact journal and their parents are ours to clean.
+      $pending = New-Object 'System.Collections.Generic.Stack[string]'; $pending.Push($staging)
+      while ($pending.Count) {
+        $directory = $pending.Pop()
+        foreach ($extended in [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $directory))) {
+          $path = ConvertFrom-DataSafeExtendedPath $extended; Assert-DataSafeNoReparsePath $path
+          if (-not $known.ContainsKey($path)) { throw 'DataSafe staging cleanup preserved unknown content.' }
+          $isDirectory = Test-DataSafeDirectory $path
+          if ($isDirectory -ne ($known[$path] -ceq 'directory')) { throw 'DataSafe staging cleanup preserved an unknown entry type.' }
+          if ($isDirectory) { $pending.Push($path) }
+        }
+      }
+      Remove-DataSafeDirectoryTree $staging
+    }
+  }
+  catch { $warnings += [PSCustomObject]@{ Code='StagingCleanupFailed'; Message=$_.Exception.Message } }
+  $pointer = Read-DataSafeCurrentPointer $Owner.Repository
+  $manifestPath = if ($null -ne $pointer) { Join-Path $Owner.Repository.MetadataRoot $pointer.manifestPath } else { $null }
+  return [PSCustomObject]@{ FinalState=$tx.state; RecoveredOperationCount=$tx.operations.Count; ManifestPath=$manifestPath; Warnings=@($warnings) }
+}
+
+function Invoke-DataSafeTransaction($Transaction, [scriptblock]$AfterOperation = $null) {
+  $owner = Get-DataSafeTransactionOwner $Transaction
+  if ($Transaction.state -cnotin @('prepared','applying')) { throw 'DataSafe apply requires prepared/applying state.' }
+  $repo = $owner.Repository
+  $tolerance = if ($Transaction.formatVersion -eq 2) { $Transaction.timestampToleranceTicks } else { (Get-DataSafeDestinationCapabilities $repo.Root).TimestampToleranceTicks }
+  if ($Transaction.state -ceq 'prepared' -or $Transaction.formatVersion -eq 1 -or -not $Transaction.pointerCaptured) {
+    # Whole-baseline and whole-stage checks precede every mutation of user data.
+    Assert-DataSafeTransactionTree $repo $Transaction.previousManifest -Metadata -TimestampToleranceTicks $tolerance
+    foreach ($op in $Transaction.operations) { if ($null -ne $op.stagedPath) { Assert-DataSafeTransactionStaged $op $null } }
+    Assert-DataSafeTransactionSpaceAndHistory $Transaction $repo 0
+  } else {
+    # Resuming the original owner must be as strict as explicit disk recovery.
+    Assert-DataSafeTransactionRecoverable $owner -Forward
+  }
+  Initialize-DataSafeApplyJournal $owner
+  Send-DataSafeTransactionBoundary $owner $null 'apply-journal' $AfterOperation
+  if ($Transaction.state -ceq 'prepared') { Set-DataSafeTransactionState $Transaction applying; Send-DataSafeTransactionBoundary $owner $null 'applying' $AfterOperation }
+  # Old entries are handled individually, deepest first. Directories are never
+  # recursively moved: children can belong to different history categories.
+  foreach ($op in @($Transaction.operations | Sort-Object @{Expression={ $_.relativePath.Split('/').Count }; Descending=$true}, sequence)) {
+    if ($op.kind -notin @('replace','delete') -or $op.archiveState -ceq 'done') { continue }
+    if ($op.oldEntry.entryType -ceq 'file') {
+      if (Test-DataSafeTransactionObject $op.historyPath $op.oldEntry) {
+        if (Test-DataSafeTransactionObject $op.oldCurrentPath $op.oldEntry) { throw 'DataSafe blocked recovery: duplicate old file locations.' }
+      } else {
+        if ((Test-DataSafeFile $op.historyPath) -or (Test-DataSafeDirectory $op.historyPath)) { throw 'DataSafe history collision or unknown content.' }
+        if (-not (Test-DataSafeTransactionObject $op.oldCurrentPath $op.oldEntry)) { throw 'DataSafe old file hash verification failed.' }
+        Ensure-DataSafeDirectory ([IO.Path]::GetDirectoryName($op.historyPath))
+        Move-DataSafeSameVolume $op.oldCurrentPath $op.historyPath
+        Send-DataSafeTransactionBoundary $owner $op 'archive-filesystem' $AfterOperation
+        if (-not (Test-DataSafeTransactionObject $op.historyPath $op.oldEntry)) { throw 'DataSafe archive verification failed.' }
+      }
+    } else {
+      Assert-DataSafeNoReparsePath $op.historyPath
+      if (Test-DataSafeFile $op.historyPath) { throw 'DataSafe history directory collision.' }
+      Ensure-DataSafeDirectory $op.historyPath
+      if (Test-DataSafeDirectory $op.oldCurrentPath) {
+        [IO.File]::SetAttributes((ConvertTo-DataSafeExtendedPath $op.oldCurrentPath), [IO.FileAttributes]::Normal)
+        [IO.Directory]::Delete((ConvertTo-DataSafeExtendedPath $op.oldCurrentPath), $false)
+      } elseif (Test-DataSafeFile $op.oldCurrentPath) { throw 'DataSafe unknown old directory content.' }
+      Set-DataSafeTransactionMetadata $op.historyPath $op.oldEntry
+      if (-not (Test-DataSafeTransactionObject $op.historyPath $op.oldEntry -Metadata -TimestampToleranceTicks $tolerance)) { throw 'DataSafe archived directory metadata verification failed.' }
+      Send-DataSafeTransactionBoundary $owner $op 'archive-filesystem' $AfterOperation
+    }
+    $op.archiveState = 'done'; Save-DataSafeTransactionBoundary $owner $op 'archived' $AfterOperation
+  }
+  $newOperations = @($Transaction.operations | Where-Object { $null -ne $_.newEntry } | Sort-Object @{Expression={ if ($_.newEntry.entryType -ceq 'directory') { 0 } else { 1 } }}, @{Expression={ $_.relativePath.Split('/').Count }}, sequence)
+  foreach ($op in $newOperations) {
+    if ($op.promoteState -ceq 'done') { continue }
+    if ($op.kind -ceq 'metadata') {
+      if (-not (Test-DataSafeTransactionObject $op.currentPath $op.newEntry)) { throw 'DataSafe metadata target verification failed.' }
+    } elseif ($op.newEntry.entryType -ceq 'directory') {
+      Assert-DataSafeNoReparsePath $op.currentPath
+      if (Test-DataSafeFile $op.currentPath) { throw 'DataSafe new directory has unknown file content.' }
+      Ensure-DataSafeDirectory $op.currentPath
+      Send-DataSafeTransactionBoundary $owner $op 'promote-filesystem' $AfterOperation
+    } elseif (Test-DataSafeTransactionObject $op.currentPath $op.newEntry) {
+      if (Test-DataSafeFile $op.stagedPath) { throw 'DataSafe blocked recovery: duplicate promoted content.' }
+    } else {
+      Assert-DataSafeTransactionStaged $op $null
+      Ensure-DataSafeDirectory ([IO.Path]::GetDirectoryName($op.currentPath))
+      Move-DataSafeSameVolume $op.stagedPath $op.currentPath
+      Send-DataSafeTransactionBoundary $owner $op 'promote-filesystem' $AfterOperation
+      if (-not (Test-DataSafeTransactionObject $op.currentPath $op.newEntry)) { throw 'DataSafe promotion verification failed.' }
+    }
+    $op.promoteState = 'done'; Save-DataSafeTransactionBoundary $owner $op 'promoted' $AfterOperation
+  }
+  $oldPaths = Get-DataSafeTransactionTreePaths $repo $Transaction.previousManifest
+  $newPaths = Get-DataSafeTransactionTreePaths $repo $Transaction.currentManifest
+  foreach ($path in @($oldPaths.Keys | Sort-Object Length -Descending)) {
+    if (-not $newPaths.ContainsKey($path) -and (Test-DataSafeDirectory $path)) {
+      # Only known, now-empty structural ancestors may disappear. Unknown
+      # descendants make the nonrecursive delete fail without losing content.
+      [IO.Directory]::Delete((ConvertTo-DataSafeExtendedPath $path), $false)
+      Send-DataSafeTransactionBoundary $owner $null 'remove-parents-filesystem' $AfterOperation
+    }
+  }
+  # Child mutations change parent times, so metadata is restored files first,
+  # then deepest directories last, including otherwise unchanged directories.
+  foreach ($entry in @($Transaction.currentManifest.entries | Sort-Object @{Expression={ if ($_.entryType -ceq 'file') { 0 } else { 1 } }}, @{Expression={ $_.relativePath.Split('/').Count }; Descending=$true})) {
+    Set-DataSafeTransactionMetadata (Join-Path $repo.Root $entry.versionLocation) $entry
+  }
+  Send-DataSafeTransactionBoundary $owner $null 'metadata-filesystem' $AfterOperation
+  Assert-DataSafeTransactionTree $repo $Transaction.currentManifest -Metadata -TimestampToleranceTicks $tolerance
+  foreach ($op in $newOperations) { $op.metadataState = 'done' }
+  Save-DataSafeTransactionBoundary $owner $null 'metadata' $AfterOperation
+  $manifestPath = Join-Path $repo.ManifestRoot ($Transaction.transactionId + '.json')
+  if (Test-DataSafeFile $manifestPath) {
+    if ((ConvertTo-Json (Read-DataSafeManifest $manifestPath) -Depth 32 -Compress) -cne (ConvertTo-Json $Transaction.currentManifest -Depth 32 -Compress)) { throw 'DataSafe manifest UUID collision.' }
+  } else { $manifestPath = Write-DataSafeManifest $repo $Transaction.currentManifest $Transaction.transactionId }
+  Send-DataSafeTransactionBoundary $owner $null 'manifest' $AfterOperation
+  $pointer = [PSCustomObject][ordered]@{ schema='datasafe.current-manifest'; formatVersion=1; transactionId=$Transaction.transactionId; manifestPath=('manifests/'+$Transaction.transactionId+'.json'); sha256=(Get-DataSafeSha256 $manifestPath) }
+  $null = Assert-DataSafeCurrentPointer $repo $pointer $Transaction.currentManifest
+  # Recheck authority immediately before the atomic publish.
+  $actual = Read-DataSafeCurrentPointer $repo
+  if ((ConvertTo-Json $actual -Depth 8 -Compress) -cne (ConvertTo-Json $Transaction.previousPointer -Depth 8 -Compress) -and
+      (ConvertTo-Json $actual -Depth 8 -Compress) -cne (ConvertTo-Json $pointer -Depth 8 -Compress)) { throw 'DataSafe pointer changed outside the transaction.' }
+  Write-DataSafeAtomicJson (Join-Path $repo.MetadataRoot 'current-manifest.json') $pointer
+  Send-DataSafeTransactionBoundary $owner $null 'pointer' $AfterOperation
+  Assert-DataSafeTransactionCommit $owner
+  Set-DataSafeTransactionState $Transaction committed
+  Send-DataSafeTransactionBoundary $owner $null 'committed' $AfterOperation
+  return Complete-DataSafeTransactionResult $owner
+}
+
+function Assert-DataSafeTransactionRecoverable($Owner, [switch]$Forward) {
+  $tx = $Owner.Transaction; $repo = $Owner.Repository
+  $oldPaths = Get-DataSafeTransactionTreePaths $repo $tx.previousManifest
+  $newPaths = Get-DataSafeTransactionTreePaths $repo $tx.currentManifest
+  # Prove every existing latest object is known before recovery changes anything.
+  $pending = New-Object 'System.Collections.Generic.Stack[string]'; $pending.Push($repo.LatestRoot)
+  while ($pending.Count) {
+    $dir = $pending.Pop(); Assert-DataSafeNoReparsePath $dir
+    foreach ($extended in [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $dir))) {
+      $path = ConvertFrom-DataSafeExtendedPath $extended; Assert-DataSafeNoReparsePath $path
+      $known = $false
+      foreach ($map in @($oldPaths,$newPaths)) {
+        if ($map.ContainsKey($path)) {
+          if ($null -eq $map[$path]) { if (Test-DataSafeDirectory $path) { $known = $true } }
+          elseif (Test-DataSafeTransactionObject $path $map[$path]) { $known = $true }
+        }
+      }
+      if (-not $known) { throw "DataSafe blocked recovery: unknown current content: $path" }
+      if (Test-DataSafeDirectory $path) { $pending.Push($path) }
+    }
+  }
+  if ($null -ne $tx.previousManifest) {
+    foreach ($entry in $tx.previousManifest.entries) {
+      if ($entry.entryType -cne 'file') { continue }
+      $path = Join-Path $repo.Root $entry.versionLocation
+      if (Test-DataSafeTransactionObject $path $entry) { continue }
+      $ops = @($tx.operations | Where-Object { $null -ne $_.oldEntry -and $_.oldEntry.versionLocation -ieq $entry.versionLocation -and $_.kind -in @('replace','delete') })
+      if ($ops.Count -ne 1 -or -not (Test-DataSafeTransactionObject $ops[0].historyPath $entry)) { throw 'DataSafe blocked recovery: required old file is missing or corrupt.' }
+    }
+  }
+  foreach ($op in $tx.operations) {
+    if ($null -ne $op.historyPath -and ((Test-DataSafeFile $op.historyPath) -or (Test-DataSafeDirectory $op.historyPath)) -and
+        -not (Test-DataSafeTransactionObject $op.historyPath $op.oldEntry)) { throw 'DataSafe blocked recovery: unknown history content.' }
+  }
+  if ($Forward) {
+    foreach ($entry in $tx.currentManifest.entries) {
+      if ($entry.entryType -cne 'file') { continue }
+      $path = Join-Path $repo.Root $entry.versionLocation
+      if (Test-DataSafeTransactionObject $path $entry) { continue }
+      $ops = @($tx.operations | Where-Object { $null -ne $_.stagedPath -and $_.newEntry.versionLocation -ieq $entry.versionLocation })
+      if ($ops.Count -ne 1 -or -not (Test-DataSafeTransactionObject $ops[0].stagedPath $entry)) { throw 'DataSafe remaining new content is missing or corrupt.' }
+    }
+  }
+}
+
+function Undo-DataSafeTransaction($Transaction) {
+  $owner = Get-DataSafeTransactionOwner $Transaction; $repo = $owner.Repository
+  if ($Transaction.state -cnotin @('staging','prepared','applying','rollingBack')) { throw 'DataSafe undo cannot undo a committed/terminal transaction.' }
+  Initialize-DataSafeApplyJournal $owner
+  $pointer = Read-DataSafeCurrentPointer $repo
+  if ($null -ne $pointer -and $pointer.transactionId -ieq $Transaction.transactionId) { throw 'DataSafe committed pointer cannot be undone.' }
+  Assert-DataSafeTransactionRecoverable $owner
+  if ($Transaction.state -cne 'rollingBack') { Set-DataSafeTransactionState $Transaction rollingBack }
+  foreach ($op in @($Transaction.operations | Sort-Object @{Expression={ $_.relativePath.Split('/').Count }; Descending=$true}, sequence)) {
+    if ($op.kind -cnotin @('add','replace')) { continue }
+    # A pre-existing old object is not a promotion. Never remove it on undo.
+    if ($null -ne $op.oldEntry -and $op.currentPath.Equals($op.oldCurrentPath, [StringComparison]::OrdinalIgnoreCase) -and
+        (Test-DataSafeTransactionObject $op.currentPath $op.oldEntry)) { continue }
+    if (Test-DataSafeTransactionObject $op.currentPath $op.newEntry) {
+      $extended = ConvertTo-DataSafeExtendedPath $op.currentPath
+      [IO.File]::SetAttributes($extended, [IO.FileAttributes]::Normal)
+      if ($op.newEntry.entryType -ceq 'file') {
+        # Retract by verified no-overwrite rename, preserving new bytes as evidence
+        # until the old tree is fully restored and terminal journal is durable.
+        if (Test-DataSafeFile $op.stagedPath) {
+          if (-not (Test-DataSafeTransactionObject $op.stagedPath $op.newEntry)) { throw 'DataSafe blocked rollback: occupied staging destination.' }
+          [IO.File]::Delete($extended)
+        } else {
+          Ensure-DataSafeDirectory ([IO.Path]::GetDirectoryName($op.stagedPath))
+          Move-DataSafeSameVolume $op.currentPath $op.stagedPath
+        }
+      } else { [IO.Directory]::Delete($extended, $false) }
+    }
+    Save-DataSafeOwnedTransaction $owner
+  }
+  # Remove only empty new implicit ancestors absent from the previous tree.
+  $oldPaths = Get-DataSafeTransactionTreePaths $repo $Transaction.previousManifest
+  $newPaths = Get-DataSafeTransactionTreePaths $repo $Transaction.currentManifest
+  foreach ($path in @($newPaths.Keys | Sort-Object Length -Descending)) {
+    if (-not $oldPaths.ContainsKey($path) -and (Test-DataSafeDirectory $path)) {
+      [IO.Directory]::Delete((ConvertTo-DataSafeExtendedPath $path), $false)
+    }
+  }
+  if ($null -ne $Transaction.previousManifest) {
+    foreach ($entry in @($Transaction.previousManifest.entries | Sort-Object @{Expression={ if ($_.entryType -ceq 'directory') { 0 } else { 1 } }}, @{Expression={ $_.relativePath.Split('/').Count }})) {
+      $path = Join-Path $repo.Root $entry.versionLocation
+      if ($entry.entryType -ceq 'directory') { Ensure-DataSafeDirectory $path }
+      elseif (-not (Test-DataSafeTransactionObject $path $entry)) {
+        $op = @($Transaction.operations | Where-Object { $null -ne $_.oldEntry -and $_.oldEntry.versionLocation -ieq $entry.versionLocation })[0]
+        if (-not (Test-DataSafeTransactionObject $op.historyPath $entry)) { throw 'DataSafe blocked rollback: old archive verification failed.' }
+        Ensure-DataSafeDirectory ([IO.Path]::GetDirectoryName($path))
+        Move-DataSafeSameVolume $op.historyPath $path
+      }
+      Save-DataSafeOwnedTransaction $owner
+    }
+    foreach ($entry in @($Transaction.previousManifest.entries | Sort-Object @{Expression={ if ($_.entryType -ceq 'file') { 0 } else { 1 } }}, @{Expression={ $_.relativePath.Split('/').Count }; Descending=$true})) {
+      Set-DataSafeTransactionMetadata (Join-Path $repo.Root $entry.versionLocation) $entry
+    }
+  }
+  Assert-DataSafeTransactionTree $repo $Transaction.previousManifest -Metadata -TimestampToleranceTicks $Transaction.timestampToleranceTicks
+  $actual = Read-DataSafeCurrentPointer $repo
+  if ((ConvertTo-Json $actual -Depth 8 -Compress) -cne (ConvertTo-Json $Transaction.previousPointer -Depth 8 -Compress)) { throw 'DataSafe rollback previous pointer mismatch.' }
+  Set-DataSafeTransactionState $Transaction rolledBack
+  return Complete-DataSafeTransactionResult $owner
+}
+
+function Recover-DataSafeTransaction($Repository, [string]$TransactionPath) {
+  $repo = Read-DataSafeRepository (Get-DataSafeManifestScalar $Repository 'Root')
+  foreach ($name in @('FormatVersion','ComputerId','ComputerName','Root','LatestRoot','HistoryRoot','MetadataRoot','ManifestRoot','TransactionRoot','StagingRoot')) {
+    if ($null -eq $Repository.PSObject.Properties[$name] -or $Repository.$name -ine $repo.$name) { throw 'DataSafe recovery repository identity/path mismatch.' }
+  }
+  # Lock before reading the journal, then bind every path/identity under it.
+  $lockPath = Join-Path $repo.MetadataRoot 'operation.lock'; Assert-DataSafeNoReparsePath $lockPath
+  $handle = Acquire-DataSafeOperationLock (ConvertTo-DataSafeExtendedPath $lockPath)
+  $owner = $null
+  try {
+    $tx = Read-DataSafeTransaction $TransactionPath
+    if ($tx.repositoryRoot -ine $repo.Root -or $tx.computerId -ine $repo.ComputerId) { throw 'DataSafe recovery transaction repository identity mismatch.' }
+    Assert-DataSafeTransactionPath $TransactionPath (Join-Path $repo.TransactionRoot ($tx.transactionId+'.json'))
+    $key = Get-DataSafeTransactionOwnerKey $repo.Root $repo.ComputerId $tx.transactionId
+    $owner = [PSCustomObject]@{ Transaction=$tx; Repository=$repo; Path=$TransactionPath; LockPath=$lockPath; Handle=$handle; Json=(ConvertTo-Json $tx -Depth 32 -Compress) }
+    $script:DataSafeTransactionOwners[$key] = $owner
+    $pointer = Read-DataSafeCurrentPointer $repo
+    if ($null -ne $pointer -and $pointer.transactionId -ieq $tx.transactionId) {
+      # Publishing the pointer forbids rollback, including a crash before the
+      # committed journal revision. Never substitute the previous tree here.
+      Assert-DataSafeTransactionCommit $owner
+      if ($tx.state -cne 'committed') {
+        if ($tx.state -cne 'applying') { throw 'DataSafe blocked recovery: committed pointer has incompatible journal state.' }
+        Set-DataSafeTransactionState $tx committed
+      }
+      return Complete-DataSafeTransactionResult $owner
+    }
+    if ($tx.state -ceq 'committed') { throw 'DataSafe blocked recovery: committed journal has no matching pointer.' }
+    if ($tx.state -ceq 'rolledBack') {
+      Initialize-DataSafeApplyJournal $owner
+      Assert-DataSafeTransactionTree $repo $tx.previousManifest -Metadata -TimestampToleranceTicks $tx.timestampToleranceTicks
+      return Complete-DataSafeTransactionResult $owner
+    }
+    Initialize-DataSafeApplyJournal $owner
+    if ($tx.state -ceq 'staging' -or $tx.state -ceq 'rollingBack') { return Undo-DataSafeTransaction $tx }
+    Assert-DataSafeTransactionRecoverable $owner
+    $forward = $true
+    try { Assert-DataSafeTransactionRecoverable $owner -Forward } catch { $forward = $false }
+    if (-not $forward) { return Undo-DataSafeTransaction $tx }
+    return Invoke-DataSafeTransaction $tx
+  } finally {
+    if ($null -ne $owner -and $null -ne $owner.Handle) {
+      Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $lockPath); $owner.Handle = $null
+    } elseif ($null -eq $owner) { Release-DataSafeOperationLock $handle (ConvertTo-DataSafeExtendedPath $lockPath) }
   }
 }

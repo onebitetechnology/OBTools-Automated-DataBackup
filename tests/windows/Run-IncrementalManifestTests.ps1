@@ -33,6 +33,24 @@ function New-FixtureManifest {
   }
 }
 
+Test-Case 'destination relocation with identical bytes requires staged replacement not metadata' {
+  $old = New-FixtureManifest; $new = New-FixtureManifest
+  $new.sources[0].relativeDestination = 'Relocated'
+  $new.entries[0].versionLocation = 'Latest Backup/Relocated/report.txt'
+  $diff = Compare-DataSafeManifests $old $new
+  Assert-True ($diff.ContentChanged.Count -eq 1 -and $diff.MetadataChanged.Count -eq 0 -and $diff.Unchanged.Count -eq 0) 'Relocation bypassed verified staging.'
+}
+Test-Case 'portable attributes normalize NTFS-only flags without versioning them' {
+  $old = New-FixtureManifest; $new = New-FixtureManifest
+  $new.entries[0].attributes = [long](32 -bor 128 -bor 256 -bor 512 -bor 2048 -bor 4096 -bor 16384)
+  $validated = ConvertTo-DataSafeValidatedManifest $new
+  Assert-True ($validated.entries[0].attributes -eq 32) 'Nonportable file attributes persisted.'
+  Assert-True ((Compare-DataSafeManifests $old $new).Unchanged.Count -eq 1) 'NTFS-only flags created a version.'
+  $new.entries[0].entryType='directory'; $new.entries[0].length=0; $new.entries[0].sha256=$null
+  $new.entries[0].attributes=[long](16 -bor 2048 -bor 4096)
+  Assert-True ((ConvertTo-DataSafeValidatedManifest $new).entries[0].attributes -eq 16) 'Directory bit not derived portably.'
+}
+
 # Malformed scalar fixtures must preserve their exact raw property value; no
 # pipeline-returning property getter is involved in constructing mutations.
 $scalarFields = @(

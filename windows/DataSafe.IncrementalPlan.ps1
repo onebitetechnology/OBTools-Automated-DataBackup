@@ -25,6 +25,7 @@ function New-DataSafeIncrementalPlan($Repository, $PreviousManifest, $CurrentMan
     DeletionReviewRequired = $false; DeletionCountsBySource = @(); BlockingErrors = @()
     OperationSchemaVersion = 1; MetadataOverheadBytes = [long]0; ReserveBytes = [long]0
     PreviousManifest = $null; CurrentManifest = $null
+    DestinationFileSystem = $null; TimestampToleranceTicks = [long]0
   }
   $errors = New-Object 'System.Collections.Generic.List[string]'
   $actual = $null; $current = $null; $previous = $null; $capabilityValid = $false
@@ -53,7 +54,10 @@ function New-DataSafeIncrementalPlan($Repository, $PreviousManifest, $CurrentMan
     }
     $maximum = Get-DataSafeManifestScalar $Capabilities 'MaxFileBytes' 'integer'
     $total = Get-DataSafeManifestScalar $Capabilities 'TotalBytes' 'integer'
+    $tolerance = Get-DataSafeManifestScalar $Capabilities 'TimestampToleranceTicks' 'integer'
+    if ($tolerance -ne $expected.TimestampToleranceTicks) { throw 'DataSafe destination timestamp granularity policy is invalid.' }
     if ($maximum -ne $expected.MaxFileBytes -or $total -le 0) { throw 'DataSafe filesystem capabilities or total capacity are invalid.' }
+    $plan.DestinationFileSystem = $fs.ToUpperInvariant(); $plan.TimestampToleranceTicks = [long]$tolerance
     $plan.ReserveBytes = ConvertTo-DataSafePlanInt64 ([Math]::Max([decimal]5368709120, [decimal]::Ceiling([decimal]$total / 10)))
     $capabilityValid = $true
   } catch { $errors.Add("Capabilities: $($_.Exception.Message)") }
