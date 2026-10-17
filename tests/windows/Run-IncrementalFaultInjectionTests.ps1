@@ -359,7 +359,7 @@ try {
     $path=Join-Path $f.Source a.txt; [IO.File]::SetAttributes($path,[IO.FileAttributes]::Hidden)
     $first=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $f.New
     $firstTx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $f.New $first); $null=Stage-DataSafeTransaction $firstTx; $null=Invoke-DataSafeTransaction $firstTx
-    [IO.File]::SetAttributes($path,[IO.FileAttributes]::ReadOnly); [IO.File]::SetLastWriteTimeUtc($path,[datetime]'2018-01-01Z')
+    [IO.File]::SetLastWriteTimeUtc($path,[datetime]'2018-01-01Z'); [IO.File]::SetAttributes($path,[IO.FileAttributes]::ReadOnly)
     $current=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;name='Documents'}) $first
     $tx=New-DataSafeTransaction $f.Repo (New-Plan $f.Repo $first $current); $null=Stage-DataSafeTransaction $tx
     Assert-Throws { Invoke-DataSafeTransaction $tx { param($c) if ($c.Phase -ceq 'metadata-attributes-cleared') { throw 'metadata clear crash' } } } 'metadata clear crash'
