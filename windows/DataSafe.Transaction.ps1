@@ -822,6 +822,27 @@ function Test-DataSafeTransactionDirectoryOwned($Owner,[string]$Path,$OldPaths=$
     if (-not $self -and -not $descendant) { continue }
     if ($op.newEntry.entryType -ceq 'directory') {
       if ($tx.formatVersion -ge 2 -and $op.promoteState -ceq 'done' -and (Test-DataSafeTransactionObject $op.currentPath $op.newEntry)) { return $true }
+      if ($descendant -and $tx.state -ceq 'rollingBack' -and $tx.formatVersion -ge 2 -and $op.promoteState -ceq 'done' -and
+          -not (Test-DataSafeFile $op.currentPath) -and -not (Test-DataSafeDirectory $op.currentPath)) {
+        # A durable directory promotion can be retracted before its journal.
+        # Retain only its necessary, empty ancestor chain: unlike returned
+        # file bytes, this proof must inspect every remaining descendant.
+        $chain=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+        $ancestor=[IO.Path]::GetDirectoryName($op.currentPath)
+        while ($ancestor.Equals($Path,[StringComparison]::OrdinalIgnoreCase) -or $ancestor.StartsWith($Path+'\',[StringComparison]::OrdinalIgnoreCase)) {
+          $null=$chain.Add($ancestor); $ancestor=[IO.Path]::GetDirectoryName($ancestor)
+        }
+        $pending=New-Object 'System.Collections.Generic.Stack[string]'; $pending.Push($Path); $bounded=$true
+        while ($pending.Count -and $bounded) {
+          foreach ($extended in [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $pending.Pop()))) {
+            $child=ConvertFrom-DataSafeExtendedPath $extended
+            Assert-DataSafeNoReparsePath $child
+            if (-not $chain.Contains($child) -or -not (Test-DataSafeDirectory $child)) { $bounded=$false; break }
+            $pending.Push($child)
+          }
+        }
+        if ($bounded) { return $true }
+      }
     } elseif ($descendant -and (Test-DataSafeTransactionObject $op.currentPath $op.newEntry) -and
         -not (Test-DataSafeFile $op.stagedPath) -and -not (Test-DataSafeDirectory $op.stagedPath)) {
       # A verified current leaf plus its absent verified stage proves the
@@ -1311,7 +1332,10 @@ function Undo-DataSafeTransaction($Transaction) {
           Ensure-DataSafeDirectory ([IO.Path]::GetDirectoryName($op.stagedPath))
           Move-DataSafeSameVolume $op.currentPath $op.stagedPath
         }
-      } else { [IO.Directory]::Delete($extended, $false) }
+      } else {
+        [IO.Directory]::Delete($extended, $false)
+        Send-DataSafeTransactionBoundary $owner $op 'rollback-directory-removed' $null
+      }
     }
     Save-DataSafeOwnedTransaction $owner
   }
@@ -1323,6 +1347,7 @@ function Undo-DataSafeTransaction($Transaction) {
         (-not $oldPaths.ContainsKey($path) -or $oldPaths[$path].entryType -ceq 'file') -and (Test-DataSafeDirectory $path)) {
       Assert-DataSafeNoReparsePath $path
       [IO.Directory]::Delete((ConvertTo-DataSafeExtendedPath $path), $false)
+      Send-DataSafeTransactionBoundary $owner $null 'rollback-parent-directory-removed' $null
     }
   }
   if ($null -ne $Transaction.previousManifest) {

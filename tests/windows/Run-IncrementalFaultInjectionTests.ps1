@@ -72,10 +72,12 @@ function New-Fixture([switch]$Initial, [string]$Transition = '') {
   Ensure-DataSafeDirectory $root
   $repo = Initialize-DataSafeRepository $root 'Fault PC' ([guid]::NewGuid().ToString('D'))
   $source = Join-Path $root source
-  foreach ($name in @('a.txt','b.txt','c.txt','keep1')) { Write-File (Join-Path $source $name) ('old-' + $name) }
+  if ($Transition -like 'directory-only*') { Ensure-DataSafeDirectory (Join-Path $source empty) }
+  else { foreach ($name in @('a.txt','b.txt','c.txt','keep1')) { Write-File (Join-Path $source $name) ('old-' + $name) } }
   if ($Transition -eq 'directory-file') { Write-File (Join-Path $source 'node/child') 'child' }
   if ($Transition -eq 'file-directory') { Write-File (Join-Path $source node) 'old-node' }
   $job = [PSCustomObject]@{ id='docs'; path=$source; name='Documents' }
+  if ($Transition -eq 'directory-only-nested') { $job | Add-Member relativeDestination @('Root','Nested') }
   if ($Transition -like 'implicit-*') {
     Write-File (Join-Path $source Sub) 'old-sub'
     $job | Add-Member relativeDestination @('Folder')
@@ -141,6 +143,94 @@ function Write-LegacyRelocation($f) {
   Write-File $f.Path (ConvertTo-Json $j -Depth 32); $null=Read-DataSafeTransaction $f.Path
 }
 try {
+  foreach ($layout in @('directory-only','directory-only-nested')) {
+    Test-Case "zero-file directory forward internal fault sweep $layout" {
+      $probe=New-Fixture -Initial -Transition $layout
+      Assert-True ($probe.Tx.stageBytes -eq 0 -and @($probe.New.entries | Where-Object entryType -eq file).Count -eq 0) 'Directory-only fixture contains file bytes.'
+      $script:directoryPoints=0
+      $null=Invoke-DataSafeTransaction $probe.Tx { param($c) $script:directoryPoints++ }
+      $count=$script:directoryPoints
+      for ($fault=1;$fault -le $count;$fault++) {
+        $f=New-Fixture -Initial -Transition $layout; $script:directoryAt=0; $script:directoryFail=$fault
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) $script:directoryAt++; if ($script:directoryAt -eq $script:directoryFail) { throw 'zero-file forward crash' } } } 'zero-file forward crash'
+        Close-TestOwners
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Directory-only forward recovery failed.'
+        Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Directory-only repeat forward recovery failed.'
+      }
+      Write-Host "Zero-file forward boundaries checked ${layout}: $count"
+    }
+    Test-Case "zero-file rollback internal directory deletion sweep $layout" {
+      $directorySender=${function:Send-DataSafeTransactionBoundary}
+      $script:rollbackDirectoryAt=0; $script:rollbackDirectoryFail=0
+      try {
+        function Send-DataSafeTransactionBoundary($Owner,$Operation,[string]$Phase,[scriptblock]$AfterOperation) {
+          & $directorySender $Owner $Operation $Phase $AfterOperation
+          if ($Phase -in @('rollback-directory-removed','rollback-parent-directory-removed')) {
+            $script:rollbackDirectoryAt++
+            if ($script:rollbackDirectoryAt -eq $script:rollbackDirectoryFail) { throw 'zero-file directory deletion crash' }
+          }
+        }
+        $probe=New-Fixture -Initial -Transition $layout
+        Assert-Throws { Invoke-DataSafeTransaction $probe.Tx { param($c) if ($c.Phase -ceq 'metadata-filesystem') { throw 'apply crash' } } } 'apply crash'
+        $null=Undo-DataSafeTransaction $probe.Tx; $count=$script:rollbackDirectoryAt
+        Assert-True ($count -ge 2) 'Directory deletion substeps not exercised.'
+        for ($fault=1;$fault -le $count;$fault++) {
+          $f=New-Fixture -Initial -Transition $layout
+          Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'metadata-filesystem') { throw 'apply crash' } } } 'apply crash'
+          $script:rollbackDirectoryAt=0; $script:rollbackDirectoryFail=$fault
+          Assert-Throws { Undo-DataSafeTransaction $f.Tx } 'zero-file directory deletion crash'
+          $script:rollbackDirectoryFail=0; Close-TestOwners
+          Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Directory deletion recovery failed.'
+          Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+          Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Repeated directory deletion recovery failed.'
+        }
+        Write-Host "Zero-file rollback deletion boundaries checked ${layout}: $count"
+      } finally { ${function:Send-DataSafeTransactionBoundary}=$directorySender }
+    }
+    foreach ($damage in @('none','unknown-file','unknown-directory','reparse')) {
+      Test-Case "zero-file directory retraction gap $layout $damage" {
+        $f=New-Fixture -Initial -Transition $layout
+        Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'metadata-filesystem') { throw 'apply crash' } } } 'apply crash'
+        $script:emptyLeaf=$f.Tx.operations[0].currentPath; $script:emptyParent=[IO.Path]::GetDirectoryName($script:emptyLeaf); $script:emptyGap=$false
+        $emptyWriter=${function:Write-DataSafeTransactionJournal}
+        try {
+          function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
+            if ($Transaction.state -ceq 'rollingBack' -and -not $script:emptyGap -and -not (Test-DataSafeDirectory $script:emptyLeaf) -and
+                (Test-DataSafeDirectory $script:emptyParent) -and [IO.Directory]::GetFileSystemEntries($script:emptyParent).Count -eq 0) {
+              $script:emptyGap=$true; throw 'zero-file retract crash'
+            }
+            & $emptyWriter $Transaction $Path -CreateOnly:$CreateOnly
+          }
+          Assert-Throws { Undo-DataSafeTransaction $f.Tx } 'zero-file retract crash'
+        } finally { ${function:Write-DataSafeTransactionJournal}=$emptyWriter }
+        $unknown=Join-Path $script:emptyParent unknown
+        if ($damage -eq 'unknown-file') { Write-File $unknown 'foreign' }
+        if ($damage -eq 'unknown-directory') { Ensure-DataSafeDirectory $unknown }
+        if ($damage -eq 'reparse') { $null=New-Item -ItemType Junction -Path $unknown -Target $f.Source }
+        Close-TestOwners
+        if ($damage -ne 'none') {
+          Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'unknown|unowned|reparse'
+          Assert-True ([IO.Directory]::Exists($script:emptyParent)) 'Rejected recovery removed structural evidence.'
+          if ($damage -eq 'unknown-file') { Assert-True ([IO.File]::ReadAllText($unknown) -ceq 'foreign') 'Foreign bytes removed.'; [IO.File]::Delete($unknown) }
+          else { [IO.Directory]::Delete($unknown,$false) }
+        }
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Directory-only retraction did not recover.'
+        Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+        Assert-True (-not (Test-DataSafeFile $f.Pointer)) 'Initial rollback published a pointer.'
+        Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Directory-only repeat rollback failed.'
+      }
+    }
+    Test-Case "zero-file unowned external directories are not rollback proof $layout" {
+      $f=New-Fixture -Initial -Transition $layout
+      Set-DataSafeTransactionState $f.Tx rollingBack
+      Ensure-DataSafeDirectory $f.Tx.operations[0].currentPath
+      Close-TestOwners
+      Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'unowned'
+      Assert-True (Test-DataSafeDirectory $f.Tx.operations[0].currentPath) 'Unowned directory removed.'
+      Assert-True ((Read-DataSafeTransaction $f.Path).state -ceq 'rollingBack') 'Unrestored tree was labeled terminal.'
+    }
+  }
   Test-Case 'destination timestamp verification accepts only fixed media tolerance without hash weakening' {
     $f=New-Fixture -Initial; $null=Invoke-DataSafeTransaction $f.Tx
     $entry=$f.New.entries[0]; $path=Join-Path $f.Repo.Root $entry.versionLocation
