@@ -805,6 +805,39 @@ function Complete-DataSafeTransactionResult($Owner) {
   return [PSCustomObject]@{ FinalState=$tx.state; RecoveredOperationCount=$tx.operations.Count; ManifestPath=$manifestPath; Warnings=@($warnings) }
 }
 
+function Test-DataSafeTransactionDirectoryOwned($Owner,[string]$Path,$OldPaths=$null) {
+  Assert-DataSafeNoReparsePath $Path
+  if (-not (Test-DataSafeDirectory $Path)) { return $false }
+  if ($null -eq $OldPaths) { $OldPaths=Get-DataSafeTransactionTreePaths $Owner.Repository $Owner.Transaction.previousManifest }
+  if ($OldPaths.ContainsKey($Path) -and $OldPaths[$Path].entryType -ceq 'directory') { return $true }
+  $tx=$Owner.Transaction
+  if ($tx.formatVersion -eq 3 -and $null -ne $tx.mutationIntent -and $tx.mutationIntent.kind -ceq 'promote' -and $Path -in $tx.mutationIntent.directories) {
+    Assert-DataSafeMutationIntentState $Owner
+    return $true
+  }
+  foreach ($op in $tx.operations) {
+    if ($op.kind -cnotin @('add','replace') -or $op.status -cne 'verified') { continue }
+    $self=$op.currentPath.Equals($Path,[StringComparison]::OrdinalIgnoreCase)
+    $descendant=$op.currentPath.StartsWith($Path+'\',[StringComparison]::OrdinalIgnoreCase)
+    if (-not $self -and -not $descendant) { continue }
+    if ($op.newEntry.entryType -ceq 'directory') {
+      if ($tx.formatVersion -ge 2 -and $op.promoteState -ceq 'done' -and (Test-DataSafeTransactionObject $op.currentPath $op.newEntry)) { return $true }
+    } elseif ($descendant -and (Test-DataSafeTransactionObject $op.currentPath $op.newEntry) -and
+        -not (Test-DataSafeFile $op.stagedPath) -and -not (Test-DataSafeDirectory $op.stagedPath)) {
+      # A verified current leaf plus its absent verified stage proves the
+      # rename gap and owns its necessary ancestors, unlike a bare directory.
+      return $true
+    } elseif ($descendant -and $tx.state -ceq 'rollingBack' -and $tx.formatVersion -ge 2 -and $op.promoteState -ceq 'done' -and
+        -not (Test-DataSafeFile $op.currentPath) -and -not (Test-DataSafeDirectory $op.currentPath) -and
+        (Test-DataSafeTransactionObject $op.stagedPath $op.newEntry)) {
+      # Retraction can empty an owned implicit ancestor before its cleanup
+      # journal. Durable promotion plus verified returned bytes retains proof.
+      return $true
+    }
+  }
+  return $false
+}
+
 function Test-DataSafeTransactionProgress($Owner) {
   if ($Owner.Transaction.state -cin @('staging','prepared')) { return $false }
   $oldPaths=Get-DataSafeTransactionTreePaths $Owner.Repository $Owner.Transaction.previousManifest
@@ -815,8 +848,9 @@ function Test-DataSafeTransactionProgress($Owner) {
         (-not (Test-DataSafeTransactionObject $op.oldCurrentPath $op.oldEntry) -or ($Owner.Transaction.formatVersion -ge 2 -and $op.archiveState -ceq 'done'))) { return $true }
     if ($op.kind -cin @('add','replace') -and (Test-DataSafeTransactionObject $op.currentPath $op.newEntry)) {
       if ($op.newEntry.entryType -ceq 'directory') {
-        if (-not $oldPaths.ContainsKey($op.currentPath) -or $oldPaths[$op.currentPath].entryType -cne 'directory' -or
-            ($Owner.Transaction.formatVersion -ge 2 -and $op.promoteState -ceq 'done')) { return $true }
+        if ((-not $oldPaths.ContainsKey($op.currentPath) -or $oldPaths[$op.currentPath].entryType -cne 'directory' -or
+            ($Owner.Transaction.formatVersion -ge 2 -and $op.promoteState -ceq 'done')) -and
+            (Test-DataSafeTransactionDirectoryOwned $Owner $op.currentPath $oldPaths)) { return $true }
       } elseif (-not (Test-DataSafeFile $op.stagedPath) -and -not (Test-DataSafeDirectory $op.stagedPath) -and
           ($op.kind -ceq 'add' -or -not (Test-DataSafeTransactionObject $op.currentPath $op.oldEntry))) { return $true }
     }
@@ -936,7 +970,10 @@ function Start-DataSafeMutationIntent($Owner,$Operation,$Entry,[string]$Path,[st
     while ($dir.Length -gt $stop.Length) {
       Assert-DataSafeNoReparsePath $dir
       if (Test-DataSafeFile $dir) { throw 'DataSafe structural intent parent is occupied by a file.' }
-      if (Test-DataSafeDirectory $dir) { break }
+      if (Test-DataSafeDirectory $dir) {
+        if ($Kind -ceq 'promote' -and $dir.Length -gt $stop.Length -and -not (Test-DataSafeTransactionDirectoryOwned $Owner $dir)) { throw 'DataSafe promotion parent is an unowned directory.' }
+        break
+      }
       $directories=@($dir)+$directories; $dir=[IO.Path]::GetDirectoryName($dir)
     }
   }
@@ -1212,7 +1249,10 @@ function Assert-DataSafeTransactionRecoverable($Owner, [switch]$Forward) {
         }
       }
       if (-not $known) { throw "DataSafe blocked recovery: unknown current content: $path" }
-      if (Test-DataSafeDirectory $path) { $pending.Push($path) }
+      if (Test-DataSafeDirectory $path) {
+        if (-not (Test-DataSafeTransactionDirectoryOwned $Owner $path $oldPaths)) { throw "DataSafe blocked recovery: unowned current directory without promotion proof: $path" }
+        $pending.Push($path)
+      }
     }
   }
   if ($null -ne $tx.previousManifest) {

@@ -724,6 +724,74 @@ try {
     Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'metadata|verif'
     Assert-True ([IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0) 'Preexisting structural directory bypassed strict baseline.'
   }
+  foreach ($damage in @('empty','empty-no-drift','nonempty','reparse')) {
+    Test-Case "unowned planned directory cannot prove progress $damage" {
+      $f=New-Fixture
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'applying') { throw 'applying crash' } } } 'applying crash'
+      $op=@($f.Tx.operations | Where-Object { $null -ne $_.newEntry -and $_.newEntry.relativePath -ceq 'empty' })[0]
+      $old=@($f.Old.entries | Where-Object relativePath -eq keep1)[0]; $oldPath=Join-Path $f.Repo.Root $old.versionLocation
+      $drift=[datetime]::ParseExact('2011-01-01T00:00:00.0000000Z','o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+      $target=Join-Path $f.Root 'planned-link-target'
+      if ($damage -ceq 'reparse') { Ensure-DataSafeDirectory $target; Write-File (Join-Path $target preserve) 'preserve'; New-Item -ItemType Junction -Path $op.currentPath -Target $target | Out-Null }
+      else { Ensure-DataSafeDirectory $op.currentPath }
+      if ($damage -ceq 'nonempty') { Write-File (Join-Path $op.currentPath preserve) 'preserve' }
+      if ($damage -cne 'empty-no-drift') { [IO.File]::SetLastWriteTimeUtc($oldPath,$drift) }
+      if ($damage -cne 'reparse') { Assert-True (-not (Test-DataSafeTransactionProgress (Get-DataSafeTransactionOwner $f.Tx))) 'A bare planned directory was classified as progress.' }
+      $pointer=[IO.File]::ReadAllText($f.Pointer); Close-TestOwners
+      try {
+        Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'unknown|metadata|verif|reparse|junction|unowned'
+        if ($damage -cne 'empty-no-drift') { Assert-True ([IO.File]::GetLastWriteTimeUtc($oldPath).Ticks -eq $drift.Ticks) 'Unowned directory bypassed old metadata gate.' }
+        Assert-True ([IO.File]::ReadAllText($f.Pointer) -ceq $pointer -and [IO.Directory]::GetFileSystemEntries($f.Repo.HistoryRoot).Count -eq 0) 'Unowned directory caused mutation before ownership proof.'
+        Assert-True ((ConvertFrom-DataSafeTransactionJson ([IO.File]::ReadAllText($f.Path))).state -ceq 'applying') 'Unowned directory mislabeled terminal.'
+        if ($damage -ceq 'nonempty') { Assert-True ([IO.File]::ReadAllText((Join-Path $op.currentPath preserve)) -ceq 'preserve') 'Unknown child lost.' }
+        if ($damage -ceq 'reparse') { Assert-True ([IO.File]::ReadAllText((Join-Path $target preserve)) -ceq 'preserve') 'Reparse target changed.' }
+      } finally { if ($damage -ceq 'reparse') { [IO.Directory]::Delete($op.currentPath) } }
+    }
+  }
+  Test-Case 'unowned planned directory after archive progress is not adopted' {
+    $f=New-Fixture
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'archived') { throw 'archive crash' } } } 'archive crash'
+    $op=@($f.Tx.operations | Where-Object { $null -ne $_.newEntry -and $_.newEntry.relativePath -ceq 'empty' })[0]
+    Ensure-DataSafeDirectory $op.currentPath; $pointer=[IO.File]::ReadAllText($f.Pointer); Close-TestOwners
+    Assert-Throws { Recover-DataSafeTransaction $f.Repo $f.Path } 'unowned|unknown|proof'
+    Assert-True ([IO.File]::ReadAllText($f.Pointer) -ceq $pointer -and (Test-DataSafeDirectory $op.currentPath)) 'Unowned post-progress directory was mutated.'
+  }
+  foreach ($phase in @('promote-intent','promote-filesystem','promoted')) {
+    Test-Case "owned empty-directory promotion remains recoverable $phase" {
+      $f=New-Fixture; $script:directoryPhase=$phase
+      $script:directorySequence=@($f.Tx.operations | Where-Object { $null -ne $_.newEntry -and $_.newEntry.relativePath -ceq 'empty' })[0].sequence
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Sequence -eq $script:directorySequence -and $c.Phase -ceq $script:directoryPhase) { throw 'directory crash' } } } 'directory crash'
+      Close-TestOwners
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Owned directory proof blocked.'
+      Assert-DataSafeTransactionTree $f.Repo $f.New -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'committed') 'Owned directory recovery not repeatable.'
+    }
+  }
+  foreach ($layout in @('initial','implicit-file-directory')) {
+    Test-Case "owned implicit directory after final leaf retraction remains recoverable $layout" {
+      $f=New-Fixture -Initial:($layout -ceq 'initial') -Transition:$(if ($layout -ceq 'initial') { '' } else { $layout })
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'metadata-filesystem') { throw 'metadata crash' } } } 'metadata crash'
+      $op=$(if ($layout -ceq 'initial') { $f.Tx.operations[-1] } else { @($f.Tx.operations | Where-Object relativePath -eq Sub)[0] })
+      $script:retractedLeaf=$op; $script:retractedParent=[IO.Path]::GetDirectoryName($op.currentPath); $script:retractionGap=$false
+      $retractionWriter=${function:Write-DataSafeTransactionJournal}
+      try {
+        function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
+          if ($Transaction.state -ceq 'rollingBack' -and -not $script:retractionGap -and
+              (Test-DataSafeTransactionObject $script:retractedLeaf.stagedPath $script:retractedLeaf.newEntry) -and
+              -not (Test-DataSafeFile $script:retractedLeaf.currentPath) -and (Test-DataSafeDirectory $script:retractedParent) -and
+              [IO.Directory]::GetFileSystemEntries($script:retractedParent).Count -eq 0) {
+            $script:retractionGap=$true; throw 'retraction journal crash'
+          }
+          & $retractionWriter $Transaction $Path -CreateOnly:$CreateOnly
+        }
+        Assert-Throws { Undo-DataSafeTransaction $f.Tx } 'retraction journal crash'
+      } finally { ${function:Write-DataSafeTransactionJournal}=$retractionWriter }
+      Close-TestOwners
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Owned empty parent lost its completed promotion evidence.'
+      Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+      Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Retracted parent repeat recovery failed.'
+    }
+  }
   foreach ($phase in @('applying','archived')) {
     Test-Case "resumed history ownership gate preserves unknown collision $phase" {
       $f=New-Fixture; $script:stopPhase=$phase
