@@ -1041,7 +1041,9 @@ function Assert-DataSafeIntentBaseline($Owner) {
     $e=$old[$path]
     if ($null -ne $e.PSObject.Properties['structural']) { if (-not (Test-DataSafeDirectory $path)) { throw 'DataSafe prior structural baseline is missing.' }; continue }
     $skipTime=$false
-    foreach ($dir in $i.directories) { if ([IO.Path]::GetDirectoryName($dir).Equals($path,[StringComparison]::OrdinalIgnoreCase)) { $skipTime=$true } }
+    # A durable reservation alone has not changed its parent's timestamp. Only
+    # a physically present child, bounded by the intent validation above, can.
+    foreach ($dir in $i.directories) { if ([IO.Path]::GetDirectoryName($dir).Equals($path,[StringComparison]::OrdinalIgnoreCase) -and (Test-DataSafeDirectory $dir)) { $skipTime=$true } }
     if ($i.kind -ceq 'metadata' -and $path.Equals($i.targetPath,[StringComparison]::OrdinalIgnoreCase)) { continue }
     if ($i.kind -ceq 'archive' -and $e.entryType -ceq 'directory') {
       $op=$tx.operations[$i.sequence-1]
@@ -1399,9 +1401,22 @@ function Recover-DataSafeTransaction($Repository, [string]$TransactionPath) {
       # Publishing the pointer forbids rollback, including a crash before the
       # committed journal revision. Never substitute the previous tree here.
       Assert-DataSafeTransactionCommit $owner
-      if ($tx.state -cne 'committed') {
-        if ($tx.state -cne 'applying') { throw 'DataSafe blocked recovery: committed pointer has incompatible journal state.' }
-        Set-DataSafeTransactionState $tx committed
+      if ($tx.state -cne 'committed' -and $tx.state -cne 'applying') { throw 'DataSafe blocked recovery: committed pointer has incompatible journal state.' }
+      $priorState=$tx.state
+      try {
+        # Recovery keeps its lease through legacy upgrade, terminal journal
+        # publication and cleanup. The public terminal setter releases early.
+        if ($tx.formatVersion -eq 2) { Initialize-DataSafeApplyJournal $owner }
+        if ($tx.state -cne 'committed') { $tx.state='committed'; Save-DataSafeOwnedTransaction $owner }
+      } catch {
+        $tx.state=$priorState
+        # Authority is already durable and verified. Retain all readable
+        # journal/staging evidence for a later finalization attempt; no cleanup.
+        return [PSCustomObject]@{
+          FinalState='committed'; RecoveredOperationCount=$tx.operations.Count
+          ManifestPath=(Join-Path $repo.MetadataRoot $pointer.manifestPath)
+          Warnings=@([PSCustomObject]@{ Code='JournalFinalizationFailed'; Message=$_.Exception.Message })
+        }
       }
       return Complete-DataSafeTransactionResult $owner
     }
