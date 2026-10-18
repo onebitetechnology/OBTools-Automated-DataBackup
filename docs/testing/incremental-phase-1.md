@@ -8,29 +8,29 @@ retention, installed-app execution or real backup-drive change is authorized her
 
 ## Reproduction identity
 
-- Exact production worker/core source commit: `eb65c7f321bcdc0dd7fea94bd825795a3f5acaee`
-  (`feat: integrate incremental backup engine`). Task 7 changes only test/docs.
+- Exact production worker/core source commit: `6bfe6e7b2b7598d5258e81dfe3429450f6cb7037`
+  (`fix: close incremental final-review safety and recovery gaps`).
 - Package: `1.0.10-beta.69`, Electron `43.2.0`, electron-builder `26.15.3`, x64;
   actual build Node `v24.19.0`, npm `10.9.4`.
 - Actual build/qualification host: Windows `10.0.26200`; Windows PowerShell
   `5.1.26100.9711`. Mac reproduction has **not** been performed.
 - Build: `npm run dist:win` (`--publish never`); output
   `dist/OBTools-Automated-Backups-Setup-1.0.10-beta.69.exe`.
-- Harness revision: the commit adding this document; obtain its full identity with
+- Media harness revision: obtain its last-changing commit identity with
   `git log -1 --format=%H -- tests/windows/Run-IncrementalMediaMatrix.ps1`.
 - Final installer SHA-256:
-  `1EEDB753F39CC38CFB9F295013DEC4100383166F6967E1FED6E79823AC532C8E`.
+  `548367BBE43F4FAEB35AB2D7E1D6C38FB5F4E14D9939E580B22627096F381F9A`.
 
 All seven packaged source comparisons matched after this build:
 
 | File | SHA-256 |
 | --- | --- |
-| backup-engine.ps1 | `03F27C0542835A803CCBF5BEDD141056D0FE1DAC320532292A5ACD2589B8AFE0` |
-| DataSafe.Safety.ps1 | `5FB3F32A4AE57AD0556863F522CF771CFAF27F23F7F28E6C1D25AF5AAF84EFE8` |
+| backup-engine.ps1 | `9644225EC42533717F10FA417D2052158F0182F590D1958BA3A0423309440861` |
+| DataSafe.Safety.ps1 | `88BF10672DC9F4249A979F1D978C0420067B06A3F97997C1F8BD9799C2D39D79` |
 | DataSafe.Repository.ps1 | `00254A9BCEBB1A943DE20EF4442FA18B08A0E40EF98F2410F8A89522343D0C07` |
 | DataSafe.Manifest.ps1 | `01498136BE1C6012613411576BA3DEAD1162605B26E58E300C204AB65E9503B0` |
 | DataSafe.IncrementalPlan.ps1 | `879AE875C26005F6C0796FCFE6CB9F2C664187D796937A88B1900C8B2393790F` |
-| DataSafe.Transaction.ps1 | `D21DEE8D6B6DF6B4A662E82987632BF019EC969AD910F3E98467490872EA059C` |
+| DataSafe.Transaction.ps1 | `70075FD29B52C89F1BB9EA97FAE5BF2017DEFA7A36462DE3486420BD993FBE5B` |
 | DataSafeTaskRunner.vbs | `77BDF3AEF577B5BB7491EF827BC691FEDB0507F8FF51B92143D22267C1139A42` |
 
 ## Safe packaged-worker matrix
@@ -128,7 +128,7 @@ test machine; this task did not install or launch it.
 
 ## Current evidence and gate
 
-Read-only inventory: C: and D: ready NTFS; F: removable not ready. No F: content was
+Task-7 read-only inventory: C: and D: ready NTFS; F: removable not ready. No F: content was
 read/written. No exFAT/FAT32 volume was available within the authorized disposable
 roots. Actual source and destination for the automatic matrix were local NTFS Temp.
 
@@ -143,7 +143,39 @@ roots. Actual source and destination for the automatic matrix were local NTFS Te
 | Zero visible PowerShell windows | No interactive desktop observer | NOT RUN |
 | Mac-host package reproduction | No Mac execution | NOT RUN |
 
-Fresh Task-7 verification: packaged matrix **10 passed / 0 failed / 4 NOT RUN**
+Final review-fix source above has fresh focused 8/0 and recovery 11/0 on WinPS 5.1
+and Core 7.6.5; Repository 46, Manifest 274, Plan 42 and Transaction 76 on both; actual
+worker integration 19/0, hotfix 64/0, and Node 19/0 with no skips. The final Windows
+build exited 0, all seven packaged hashes match source, packaged matrix 10/0/4 NOT RUN
+and harness-failure 6/0 passed. Package evidence `final-packaged-media.json` reports
+`CleanupBlocked=false`, `UnresolvedLaunch=null`, `ArtifactsRetained=false`, empty
+`OwnedRoots`, and `Phase1Complete=false`. Logs/report use the `final-*` prefix in
+the ignored SDD evidence directory.
+
+Full 124-case fault traversals at the frozen source commit each completed with
+**119 passed / 5 failed, native exit 1**: WinPS 4771.3795119 seconds, Core
+8308.8287163 seconds. The five failures were obsolete always-mutate assumptions in
+rollback tests. Four restored relocation archives with already-correct metadata,
+so expected injected setter faults were never reached; the fifth incorrectly
+required mutation of every old entry. The approved test-only
+correction makes those cases reach a real `b.txt` metadata-only mutation and keeps
+all four rollback substep faults, strict tree/recovery checks and durable completion
+proof. No production or shared fixture/helper changed for this correction.
+
+The five corrected cases plus ten adjacent metadata cases passed **15/15, exit 0**
+on WinPS (227.3073724 seconds) and Core (297.9126297 seconds). They ran from an
+ignored copy with explicit frozen `WindowsRoot` and disjoint GUID fixtures while
+the original Core traversal continued unchanged. After both originals exited,
+the tracked test was verified byte-identical to that reviewed, tested copy:
+SHA-256 `00BB777E1FE3FD6F616108710DC98EEC2DEF19C0B147EE7716BB55080C4C7D35`.
+This is composite evidence: 119 unchanged cases passed in each original traversal,
+and the five corrected cases plus ten adjacent cases passed in each focused run.
+The original failures remain preserved; **no fresh full-124/native-exit-0 claim or
+new repeat campaign** is made. Both original full runs passed the 47-boundary
+forward sweep and 10-boundary rollback journal-write sweep. The production and
+test-only continuation scoped reviews found no new Critical/Important findings.
+
+Historical Task-7 verification (before the final review fixes): packaged matrix **10 passed / 0 failed / 4 NOT RUN**
 (package equality1, NTFS behavior8 including logical disconnect/UUID isolation/
 frozen-launcher regression, FAT32 schema-only1). NTFS is the only actual filesystem
 qualified here; the four skipped rows are physical removal, desktop observation,
@@ -162,11 +194,13 @@ Historical evidence is attributed, not rerun by implication: Task 5's frozen
 runtimes and exactly twenty qualified Core repeats of36 (720/0). That does **not**
 qualify later changes automatically. Task 5 correction commit
 `94b3cf55e1dc7fdb41c1829239754ab95c41bdda` separately passed new11, selected33 and
-dependency suites on both runtimes. Task 6 source commit above freshly passed
+dependency suites on both runtimes. Task 6 source commit
+`eb65c7f321bcdc0dd7fea94bd825795a3f5acaee` separately passed
 integration10, Repository46, Manifest274, Plan42, Transaction76, recovery11 on both
 runtimes, Hotfix64, selected faults17 and Node19. Those reports/logs live in the
-plan's ignored SDD evidence directory. Task 7 changes no production dependency,
-so no new expensive full/repeat fault campaign is claimed or required by this scope.
+plan's ignored SDD evidence directory. Task 7 itself changed no production
+dependency and did not run a new full/repeat fault campaign. Final-fix evidence
+for the subsequently changed shared metadata helper is reported separately.
 
 For fresh focused verification (all must exit0):
 
@@ -174,6 +208,10 @@ For fresh focused verification (all must exit0):
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalEngineIntegrationTests.ps1
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalRecoveryRegressionTests.ps1
 pwsh -NoProfile -NonInteractive -File tests/windows/Run-IncrementalRecoveryRegressionTests.ps1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalFinalRegressionTests.ps1
+pwsh -NoProfile -NonInteractive -File tests/windows/Run-IncrementalFinalRegressionTests.ps1
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalFaultInjectionTests.ps1 -CasePattern '^(internal metadata|metadata exposes|internal rollback metadata|metadata-only|rollback metadata entries)'
+pwsh -NoProfile -NonInteractive -File tests/windows/Run-IncrementalFaultInjectionTests.ps1 -CasePattern '^(internal metadata|metadata exposes|internal rollback metadata|metadata-only|rollback metadata entries)'
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-HotfixRegressionTests.ps1
 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/windows/Run-IncrementalMediaMatrixFailureTests.ps1
 npm test
@@ -181,7 +219,7 @@ npm run dist:win
 git diff --check
 ```
 
-Expected counts: integration10/0, recovery11/0 each runtime, hotfix64/0, Node19/0
+Expected counts: integration 19/0, focused final 8/0, recovery 11/0 and selected metadata faults 15/0 each runtime, hotfix 64/0, Node 19/0
 with no skips, build exit0; matrix counts explicitly separate PASS/FAIL/NOT RUN.
 The focused matrix failure runner expects6/0: it controls the launcher/taskkill
 boundary (never killing real processes), with real disposable filesystem cleanup
@@ -308,6 +346,53 @@ warnings`; recoveryAction none/recovering/committed/rolledBack. Existing status 
 include `lastBackupAt,lastBackupResult,lastBackupMessage,destinationStatus,recentSnapshots`.
 `copyBytes` means successfully staged user-file bytes, not all I/O. Electron owns
 notifications; workers emit status/logs without popups.
+
+Transaction discovery accepts canonical UUID-D `.json` ordinary files and still
+validates their complete schema/path/identity. Only exact writer-generated ordinary
+file names `.transaction-<32 lowercase hex>.tmp` and `.datasafe-<32 lowercase hex>.tmp`
+are treated as unpublished evidence. They are never parsed as authority, promoted,
+or deleted; each produces an `UnpublishedJournalTemporary` warning containing its
+path. Canonical recovery can proceed beside them, and warnings remain on subsequent
+runs while the evidence remains. These non-authoritative temporary warnings alone
+do not prevent starting subsequent backups. Unknown names, directories even with those exact
+names, and reparses still block. Actual unresolved journal/staging/finalization
+evidence retains the existing block-new-transaction behavior.
+
+## Bounded metadata work and remaining performance measurements
+
+Already-correct entries without an active mutation intent no longer require a
+metadata mutation or per-entry journal save. Changed metadata and parent directory
+times dirtied by child moves still use the existing durable intent, filesystem
+substeps, verification and completion boundary. Existing active intents always
+reconcile and durably finalize, even when the target metadata is already correct.
+Full-tree content/hash/metadata validation is unchanged, and the skip check itself
+uses the same strict object verification.
+
+Controlled disposable NTFS apply-phase counters (not production benchmarks):
+
+| Fixture | Entries / plan operations | Metadata mutations / intents / completions | Full transaction-journal writes |
+| --- | --- | --- | --- |
+| Unchanged 8 files + directory | 9 / 0 | 0 / 0 / 0 | 3 |
+| Unchanged 32 files + directory | 33 / 0 | 0 / 0 / 0 | 3 |
+| One changed file among 32 + directory | 33 / 1 | 2 / 2 / 2 | 11 |
+
+Both Windows PowerShell 5.1 and bundled Core 7.6.5 produced these counts. The old
+WinPS implementation measured 9/33 metadata mutations and 21/69 full-journal writes
+on the corresponding unchanged trees. The changed-file case restores that file
+and its child-dirtied parent. These tests count real setter/writer calls and retain
+full content/history oracles; `copyBytes=0` alone is not performance evidence.
+The ignored final-fix report records exact byte/write/hash/elapsed counters and
+their measurement scope. Apply journal bytes still grow with manifest size;
+source scan/staging are outside this apply-only measurement, and repeated manifest
+hashes are included in its SHA-byte counter. Runtime serialization and concurrent
+test load prevent interpreting the elapsed values as cross-runtime speed results.
+
+Whole-tree Latest SHA passes, whole-journal rewrites for genuine large change sets,
+rollback restoration-loop saves, and reparsing retained terminal journals remain
+scaling costs. Measure hash bytes, journal bytes/writes, and per-phase time against
+representative larger datasets before consumer use. No production-scale throughput
+or elapsed-time benchmark has been run, and this fix does not claim production
+speed or remove those validation gates.
 
 Next plans must consume these public APIs for restore/retention/migration and preserve
 UUID isolation, locks, strict schema, pointer authority, peak-space and deletion

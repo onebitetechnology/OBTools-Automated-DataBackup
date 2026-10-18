@@ -577,8 +577,15 @@ try {
   }
   foreach ($phase in @('rollbackMetadata-intent','metadata-attributes-cleared','metadata-time-filesystem','metadata-filesystem')) {
     Test-Case "internal rollback metadata substep recovery $phase" {
-      $f=New-Fixture -Transition implicit-directory-directory
-      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -ceq 'metadata-filesystem') { throw 'apply crash' } } } 'apply crash'
+      # Relocation restores already-correct archived metadata without a setter.
+      # Use the ordinary fixture and interrupt its real b.txt metadata mutation.
+      $f=New-Fixture
+      $metadataOps=@($f.Tx.operations | Where-Object { $_.kind -ceq 'metadata' -and $_.relativePath -ceq 'b.txt' })
+      Assert-True ($metadataOps.Count -eq 1) 'Rollback fixture must contain the b.txt metadata-only operation.'
+      $script:rollbackMutationSequence=$metadataOps[0].sequence
+      Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Sequence -eq $script:rollbackMutationSequence -and $c.Phase -ceq 'metadata-filesystem') { throw 'apply crash' } } } 'apply crash'
+      Assert-True (Test-DataSafeTransactionObject $metadataOps[0].currentPath $metadataOps[0].newEntry -Metadata) 'Forward metadata mutation was not reached.'
+      Assert-True (-not (Test-DataSafeTransactionObject $metadataOps[0].oldCurrentPath $metadataOps[0].oldEntry -Metadata)) 'Rollback fixture has no real metadata to restore.'
       $boundarySender=${function:Send-DataSafeTransactionBoundary}; $script:rollbackInternalPhase=$phase; $script:rollbackInternalFailed=$false
       try {
         function Send-DataSafeTransactionBoundary($Owner,$Operation,[string]$Phase,[scriptblock]$AfterOperation) {
@@ -1082,19 +1089,37 @@ try {
   }
   Test-Case 'rollback metadata entries each persist a faultable journal boundary' {
     $f=New-Fixture
-    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { throw 'crash' } } } crash
-    $setter=${function:Set-DataSafeTransactionMetadataSteps}; $writer=${function:Write-DataSafeTransactionJournal}; $script:pendingMetadata=$false; $script:rollbackMetadataCount=0
+    $metadataOps=@($f.Tx.operations | Where-Object { $_.kind -ceq 'metadata' -and $_.relativePath -ceq 'b.txt' })
+    Assert-True ($metadataOps.Count -eq 1) 'Rollback fixture must contain the b.txt metadata-only operation.'
+    $script:rollbackMutationSequence=$metadataOps[0].sequence
+    Assert-Throws { Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Sequence -eq $script:rollbackMutationSequence -and $c.Phase -ceq 'metadata-filesystem') { throw 'crash' } } } crash
+    Assert-True (Test-DataSafeTransactionObject $metadataOps[0].currentPath $metadataOps[0].newEntry -Metadata) 'Forward metadata mutation was not reached.'
+    Assert-True (-not (Test-DataSafeTransactionObject $metadataOps[0].oldCurrentPath $metadataOps[0].oldEntry -Metadata)) 'Rollback fixture has no real metadata to restore.'
+    $setter=${function:Set-DataSafeTransactionMetadataSteps}; $writer=${function:Write-DataSafeTransactionJournal}; $script:pendingMetadata=$false; $script:rollbackMetadataCompletions=0
+    $script:rollbackMetadataPaths=New-Object 'System.Collections.Generic.List[string]'
     try {
       function Set-DataSafeTransactionMetadataSteps([string]$Path,$Entry,$Owner,$Operation,[scriptblock]$AfterOperation) {
         Assert-True (-not $script:pendingMetadata) 'Rollback metadata mutation lacks its own durable boundary.'
-        & $setter $Path $Entry $Owner $Operation $AfterOperation; $script:pendingMetadata=$true; $script:rollbackMetadataCount++
+        & $setter $Path $Entry $Owner $Operation $AfterOperation
+        # Undo first finalizes the interrupted forward intent while applying.
+        # Count only real restorations after it enters rollingBack.
+        if ($Owner.Transaction.state -ceq 'rollingBack') {
+          $script:pendingMetadata=$true; $script:rollbackMetadataPaths.Add($Entry.relativePath)
+        }
       }
       function Write-DataSafeTransactionJournal($Transaction,[string]$Path,[switch]$CreateOnly) {
-        & $writer $Transaction $Path -CreateOnly:$CreateOnly; $script:pendingMetadata=$false
+        & $writer $Transaction $Path -CreateOnly:$CreateOnly
+        if ($script:pendingMetadata) {
+          Assert-True ($Transaction.state -ceq 'rollingBack' -and $null -eq $Transaction.mutationIntent) 'Rollback metadata completion did not durably clear its intent.'
+          $script:pendingMetadata=$false; $script:rollbackMetadataCompletions++
+        }
       }
       $null=Undo-DataSafeTransaction $f.Tx
-      Assert-True (-not $script:pendingMetadata -and $script:rollbackMetadataCount -ge $f.Old.entries.Count) 'Final rollback metadata not persisted/exercised.'
+      Assert-True (-not $script:pendingMetadata -and $script:rollbackMetadataPaths.Count -eq 1 -and $script:rollbackMetadataPaths[0] -ceq 'b.txt' -and $script:rollbackMetadataCompletions -eq 1) 'Actual b.txt rollback mutation or its durable completion was not exercised.'
     } finally { ${function:Set-DataSafeTransactionMetadataSteps}=$setter; ${function:Write-DataSafeTransactionJournal}=$writer }
+    Assert-DataSafeTransactionTree $f.Repo $f.Old -Metadata
+    Assert-True ($null -eq (Read-DataSafeTransaction $f.Path).mutationIntent) 'Rollback left an unresolved metadata intent.'
+    Assert-True ((Recover-DataSafeTransaction $f.Repo $f.Path).FinalState -ceq 'rolledBack') 'Durable rollback metadata repeat recovery failed.'
   }
   foreach ($transition in @('directory-file','file-directory')) {
     Test-Case "partial new directory rollback restores dependency tree $transition" {
