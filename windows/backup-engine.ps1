@@ -555,6 +555,19 @@ function Invoke-IncrementalBackup($Config, $Status) {
   foreach ($extended in [IO.Directory]::GetFileSystemEntries((ConvertTo-DataSafeExtendedPath $repo.TransactionRoot))) {
     $path = ConvertFrom-DataSafeExtendedPath $extended
     Assert-DataSafeNoReparsePath $path
+    $name = [IO.Path]::GetFileName($path)
+    # Process termination can bypass either atomic writer's finally cleanup.
+    # These exact ordinary-file names are unpublished evidence, never journals:
+    # do not parse, promote, or delete them, even when their JSON looks complete.
+    if ($name -cmatch '^\.(?:transaction|datasafe)-[0-9a-f]{32}\.tmp$' -and (Test-DataSafeFile $path)) {
+      $Status.warnings = @($Status.warnings) + @([PSCustomObject]@{
+        Code='UnpublishedJournalTemporary'; Message="Unpublished journal temporary retained for review: $path"
+      })
+      continue
+    }
+    if ($name -notmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$' -or -not (Test-DataSafeFile $path)) {
+      throw "DataSafe found an unknown transaction entry; review is required: $path"
+    }
     $tx = Read-DataSafeTransaction $path
     $retainedStaging = Join-Path $repo.StagingRoot $tx.transactionId
     Assert-DataSafeNoReparsePath $retainedStaging
@@ -569,7 +582,7 @@ function Invoke-IncrementalBackup($Config, $Status) {
     $Status.recoveryAction = 'recovering'
     $recovered = Recover-DataSafeTransaction $repo $item.Path
     $Status.recoveryAction = $recovered.FinalState
-    $Status.warnings = @($recovered.Warnings)
+    $Status.warnings = @($Status.warnings) + @($recovered.Warnings)
     # Pointer authority is re-read even when journal finalization warns. Never
     # start a second transaction over unresolved retained journal evidence.
     $pointer = Read-DataSafeCurrentPointer $repo

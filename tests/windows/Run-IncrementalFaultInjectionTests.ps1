@@ -421,10 +421,24 @@ try {
     Assert-True ((Recover-DataSafeTransaction $f.Repo $journal).FinalState -ceq 'committed') 'Metadata intermediate state blocked recovery.'
     Assert-DataSafeTransactionTree $f.Repo $current -Metadata
   }
-  Test-Case 'metadata exposes a filesystem and durable boundary for every entry' {
-    $f=New-Fixture; $script:metadataFs=0; $script:metadataJournal=0
-    $null=Invoke-DataSafeTransaction $f.Tx { param($c) if ($c.Phase -eq 'metadata-filesystem') { $script:metadataFs++ }; if ($c.Phase -eq 'metadata') { $script:metadataJournal++ } }
-    Assert-True ($script:metadataFs -eq $f.New.entries.Count -and $script:metadataJournal -eq $f.New.entries.Count) 'Metadata entries share only one fault boundary.'
+  Test-Case 'metadata exposes filesystem and durable boundaries for every actual mutation' {
+    $f=New-Fixture; $script:metadataFs=0; $script:metadataJournal=0; $script:metadataIntent=0
+    $script:metadataMutations=New-Object 'System.Collections.Generic.List[string]'
+    $setter=${function:Set-DataSafeTransactionMetadataSteps}
+    try {
+      function Set-DataSafeTransactionMetadataSteps([string]$Path,$Entry,$Owner,$Operation,[scriptblock]$AfterOperation) {
+        $script:metadataMutations.Add($Entry.relativePath)
+        & $setter $Path $Entry $Owner $Operation $AfterOperation
+      }
+      $null=Invoke-DataSafeTransaction $f.Tx {
+        param($c)
+        if ($c.Phase -ceq 'metadata-filesystem') { $script:metadataFs++ }
+        if ($c.Phase -ceq 'metadata-intent') { $script:metadataIntent++ }
+        if ($c.Phase -ceq 'metadata') { $script:metadataJournal++ }
+      }
+    } finally { ${function:Set-DataSafeTransactionMetadataSteps}=$setter }
+    Assert-True ($script:metadataMutations.Count -eq 4 -and -not $script:metadataMutations.Contains('keep1')) 'Metadata mutation touched the unchanged file or omitted a changed entry.'
+    Assert-True ($script:metadataFs -eq 4 -and $script:metadataIntent -eq 4 -and $script:metadataJournal -eq 4) 'A real metadata mutation lost its intent/filesystem/durable completion boundary.'
   }
   foreach ($role in @('archive','promote')) {
     Test-Case "internal structural intent boundary sweep $role" {

@@ -118,6 +118,9 @@ function Copy-DataSafeFile([string]$SourcePath, [string]$DestinationPath) {
 }
 
 function Remove-DataSafeDirectoryTree([string]$Path) {
+  # Reject the root and its ancestors before any existence/enumeration call can
+  # follow a junction. Child reparses below an ordinary root are unlinked only.
+  Assert-DataSafeNoReparsePath $Path
   $extendedRoot = ConvertTo-DataSafeExtendedPath $Path
   if (-not [System.IO.Directory]::Exists($extendedRoot)) {
     return

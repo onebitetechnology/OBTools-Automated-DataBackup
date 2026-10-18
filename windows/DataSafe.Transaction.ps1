@@ -1095,7 +1095,15 @@ function Ensure-DataSafeIntentDirectories($Owner,$Operation,[scriptblock]$AfterO
 }
 
 function Invoke-DataSafeOwnedMetadata($Owner,$Operation,$Entry,[string]$Path,[string]$Kind,[scriptblock]$AfterOperation) {
-  if ($null -eq $Owner.Transaction.mutationIntent) { Start-DataSafeMutationIntent $Owner $Operation $Entry $Path $Kind $AfterOperation }
+  if ($null -eq $Owner.Transaction.mutationIntent) {
+    # Untouched entries (including zero-operation backups) need no filesystem
+    # mutation or per-entry journal writes. Child-dirtied directory times still
+    # fail this check and are restored in the existing deepest-last order.
+    # Never skip an existing intent: even already-correct bytes/metadata must
+    # pass strict reconciliation and durably publish the intent's completion.
+    if (Test-DataSafeTransactionObject $Path $Entry -Metadata -TimestampToleranceTicks $Owner.Transaction.timestampToleranceTicks) { return }
+    Start-DataSafeMutationIntent $Owner $Operation $Entry $Path $Kind $AfterOperation
+  }
   Assert-DataSafeMutationIntentState $Owner
   Set-DataSafeTransactionMetadataSteps $Path $Entry $Owner $Operation $AfterOperation
   if (-not (Test-DataSafeTransactionObject $Path $Entry -Metadata -TimestampToleranceTicks $Owner.Transaction.timestampToleranceTicks)) { throw 'DataSafe destination metadata verification failed.' }

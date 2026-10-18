@@ -138,6 +138,83 @@ try {
     Assert-True ((Read-DataSafeCurrentPointer $repo).transactionId -ceq $tx.transactionId) 'Recovery did not establish pointer authority.'
     Assert-True ([IO.File]::ReadAllText((Join-Path $repo.LatestRoot 'Personal/Documents/a.txt')) -ceq 'prepared-recovery-value') 'Recovery lost prepared ordinary content.'
   }
+  foreach ($prefix in @('transaction','datasafe')) {
+    foreach ($contents in @('partial','complete')) {
+      Test-Case "worker recovers canonical interrupted journal beside $contents $prefix writer temporary" {
+        $f=New-Fixture; $null=Invoke-Worker $f; $repo=Get-Repository $f
+        $pointer=Read-DataSafeCurrentPointer $repo
+        $old=Read-DataSafeManifest (Join-Path $repo.MetadataRoot $pointer.manifestPath)
+        Write-File (Join-Path $f.Source a.txt) 'canonical-recovered-value'
+        $job=[PSCustomObject]@{id='docs';path=$f.Source;relativeDestination=@('Personal','Documents')}
+        $current=New-DataSafeSourceManifest @($job)
+        $plan=New-DataSafeIncrementalPlan $repo $old $current (Get-DataSafeDestinationCapabilities $repo.Root) (Get-DataSafeFreeBytes $repo.Root)
+        $tx=New-DataSafeTransaction $repo $plan; $null=Stage-DataSafeTransaction $tx
+        $owner=Get-DataSafeTransactionOwner $tx
+        $stopped=$false
+        try { $null=Invoke-DataSafeTransaction $tx { param($c) if ($c.Phase -ceq 'archive-filesystem') { throw 'fixture interrupted archive' } } }
+        catch { if ($_.Exception.Message -notmatch 'fixture interrupted archive') { throw }; $stopped=$true }
+        finally { if ($null -ne $owner.Handle) { Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath); $owner.Handle=$null } }
+        Assert-True $stopped 'Interrupted applying boundary was not reached.'
+        $journal=Join-Path $repo.TransactionRoot ($tx.transactionId+'.json')
+        $text=[IO.File]::ReadAllText($journal)
+        if ($contents -ceq 'partial') { $text=$text.Substring(0,[int]($text.Length/2)) }
+        # Exact writer names and abandoned bytes model termination before rename;
+        # recovery itself runs in the actual fresh worker process.
+        $temporary=Join-Path $repo.TransactionRoot ('.'+$prefix+'-'+[guid]::NewGuid().ToString('N')+'.tmp')
+        Write-File $temporary $text; $temporaryHash=Get-DataSafeSha256 $temporary
+        $f.Config.jobs[0].path=Join-Path $f.Root missing
+        $s=Invoke-Worker $f 1
+        Assert-True ($s.recoveryAction -ceq 'committed') 'Writer temporary prevented canonical recovery before unavailable-source scan.'
+        Assert-True ((Read-DataSafeCurrentPointer $repo).transactionId -ceq $tx.transactionId) 'Temporary replaced canonical commit authority.'
+        Assert-True ([IO.File]::ReadAllText((Join-Path $repo.LatestRoot 'Personal/Documents/a.txt')) -ceq 'canonical-recovered-value') 'Canonical recovery did not restore Latest.'
+        Assert-True ((Get-DataSafeSha256 $temporary) -ceq $temporaryHash) 'Unpublished temporary evidence was modified/deleted.'
+        Assert-True (@($s.warnings | Where-Object { $_.Code -ceq 'UnpublishedJournalTemporary' -and $_.Message.Contains($temporary) }).Count -eq 1) 'Temporary evidence not reported after recovery.'
+        $f.Config.jobs[0].path=$f.Source; $s=Invoke-Worker $f
+        Assert-True ($s.lastBackupResult -ceq 'warning' -and $s.copyBytes -eq 0) 'Retained temporary warning disappeared on normal backup.'
+        Assert-True ((Get-DataSafeSha256 $temporary) -ceq $temporaryHash) 'Later backup removed unpublished evidence.'
+      }
+    }
+  }
+  Test-Case 'worker recovers actual writer temporary after process termination bypasses finally' {
+    $f=New-Fixture; $null=Invoke-Worker $f; $repo=Get-Repository $f
+    Write-File (Join-Path $f.Source a.txt) 'terminated-writer-value'
+    $library=Join-Path $f.Bin 'DataSafe.Transaction.ps1'; $original=[IO.File]::ReadAllText($library)
+    # Stop only the owned child, after its real writer has created/read back a
+    # complete unpublished journal, after the old file moved out of Latest.
+    $termination=@'
+$script:fixtureDocumentReader=${function:Read-DataSafeTransactionDocument}
+function Read-DataSafeTransactionDocument([string]$Path,[string]$ExpectedPath) {
+  $document=& $script:fixtureDocumentReader $Path $ExpectedPath
+  if ([IO.Path]::GetFileName($Path) -match '^\.transaction-[0-9a-f]{32}\.tmp$' -and $document.state -ceq 'applying' -and
+      @($document.operations | Where-Object { $_.archiveState -ceq 'done' }).Count -gt 0) { [Environment]::Exit(73) }
+  return $document
+}
+'@
+    Write-File $library ($original+"`n"+$termination)
+    $null=Invoke-Worker $f 73
+    Write-File $library $original
+    $temporary=@([IO.Directory]::GetFiles($repo.TransactionRoot,'.transaction-*.tmp'))
+    Assert-True ($temporary.Count -eq 1) 'True process exit did not retain the actual writer temporary.'
+    $hash=Get-DataSafeSha256 $temporary[0]
+    Assert-True (-not (Test-DataSafeFile (Join-Path $repo.LatestRoot 'Personal/Documents/a.txt'))) 'Termination did not leave interrupted Latest.'
+    $s=Invoke-Worker $f
+    Assert-True ($s.recoveryAction -ceq 'committed' -and $s.lastBackupResult -ceq 'warning') 'Actual terminated writer blocked recovery/warning.'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $repo.LatestRoot 'Personal/Documents/a.txt')) -ceq 'terminated-writer-value') 'Terminated writer lost ordinary new bytes.'
+    Assert-True ((Get-DataSafeSha256 $temporary[0]) -ceq $hash) 'Actual writer temporary evidence was discarded.'
+  }
+  foreach ($entry in @('unknown.txt','.transaction-not-a-uuid.tmp','.datasafe-0123456789abcdef0123456789abcdef.tmp.extra','temporary-directory')) {
+    Test-Case "worker conservatively rejects unknown transaction entry $entry" {
+      $f=New-Fixture; $null=Invoke-Worker $f; $repo=Get-Repository $f
+      $pointerPath=Join-Path $repo.MetadataRoot current-manifest.json; $before=[IO.File]::ReadAllText($pointerPath)
+      $name=if ($entry -ceq 'temporary-directory') { '.transaction-'+[guid]::NewGuid().ToString('N')+'.tmp' } else { $entry }
+      $path=Join-Path $repo.TransactionRoot $name
+      if ($entry -ceq 'temporary-directory') { Ensure-DataSafeDirectory $path } else { Write-File $path 'unrecognized-evidence' }
+      $s=Invoke-Worker $f 1
+      Assert-True ([IO.File]::ReadAllText($pointerPath) -ceq $before) 'Unknown transaction entry permitted pointer publication.'
+      Assert-True ((Test-DataSafeFile $path) -or (Test-DataSafeDirectory $path)) 'Unknown evidence removed.'
+      Assert-True ($s.lastBackupMessage -match 'transaction|journal') 'Unknown transaction entry lacked diagnostic.'
+    }
+  }
   Test-Case 'post-pointer finalization warning retains authority and prevents another transaction' {
     $f=New-Fixture; $null=Invoke-Worker $f; $repo=Get-Repository $f
     $pointer=Read-DataSafeCurrentPointer $repo
