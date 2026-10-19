@@ -62,7 +62,63 @@ function Get-ByteTree([string]$Path) {
     if ($_.PSIsContainer) { 'D '+$relative } else { 'F '+$relative+' '+(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
   }) -join "`n")
 }
+function Invoke-RawConfigWorker($Fixture,[string]$Extra='') {
+  $out=Join-Path $Fixture.Root raw-out.txt; $err=Join-Path $Fixture.Root raw-err.txt
+  $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ConfigPath "{1}" -StatusPath "{2}" {3}' -f (Join-Path $Fixture.Bin 'backup-engine.ps1'),$Fixture.ConfigPath,$Fixture.StatusPath,$Extra
+  $p=Start-Process (Get-Process -Id $PID).Path -WindowStyle Hidden -ArgumentList $args -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+  return [PSCustomObject]@{ExitCode=$p.ExitCode;Output=[IO.File]::ReadAllText($out);Error=[IO.File]::ReadAllText($err)}
+}
 try {
+  Test-Case 'OrdinaryUnreadableConfigHonorsHeldStatusLease' {
+    foreach ($kind in @('missing','malformed')) {
+      $f=New-Fixture
+      if ($kind -eq 'malformed') { Write-File $f.ConfigPath '{not-json' }
+      $before=[IO.File]::ReadAllText($f.StatusPath); $beforeTree=Get-ByteTree $f.Drive
+      $handle=Acquire-DataSafeOperationLock ($f.StatusPath+'.lock')
+      try { $r=Invoke-RawConfigWorker $f }
+      finally { Release-DataSafeOperationLock $handle ($f.StatusPath+'.lock') }
+      Assert-True ($r.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($r.Error) -and $r.Output -match 'already running') "Ordinary $kind config failure bypassed existing busy behavior: exit=$($r.ExitCode), $($r.Error)"
+      Assert-True ([IO.File]::ReadAllText($f.StatusPath) -ceq $before) "Ordinary $kind config failure rewrote status owned by another operation."
+      Assert-True ((Get-ByteTree $f.Drive) -ceq $beforeTree -and -not [IO.File]::Exists((Join-Path $f.Root 'incremental-computer-id.json'))) 'Preflight failure wrote backup metadata.'
+    }
+  }
+  Test-Case 'OrdinaryUnreadableConfigAcquiresLeaseBeforeFailureReport' {
+    foreach ($kind in @('missing','malformed')) {
+      $f=New-Fixture
+      if ($kind -eq 'malformed') { Write-File $f.ConfigPath '{not-json' }
+      $safety=Join-Path $f.Bin 'DataSafe.Safety.ps1'; $acquired=Join-Path $f.Root 'lease-acquired.txt'
+      $observer=@'
+$script:originalFixtureAcquire=${function:Acquire-DataSafeOperationLock}
+function Acquire-DataSafeOperationLock([string]$LockPath) {
+  $handle=& $script:originalFixtureAcquire $LockPath
+  [IO.File]::WriteAllText((Join-Path ([IO.Path]::GetDirectoryName($LockPath)) 'lease-acquired.txt'),'acquired')
+  return $handle
+}
+'@
+      Write-File $safety ([IO.File]::ReadAllText($safety)+"`n"+$observer)
+      $r=Invoke-RawConfigWorker $f
+      Assert-True ($r.ExitCode -eq 1 -and [IO.File]::Exists($acquired)) "Ordinary $kind config failure did not arbitrate the status lease."
+      Assert-True ((Read-DataSafeJson $f.StatusPath).lastBackupResult -ceq 'error') 'Unlocked failure was not reported after safely acquiring lease.'
+      Assert-True (-not [IO.File]::Exists(($f.StatusPath+'.lock')) -and (Get-ByteTree $f.Drive) -ceq '') 'Failure leaked status lease or wrote backup data.'
+    }
+  }
+  Test-Case 'AppUnreadableConfigStillBlocksBeforeStatusLease' {
+    foreach ($kind in @('missing','malformed')) {
+      foreach ($held in @($true,$false)) {
+        $f=New-Fixture
+        if ($kind -eq 'malformed') { Write-File $f.ConfigPath '{not-json' }
+        $before=[IO.File]::ReadAllText($f.StatusPath); $handle=$null
+        if ($held) { $handle=Acquire-DataSafeOperationLock ($f.StatusPath+'.lock') }
+        try { $r=Invoke-RawConfigWorker $f ('-ManualBetaRun -AppOperationId '+$f.OperationId) }
+        finally { if ($null -ne $handle) { Release-DataSafeOperationLock $handle ($f.StatusPath+'.lock') } }
+        $markers=@($r.Output -split '\r?\n' | Where-Object {$_.StartsWith('__OB_RESULT__:')})
+        Assert-True ($r.ExitCode -eq 1 -and $markers.Count -eq 1) 'Unreadable app config did not return blocked protocol result.'
+        $result=$markers[0].Substring('__OB_RESULT__:'.Length) | ConvertFrom-Json
+        Assert-True ($result.outcome -ceq 'blocked' -and $result.operationId -ceq $f.OperationId -and [IO.File]::ReadAllText($f.StatusPath) -ceq $before) 'App preflight failure acquired busy status or rewrote prior status.'
+        Assert-True (-not [IO.File]::Exists(($f.StatusPath+'.lock')) -and (Get-ByteTree $f.Drive) -ceq '') 'App preflight acquired status lease or wrote backup content.'
+      }
+    }
+  }
   Test-Case 'FormatDefaultsPrecedenceAndStrictTypes' {
     . (Join-Path $WindowsRoot 'DataSafe.AppIntegration.ps1')
     Assert-True ((Get-DataSafeBackupFormat ([PSCustomObject]@{destination=[PSCustomObject]@{}})) -eq 1) 'Absent format not legacy.'

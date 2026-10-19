@@ -67,6 +67,11 @@ function Test-BackupIsDue($Schedule, $Status) {
 }
 
 $config = Read-Json $ConfigPath
+. (Join-Path $PSScriptRoot 'DataSafe.AppIntegration.ps1')
+if (Test-DataSafeManualBetaConfig $config) {
+  Write-DataSafeManualBetaSkipped 'check-backup-catchup'
+  return
+}
 $status = Read-Json $StatusPath
 $schedule = if ($config.schedule) { $config.schedule } else { [PSCustomObject]@{
   enabled = $true

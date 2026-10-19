@@ -24,6 +24,11 @@ function Show-IntegrityWarning([string]$Message) {
 }
 
 $config = Read-DataSafeJson $ConfigPath
+. (Join-Path $PSScriptRoot 'DataSafe.AppIntegration.ps1')
+if (Test-DataSafeManualBetaConfig $config) {
+  Write-DataSafeManualBetaSkipped 'verify-backup-integrity'
+  return
+}
 $status = Read-DataSafeJson $StatusPath
 
 try {

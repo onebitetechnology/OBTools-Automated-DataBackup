@@ -780,6 +780,13 @@ try {
   }
 } catch {
   $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
+  # Ordinary config preflight failures still report legacy status, but only
+  # while owning the same status lease as every other backup/restore writer.
+  # App preflight refusals remain lock-free and never rewrite prior status.
+  if ($null -eq $lockHandle -and -not $script:appRequest -and $message -ne $operationBusyMessage) {
+    try { $lockHandle = Acquire-DataSafeOperationLock $lockPath }
+    catch { $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" } }
+  }
   if ($message -eq $operationBusyMessage) {
     if ($script:appRequest) { Write-DataSafeAppBackupResult $AppOperationId $script:appDestinationId 'busy' $null $message }
     Write-Output $message
@@ -792,7 +799,7 @@ try {
   }
   # A registered background worker must not overwrite existing committed
   # status when explicit v2 enrollment forbids its nonmanual invocation.
-  if (-not $appPreflight -or -not $script:appRequest) { Write-FailedBackupStatus $StatusPath $message }
+  if ($null -ne $lockHandle -and (-not $appPreflight -or -not $script:appRequest)) { Write-FailedBackupStatus $StatusPath $message }
 
   $notificationConfig = $configForNotification
   if (-not $notificationConfig) {

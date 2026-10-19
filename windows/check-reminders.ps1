@@ -91,6 +91,11 @@ function Show-BackupNotification(
 }
 
 $config = Read-Json $ConfigPath
+. (Join-Path $PSScriptRoot 'DataSafe.AppIntegration.ps1')
+if (Test-DataSafeManualBetaConfig $config) {
+  Write-DataSafeManualBetaSkipped 'check-reminders'
+  return
+}
 $status = Read-Json $StatusPath
 $support = Get-SupportContact $config
 $contactTarget = Get-ContactTarget $support

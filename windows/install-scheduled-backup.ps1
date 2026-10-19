@@ -70,6 +70,11 @@ function Test-IsAdministrator {
 }
 
 $config = Read-Json $ConfigPath
+. (Join-Path $PSScriptRoot 'DataSafe.AppIntegration.ps1')
+if (Test-DataSafeManualBetaConfig $config) {
+  Write-DataSafeManualBetaSkipped 'install-scheduled-backup'
+  return
+}
 $schedule = if ($config.schedule) { $config.schedule } else { [PSCustomObject]@{
   enabled = $true
   frequency = "weekly"

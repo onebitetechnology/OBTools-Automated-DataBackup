@@ -64,6 +64,21 @@ function Get-DataSafeBackupFormat($Config) {
   return [int]$value
 }
 
+function Test-DataSafeManualBetaConfig($Config) {
+  $format = Get-DataSafeBackupFormat $Config
+  $destination = Get-DataSafeAppDestinationRecord $Config
+  # The root flag is retained for qualified engine fixtures, not app enrollment.
+  return ($format -eq 2 -and $null -ne $destination -and $null -ne $destination.PSObject.Properties['backupFormatVersion'])
+}
+
+function Write-DataSafeManualBetaSkipped([string]$EntryPoint) {
+  $result = [ordered]@{
+    outcome='skipped'; backupFormatVersion=2; entryPoint=$EntryPoint
+    reason='manual-only-beta'; message='Incremental beta is manual-only. This background action is unsupported and was skipped.'
+  }
+  Write-Output ('__OB_RESULT__:' + (ConvertTo-Json $result -Compress))
+}
+
 function Assert-DataSafeAppDestination($Config, [string]$ActualVolumeUniqueId, [bool]$ManualBetaRun) {
   $format = Get-DataSafeBackupFormat $Config
   $destination = Get-DataSafeAppDestinationRecord $Config

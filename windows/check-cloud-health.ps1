@@ -156,6 +156,12 @@ function Get-KnownFolderPath([string]$RegistryName, [string]$FallbackFolderName)
   return Join-Path $env:USERPROFILE $FallbackFolderName
 }
 
+$config = Read-Json $ConfigPath
+. (Join-Path $PSScriptRoot 'DataSafe.AppIntegration.ps1')
+if (Test-DataSafeManualBetaConfig $config) {
+  Write-DataSafeManualBetaSkipped 'check-cloud-health'
+  return
+}
 $status = Read-Json $StatusPath
 $recommendations = New-Object System.Collections.Generic.List[string]
 $summaryParts = New-Object System.Collections.Generic.List[string]
