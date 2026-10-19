@@ -3,11 +3,14 @@ const packageJson = require("./package.json");
 const inferredChannel = /-beta/i.test(packageJson.version) ? "beta" : "latest";
 const releaseChannel = process.env.OBTOOLS_RELEASE_CHANNEL || inferredChannel;
 const releaseType = process.env.OBTOOLS_RELEASE_TYPE || (releaseChannel === "beta" ? "prerelease" : "release");
+if (inferredChannel === "beta" && (releaseChannel !== "beta" || releaseType !== "prerelease")) {
+  throw new Error("Beta versions must use the beta channel and prerelease publication.");
+}
 
 module.exports = {
   appId: "ca.onebitetechnology.backupcompanion",
   productName: "DataSafe",
-  generateUpdatesFilesForAllChannels: true,
+  generateUpdatesFilesForAllChannels: releaseChannel !== "beta",
   files: [
     "app.js",
     "assets/**/*",

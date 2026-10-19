@@ -2,78 +2,179 @@ name: Build Windows Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        default: verify-build
+        options: [verify-build, publish-qualified]
+      verified_run_id:
+        description: Successful verify-build run ID (publish-qualified only)
+        type: string
+      source_sha:
+        description: Exact verified source commit SHA (publish-qualified only)
+        type: string
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-publish-prerelease:
+  verify-build:
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'verify-build'
     runs-on: windows-latest
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
         with:
-          node-version: 20
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
-      - name: Run safety regression tests
+      - name: Node regressions
         run: npm test
-
-      - name: Create or reuse the release
+      - name: Windows PowerShell integration gates
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = node -p "require('./package.json').version"
-          $tag = "v$version"
-          $headers = @{
-            Authorization = "Bearer $env:GH_TOKEN"
-            Accept = "application/vnd.github+json"
-            "X-GitHub-Api-Version" = "2022-11-28"
+          $suites = @('Run-AppFormatPolicyTests', 'Run-BackupCatalogTests', 'Run-BetaAutomationTests', 'Run-AppIntegrationTests', 'Run-IncrementalEngineIntegrationTests', 'Run-IncrementalRecoveryRegressionTests', 'Run-IncrementalFinalRegressionTests')
+          foreach ($suite in $suites) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "tests/windows/$suite.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "$suite failed under Windows PowerShell" }
           }
-          $releaseUrl = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/$([Uri]::EscapeDataString($tag))"
-
-          try {
-            Invoke-RestMethod -Method Get -Uri $releaseUrl -Headers $headers -ErrorAction Stop | Out-Null
-            Write-Output "Reusing release $tag."
-          } catch {
-            if ([int]$_.Exception.Response.StatusCode -ne 404) {
-              throw
-            }
-
-            $release = @{
-              tag_name = $tag
-              target_commitish = $env:GITHUB_SHA
-              name = $version
-              prerelease = $version -match "-"
-              draft = $false
-            } | ConvertTo-Json
-            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases" -Headers $headers -ContentType "application/json" -Body $release | Out-Null
-            Write-Output "Created release $tag."
+      - name: PowerShell 7 integration gates
+        shell: pwsh
+        run: |
+          $suites = @('Run-AppFormatPolicyTests', 'Run-BackupCatalogTests', 'Run-BetaAutomationTests', 'Run-AppIntegrationTests', 'Run-IncrementalEngineIntegrationTests', 'Run-IncrementalRecoveryRegressionTests', 'Run-IncrementalFinalRegressionTests')
+          foreach ($suite in $suites) {
+            & pwsh -NoProfile -File "tests/windows/$suite.ps1"
+            if ($LASTEXITCODE -ne 0) { throw "$suite failed under PowerShell 7" }
           }
-
-      - name: Build and publish internal prerelease
-        run: npm run release:win
+      - name: Nonpublishing Windows build
+        run: npm run dist:win
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
-
-      - name: Upload published installer artifact
+      - name: Audit packaged resolution and source equality
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Test-AppPackage.ps1 -PackagedRoot dist/win-unpacked -SourceRoot .
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell package audit failed' }
+          & pwsh -NoProfile -File tests/windows/Test-AppPackage.ps1 -PackagedRoot dist/win-unpacked -SourceRoot . | Set-Content -Encoding utf8 dist/package-audit.json
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 package audit failed' }
+      - name: Disposable NTFS packaged worker smoke
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Run-AppIntegrationTests.ps1 -WorkerRoot dist/win-unpacked/resources/windows
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows PowerShell smoke failed' }
+          & pwsh -NoProfile -File tests/windows/Run-AppIntegrationTests.ps1 -WorkerRoot dist/win-unpacked/resources/windows
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged PowerShell 7 smoke failed' }
+      - name: Seal exact beta artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = node -p "require('./package.json').version"
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+-beta\.\d+$') { throw 'Only beta qualification bundles are supported' }
+          $installer = "OBTools-Automated-Backups-Setup-$version.exe"
+          $expected = @($installer, "$installer.blockmap", 'beta.yml', 'package-audit.json')
+          $actual = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in @('.exe', '.blockmap', '.yml') -and $_.Name -ne 'builder-debug.yml' } | Select-Object -ExpandProperty Name)
+          if (@(Compare-Object ($expected | Where-Object { $_ -ne 'package-audit.json' }) $actual).Count) { throw 'Unexpected release files or stable metadata' }
+          New-Item -ItemType Directory -Path qualified -ErrorAction Stop | Out-Null
+          $files = @(foreach ($name in $expected) {
+            Copy-Item -LiteralPath "dist/$name" -Destination "qualified/$name"
+            @{ name=$name; sha256=(Get-FileHash -Algorithm SHA256 -LiteralPath "qualified/$name").Hash.ToLowerInvariant() }
+          })
+          @{ schema='datasafe.qualified-beta'; formatVersion=1; version=$version; sourceSha=$env:GITHUB_SHA; runId=$env:GITHUB_RUN_ID; runAttempt=$env:GITHUB_RUN_ATTEMPT; files=$files } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 qualified/qualification.json
+      - name: Retain immutable qualification bundle
         uses: actions/upload-artifact@v4
         with:
-          name: OBTools-Automated-Backups-Windows-Installer
-          path: |
-            dist/*.exe
-            dist/*.yml
+          name: qualified-beta-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: qualified/*
           if-no-files-found: error
+          retention-days: 30
+          overwrite: false
+
+  publish-qualified:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'publish-qualified'
+    runs-on: windows-latest
+    # Required reviewers and prevent-self-review must be configured by an owner.
+    environment: incremental-beta-release
+    concurrency:
+      group: incremental-beta-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Validate successful verification run
+        id: verified
+        uses: actions/github-script@v7
+        env:
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        with:
+          script: |
+            const runId = process.env.VERIFIED_RUN_ID;
+            const sha = process.env.SOURCE_SHA;
+            if (!/^[1-9]\d*$/.test(runId) || !/^[a-f0-9]{40}$/.test(sha)) throw new Error('Exact run ID and SHA required');
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: runId });
+            if (run.conclusion !== 'success' || run.status !== 'completed' || run.head_sha !== sha ||
+                run.path !== '.github/workflows/build-windows-installer.yml' ||
+                !['push', 'workflow_dispatch'].includes(run.event) || run.repository.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+              throw new Error('Run provenance mismatch');
+            }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, { ...context.repo, run_id: runId, filter: 'latest' });
+            if (!jobs.some(job => job.name === 'verify-build' && job.conclusion === 'success')) throw new Error('No successful verification job');
+            const name = `qualified-beta-${runId}-${run.run_attempt}-${sha}`;
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, { ...context.repo, run_id: runId });
+            const matching = artifacts.filter(artifact => artifact.name === name && !artifact.expired);
+            if (matching.length !== 1) throw new Error('Exact immutable artifact unavailable');
+            core.setOutput('artifact_name', name);
+            core.setOutput('run_attempt', String(run.run_attempt));
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.verified.outputs.artifact_name }}
+          path: qualified
+          run-id: ${{ inputs.verified_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate bundle and publish without rebuilding
+        uses: actions/github-script@v7
+        env:
+          VERIFIED_RUN_ID: ${{ inputs.verified_run_id }}
+          VERIFIED_RUN_ATTEMPT: ${{ steps.verified.outputs.run_attempt }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const manifest = JSON.parse(fs.readFileSync('qualified/qualification.json', 'utf8').replace(/^\uFEFF/, ''));
+            if (manifest.schema !== 'datasafe.qualified-beta' || manifest.formatVersion !== 1 ||
+                manifest.sourceSha !== process.env.SOURCE_SHA || String(manifest.runId) !== process.env.VERIFIED_RUN_ID ||
+                String(manifest.runAttempt) !== process.env.VERIFIED_RUN_ATTEMPT ||
+                !/^\d+\.\d+\.\d+-beta\.\d+$/.test(manifest.version) || manifest.version === '1.0.10-beta.69') throw new Error('Bundle provenance/version mismatch');
+            const installer = `OBTools-Automated-Backups-Setup-${manifest.version}.exe`;
+            const expected = [installer, `${installer}.blockmap`, 'beta.yml', 'package-audit.json'].sort();
+            if (!Array.isArray(manifest.files) || JSON.stringify(manifest.files.map(file => file.name).sort()) !== JSON.stringify(expected) ||
+                JSON.stringify(fs.readdirSync('qualified').sort()) !== JSON.stringify([...expected, 'qualification.json'].sort())) throw new Error('Unexpected artifact files or stable metadata');
+            for (const file of manifest.files) {
+              if (!/^[a-f0-9]{64}$/.test(file.sha256) || crypto.createHash('sha256').update(fs.readFileSync(`qualified/${file.name}`)).digest('hex') !== file.sha256) throw new Error(`Hash mismatch: ${file.name}`);
+            }
+            const audit = JSON.parse(fs.readFileSync('qualified/package-audit.json', 'utf8').replace(/^\uFEFF/, ''));
+            if (audit.schema !== 'datasafe.package-audit' || audit.version !== manifest.version || audit.moduleResolution !== 'packaged-electron-asar' || !audit.hashes?.length) throw new Error('Package audit mismatch');
+            const metadata = fs.readFileSync('qualified/beta.yml', 'utf8');
+            if (!metadata.includes(`version: ${manifest.version}\n`) || !metadata.includes(installer)) throw new Error('Beta metadata mismatch');
+            const { data: source } = await github.rest.repos.getContent({ ...context.repo, path: 'package.json', ref: manifest.sourceSha });
+            if (JSON.parse(Buffer.from(source.content, 'base64').toString()).version !== manifest.version) throw new Error('Source version mismatch');
+            const tag = `v${manifest.version}`;
+            for (const lookup of [() => github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` }), () => github.rest.repos.getReleaseByTag({ ...context.repo, tag })]) {
+              try { await lookup(); } catch (error) { if (error.status === 404) continue; throw error; }
+              throw new Error('Tag/release already exists; refusing reuse or overwrite');
+            }
+            const { data: release } = await github.rest.repos.createRelease({ ...context.repo, tag_name: tag,
+              target_commitish: manifest.sourceSha, name: manifest.version, draft: true, prerelease: true,
+              body: `Qualified source ${manifest.sourceSha}; verification run ${manifest.runId}, attempt ${manifest.runAttempt}.` });
+            for (const name of [...expected, 'qualification.json']) {
+              await github.rest.repos.uploadReleaseAsset({ ...context.repo, release_id: release.id, name, data: fs.readFileSync(`qualified/${name}`) });
+            }
+            await github.rest.repos.updateRelease({ ...context.repo, release_id: release.id, draft: false, prerelease: true });
