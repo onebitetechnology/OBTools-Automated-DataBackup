@@ -6,6 +6,10 @@ const state = {
   driveInsights: null,
   backupProgress: null,
   backupTiming: null,
+  catalog: null,
+  lastAttempt: null,
+  activeOperation: null,
+  catalogRequest: 0,
   notifiedUpdateVersion: null,
   pendingUpdateVersion: null,
   updateChannelDraft: null,
@@ -34,6 +38,15 @@ const el = {
   lastBackup: document.getElementById("last-backup"),
   lastBackupDetail: document.getElementById("last-backup-detail"),
   snapshotCount: document.getElementById("snapshot-count"),
+  snapshotCountLabel: document.getElementById("snapshot-count-label"),
+  knownDestinationSelect: document.getElementById("known-destination-select"),
+  betaSummary: document.getElementById("beta-summary"),
+  betaConfirmManual: document.getElementById("beta-confirm-manual"),
+  betaConfirmLimitations: document.getElementById("beta-confirm-limitations"),
+  enrollIncremental: document.getElementById("enroll-incremental"),
+  refreshBackups: document.getElementById("refresh-backups"),
+  backupLocations: document.getElementById("backup-locations"),
+  betaLimitations: document.getElementById("beta-limitations"),
   cloudSummary: document.getElementById("cloud-summary"),
   cloudHealthIndicator: document.getElementById("cloud-health-indicator"),
   cloudHealthLabel: document.getElementById("cloud-health-label"),
@@ -195,6 +208,10 @@ async function desktopRequest(url, options = {}) {
 
   if (url === "/api/run-backup" && options.method === "POST") {
     return window.onebiteDesktop.runBackup(body);
+  }
+
+  if (url === "/api/enroll-incremental" && options.method === "POST") {
+    return window.onebiteDesktop.enrollIncrementalTest(body);
   }
 
   if (url === "/api/check-cloud" && options.method === "POST") {
@@ -503,6 +520,11 @@ function buildBackupTiming(progress = null) {
 function getBackupProgressView(progress = state.backupProgress) {
   if (!progress) {
     return null;
+  }
+
+  if (isIncremental()) {
+    const projected = window.DataSafeBackupView.projectBackupProgress({ operation: state.activeOperation || { startedAt: state.backupTiming?.startedAt, backupFormatVersion: 2 }, progress });
+    return { ...projected, detail: projected.label, timing: { elapsedText: `Elapsed: ${formatDuration(projected.elapsedSeconds * 1000)}`, etaText: "Estimated remaining: Not available for phase-only progress" } };
   }
 
   const detail = progress?.jobName
@@ -928,11 +950,9 @@ async function switchPrimaryDestination(destinationId) {
 
   state.config = normalizeConfig({
     ...state.config,
-    destination: {
-      ...state.config.destination,
-      ...destination
-    }
+    destination: { ...destination }
   });
+  clearBackupSelection();
   renderConfig();
   renderStatus();
   await saveConfig(false, { suppressDriveInsightPrompt: true });
@@ -1603,6 +1623,7 @@ function setActionButtonsDisabled(disabled) {
   el.runCloudCheck.disabled = disabled;
   el.installAutomation.disabled = disabled;
   renderMeta();
+  renderBetaControls();
 }
 
 function displayJobType(job) {
@@ -1816,8 +1837,181 @@ function renderJobs() {
   });
 }
 
+function isIncremental() {
+  return (state.config?.destination?.backupFormatVersion ?? state.config?.incrementalFormatVersion ?? 1) !== 1;
+}
+
+function backupView() {
+  return window.DataSafeBackupView.projectBackupView(state);
+}
+
+function clearBackupSelection() {
+  state.catalogRequest++;
+  state.catalog = null;
+  state.lastAttempt = null;
+  state.activeOperation = null;
+  state.backupProgress = null;
+  state.backupTiming = null;
+  stopBackupProgressTimer();
+  if (el.resultModalTitle.textContent === "Backup In Progress") {
+    el.resultModal.hidden = true;
+    renderResultProgress(null);
+  }
+}
+
+function applyBackupProjection(payload) {
+  const destinationId = state.config?.destination?.id;
+  const format = state.config?.destination?.backupFormatVersion ?? state.config?.incrementalFormatVersion ?? 1;
+  const catalog = payload?.catalog;
+  if (!catalog || catalog.schema !== "datasafe.app-catalog" || catalog.formatVersion !== 1 || catalog.destinationId !== destinationId || catalog.backupFormatVersion !== format) {
+    clearBackupSelection();
+    return false;
+  }
+  state.catalog = catalog;
+  state.lastAttempt = payload.lastAttempt?.destinationId === destinationId && payload.lastAttempt.backupFormatVersion === format ? payload.lastAttempt : null;
+  const operation = payload.activeOperation;
+  state.activeOperation = operation?.destinationId === destinationId && operation.backupFormatVersion === format && operation.operationId ? operation : null;
+  if (state.backupProgress && state.backupProgress.operationId !== state.activeOperation?.operationId) state.backupProgress = null;
+  return true;
+}
+
+async function refreshBackupCatalog({ force = true } = {}) {
+  if (!window.onebiteDesktop?.refreshBackups) return;
+  const selection = JSON.stringify(state.config?.destination);
+  const requestId = ++state.catalogRequest;
+  const payload = await (force ? window.onebiteDesktop.refreshBackups() : window.onebiteDesktop.getState());
+  if (requestId !== state.catalogRequest || JSON.stringify(state.config?.destination) !== selection) {
+    if (state.catalog?.destinationId !== state.config?.destination?.id) clearBackupSelection();
+    return;
+  }
+  if (!applyBackupProjection(payload)) return;
+  state.status = normalizeStatus(payload.status || state.status);
+  renderStatus();
+  renderStorageAnalysis();
+}
+
+async function receiveBackupProgress(progress) {
+  if (isIncremental()) {
+    if (!progress || progress.destinationId !== state.config.destination.id || progress.backupFormatVersion !== 2 || !progress.operationId) return;
+    // The first marker can precede the response to backup:run. Obtain the
+    // operation identity from main state; a marker never appoints itself.
+    if (!state.activeOperation) await refreshBackupCatalog({ force: false });
+    if (progress.destinationId !== state.config.destination.id || progress.operationId !== state.activeOperation?.operationId) return;
+    if (["complete", "finished-with-issue"].includes(progress.phase)) {
+      await refreshBackupCatalog({ force: false });
+      return;
+    }
+  } else if (progress?.backupFormatVersion === 2 || progress?.destinationId && progress.destinationId !== state.config.destination.id) return;
+  state.backupProgress = progress || null;
+  if (progress && !state.backupTiming?.startedAt) state.backupTiming = { startedAt: state.activeOperation?.startedAt ? new Date(state.activeOperation.startedAt).getTime() : Date.now() };
+  if (progress?.phase === "complete") stopBackupProgressTimer();
+  else if (progress) ensureBackupProgressTimer();
+  refreshBackupProgressModal();
+}
+
+function renderBetaControls() {
+  if (!state.config) return;
+  const view = backupView();
+  const v2 = isIncremental();
+  const desktop = Boolean(window.onebiteDesktop?.enrollIncrementalTest);
+  const busy = state.actionInFlight || Boolean(state.activeOperation);
+  if (el.knownDestinationSelect) {
+    el.knownDestinationSelect.innerHTML = "";
+    (state.config.knownDestinations || []).forEach(destination => {
+      const option = document.createElement("option");
+      option.value = destination.id;
+      option.textContent = `${destination.backupFormatVersion === 2 ? "Incremental" : "Legacy"} — ${destination.driveLetter || "No drive"}${destination.label ? ` (${destination.label}, saved name)` : ""}`;
+      option.selected = destination.id === state.config.destination.id;
+      el.knownDestinationSelect.appendChild(option);
+    });
+    el.knownDestinationSelect.disabled = state.actionInFlight;
+  }
+  if (el.betaSummary) {
+    const choices = v2 && state.config.betaTest?.previousAutomation || { schedule: state.config.schedule, reminders: state.config.reminders, cloudChecks: state.config.cloudCheck };
+    const automationCopy = `Schedule: ${choices.schedule?.enabled ? `enabled (${choices.schedule.frequency || "saved cadence"}, ${choices.schedule.dayOfWeek || ""} ${choices.schedule.time || "saved time"})` : "disabled"}; reminders: ${choices.reminders?.enabled ? `enabled (after ${choices.reminders.staleDays || "saved"} days)` : "disabled"}; cloud checks: ${choices.cloudChecks?.enabled ? "enabled" : "disabled"}`;
+    const drive = state.config.destination.driveLetter?.replace(":", "") || "?";
+    el.betaSummary.textContent = `${drive}: — saved name: ${state.config.destination.label || "not set"}. Catalog: ${state.catalog?.connection || "not checked"}. ${v2 ? "Incremental layout" : "Future layout"}: ${drive}:\\DataSafe Backups\\<PC>\\Latest Backup. Enrollment freshly checks and binds Windows volume identity; the saved name is not proof of hardware identity. ${v2 ? "Previous" : "Current saved"} automation choices — ${automationCopy}. Use custom generated sample sources. Save source/settings edits before enrollment. ${view.enrollmentIssue}`;
+  }
+  if (el.enrollIncremental) el.enrollIncremental.disabled = busy || !desktop || !view.canEnroll || !el.betaConfirmManual?.checked || !el.betaConfirmLimitations?.checked;
+  for (const input of [el.betaConfirmManual, el.betaConfirmLimitations]) if (input) input.disabled = busy || v2 || !desktop;
+  if (el.betaLimitations) el.betaLimitations.textContent = `${!desktop ? "Preview: real incremental enrollment, backup and browsing require the installed Windows app. " : ""}${view.limitations}`;
+  if (el.betaLimitations) el.betaLimitations.hidden = !v2;
+  const tools = document.getElementById("incremental-tools");
+  if (tools) tools.hidden = !v2;
+  const retentionNote = document.getElementById("incremental-retention-note");
+  if (retentionNote) retentionNote.hidden = !v2;
+  if (el.refreshBackups) el.refreshBackups.disabled = !window.onebiteDesktop?.refreshBackups || state.actionInFlight;
+  if (v2) {
+    el.runBackup.disabled = busy || !desktop || !view.canManualBackup;
+    el.installAutomation.disabled = true;
+    el.openRestore.textContent = "Browse backup files";
+    el.settingsRetentionSummary.textContent = "Unavailable in incremental beta";
+    el.destinationIntegritySummary.textContent = "Verify is unavailable in incremental beta; no manual integrity check is offered.";
+    el.destinationIntegritySummary.classList.remove("integrity-success", "integrity-error");
+    const layout = `${state.config.destination.driveLetter || "?"}:\\DataSafe Backups\\<PC>\\Latest Backup`;
+    el.destinationFinalSummary.textContent = layout;
+    el.destinationHealthSummary.textContent = layout;
+    el.destinationModeSummary.textContent = "Drive-root incremental layout; manual testing only.";
+  } else {
+    el.runBackup.disabled = busy;
+    el.installAutomation.disabled = busy;
+    el.openRestore.textContent = "Restore files";
+  }
+  for (const control of [el.retentionDays, el.retentionMonths, el.retentionYears, el.scheduleEnabled, el.scheduleFrequency, el.scheduleTime, el.remindersEnabled, el.reminderDays, el.cloudCheckEnabled]) control.disabled = v2;
+  if (el.scheduleDayOfWeek) el.scheduleDayOfWeek.disabled = v2 || state.config.schedule.frequency !== "weekly";
+  if (el.backupLocations) {
+    el.backupLocations.replaceChildren();
+    view.repositories.forEach(repository => {
+      const heading = document.createElement("h4"); heading.textContent = repository.label; el.backupLocations.appendChild(heading);
+      repository.locations.forEach(location => {
+        const row = document.createElement("div"); row.className = "backup-location";
+        const button = document.createElement("button"); button.type = "button"; button.className = "secondary"; button.textContent = location.label; button.disabled = busy || !desktop || !location.canOpen;
+        button.addEventListener("click", () => openBackupLocation(repository.computerId, location.locationId).catch(error => showResultModal({ title: "Browse Needs Attention", message: error.message })));
+        const explanation = document.createElement("p"); explanation.className = "hint"; explanation.textContent = location.explanation;
+        row.appendChild(button); row.appendChild(explanation); el.backupLocations.appendChild(row);
+      });
+    });
+  }
+}
+
+function enrollmentSelection(config) {
+  return JSON.stringify([config.destination.id, config.destination.driveLetter, config.destination.baseFolder,
+    config.jobs, config.schedule.enabled, config.schedule.frequency, config.schedule.dayOfWeek, config.schedule.time,
+    config.reminders.enabled, config.reminders.staleDays, config.cloudCheck.enabled]);
+}
+
+async function enrollIncrementalTest() {
+  const view = backupView();
+  if (!window.onebiteDesktop?.enrollIncrementalTest || state.actionInFlight || !view.canEnroll || !el.betaConfirmManual?.checked || !el.betaConfirmLimitations?.checked) return;
+  const destinationId = state.config.destination.id;
+  const displayed = enrollmentSelection(collectConfig());
+  setActionButtonsDisabled(true);
+  try {
+    const saved = await window.onebiteDesktop.getState();
+    if (state.config.destination.id !== destinationId) return;
+    if (displayed !== enrollmentSelection(collectConfig()) || displayed !== enrollmentSelection(normalizeConfig(saved.config))) {
+      showResultModal({ title: "Save Before Enrollment", message: "Save your backup items and settings before starting the incremental beta test. No settings were saved and enrollment has not started." });
+      return;
+    }
+    const payload = await request("/api/enroll-incremental", { method: "POST", body: JSON.stringify({ destinationId, confirmedManualTesting: true, confirmedLimitations: true }) });
+    if (state.config.destination.id !== destinationId) return;
+    clearBackupSelection();
+    state.config = normalizeConfig(payload.config); state.status = normalizeStatus(payload.status);
+    applyBackupProjection(payload); renderConfig(); renderStatus();
+    showResultModal({ title: "Incremental Beta Ready", message: "Automation pause was confirmed. Your separate Legacy record and prior automation choices were retained. Run manual sample backups; browse ordinary files for recovery." });
+  } finally { el.betaConfirmManual.checked = false; el.betaConfirmLimitations.checked = false; setActionButtonsDisabled(false); }
+}
+
+async function openBackupLocation(computerId, locationId) {
+  const repository = backupView().repositories.find(item => item.computerId === computerId);
+  if (!window.onebiteDesktop?.openBackupLocation || !repository?.locations.some(location => location.locationId === locationId && location.canOpen)) return;
+  const result = await window.onebiteDesktop.openBackupLocation({ destinationId: state.config.destination.id, computerId, locationId });
+  if (!result.opened) throw new Error(result.message || "The backup location could not be validated. Refresh and try again.");
+}
+
 function renderStatus() {
-  const summary = protectionSummary(state.status);
+  const projected = isIncremental() ? backupView() : null;
+  const summary = projected || protectionSummary(state.status);
   const cloudLevel = state.status.cloud?.level || "info";
   const cloudChecked = Boolean(state.status.cloud?.checkedAt);
   const cloudConfigurationFound = cloudChecked && cloudLevel === "info" && state.status.cloud?.verificationScope === "local-configuration";
@@ -1873,6 +2067,14 @@ function renderStatus() {
   }
 
   renderRestoreSection();
+  if (projected) {
+    el.lastBackup.textContent = projected.backupTimeLabel;
+    el.lastBackupDetail.textContent = projected.backupTimeLabel;
+    el.snapshotCount.textContent = String(projected.snapshotCount);
+    if (!window.onebiteDesktop) el.protectionMessage.textContent = "Preview: incremental actions require the installed Windows app.";
+  }
+  if (el.snapshotCountLabel) el.snapshotCountLabel.textContent = projected ? "Complete latest backups (this PC)" : "Snapshots kept";
+  renderBetaControls();
 }
 
 function openSettingsDrawer(panelId = state.settingsActivePanelId || "automation-section") {
@@ -1944,7 +2146,7 @@ function initializeSettingsPanels() {
 
 function renderSettingsSummary() {
   const { retention, schedule, preferences } = state.config;
-  el.settingsRetentionSummary.textContent = retentionSummary(retention);
+  el.settingsRetentionSummary.textContent = isIncremental() ? "Unavailable in incremental beta" : retentionSummary(retention);
 
   if (!schedule.enabled) {
     el.settingsScheduleSummary.textContent = "Manual only";
@@ -2010,6 +2212,17 @@ function getSelectedRestoreJob() {
 
 function renderRestoreSection() {
   if (!el.restoreSnapshotSelect || !el.restoreJobSelect) {
+    return;
+  }
+
+  const legacyControls = document.getElementById("legacy-restore-controls");
+  if (legacyControls) legacyControls.hidden = isIncremental();
+  if (isIncremental()) {
+    el.runRestore.disabled = true;
+    el.restorePickTarget.disabled = true;
+    el.restoreSnapshotSelect.disabled = true;
+    el.restoreJobSelect.disabled = true;
+    el.restoreSupportNote.textContent = "Assisted restore is unavailable for incremental beta. Browse Latest Backup or partial Earlier Versions; these are never sent to legacy Restore.";
     return;
   }
 
@@ -2083,6 +2296,11 @@ function renderRestoreSection() {
 }
 
 function renderStorageAnalysis() {
+  if (isIncremental()) {
+    el.backupSizeEstimate.textContent = backupView().storageEstimate;
+    el.destinationFreeSpace.textContent = "Not calculated for incremental beta";
+    return;
+  }
   if (!state.storage) {
     el.backupSizeEstimate.textContent = "Waiting for analysis";
     el.destinationFreeSpace.textContent = "Waiting for analysis";
@@ -2094,7 +2312,7 @@ function renderStorageAnalysis() {
 }
 
 async function refreshStorageAnalysis() {
-  if (!window.onebiteDesktop?.analyzeStorage) {
+  if (isIncremental() || !window.onebiteDesktop?.analyzeStorage) {
     state.storage = null;
     renderStorageAnalysis();
     return;
@@ -2273,6 +2491,7 @@ function renderConfig() {
   renderStorageAnalysis();
   renderMeta();
   renderTermsGate();
+  renderBetaControls();
 }
 
 function collectConfig() {
@@ -2349,6 +2568,7 @@ async function load() {
   state.status = normalizeStatus(payload.status);
   state.meta = payload.meta || null;
   state.driveInsights = payload.driveInsights || null;
+  applyBackupProjection(payload);
   state.updateChannelDraft = state.config?.updates?.channel || state.meta?.updateStatus?.channel || "beta";
   if (window.onebiteDesktop?.onUpdateStatus) {
     window.onebiteDesktop.onUpdateStatus((updateStatus) => {
@@ -2363,31 +2583,12 @@ async function load() {
     });
   }
   if (window.onebiteDesktop?.onBackupProgress) {
-    window.onebiteDesktop.onBackupProgress((progress) => {
-      state.backupProgress = progress || null;
-
-      if (progress && !state.backupTiming?.startedAt) {
-        state.backupTiming = {
-          startedAt: Date.now()
-        };
-      }
-
-      if (progress?.phase === "complete") {
-        stopBackupProgressTimer();
-      } else if (progress) {
-        ensureBackupProgressTimer();
-      }
-
-      refreshBackupProgressModal();
-    });
+    window.onebiteDesktop.onBackupProgress(progress => receiveBackupProgress(progress).catch(() => {}));
   }
   if (window.onebiteDesktop?.onStatusChanged) {
-    window.onebiteDesktop.onStatusChanged((payload) => {
-      state.status = normalizeStatus(payload?.status || {});
-      state.meta = payload?.meta || state.meta;
-      renderStatus();
-      renderMeta();
-    });
+    // Legacy status notifications have no destination identity. Treat them as
+    // invalidations, not authoritative state for whichever set is now selected.
+    window.onebiteDesktop.onStatusChanged(() => refreshBackupCatalog({ force: false }).catch(() => {}));
   }
   renderConfig();
   renderStatus();
@@ -2441,6 +2642,7 @@ function buildAutomationPrompt(config) {
 function shouldOfferAutomationInstall() {
   return Boolean(
     window.onebiteDesktop &&
+    !isIncremental() &&
     state.config &&
     state.status &&
     !state.status.automation?.installedAt &&
@@ -2508,6 +2710,7 @@ async function saveConfig(showAutomationPrompt = true, options = {}) {
   state.status = normalizeStatus(payload.status);
   state.meta = payload.meta || state.meta;
   state.driveInsights = payload.driveInsights || null;
+  applyBackupProjection(payload);
   renderConfig();
   renderStatus();
   await refreshStorageAnalysis().catch(() => {
@@ -2538,6 +2741,7 @@ async function acceptTerms() {
     state.config = normalizeConfig(payload.config);
     state.status = normalizeStatus(payload.status);
     state.meta = payload.meta || state.meta;
+    applyBackupProjection(payload);
     renderConfig();
     renderStatus();
     setTimeout(() => {
@@ -2549,6 +2753,11 @@ async function invokeAction(path, options = {}) {
   if (state.actionInFlight) {
     return;
   }
+  if (isIncremental() && (path === "/api/install-automation" || path === "/api/run-backup" && (!window.onebiteDesktop || !backupView().canManualBackup))) {
+    renderStatus();
+    return;
+  }
+  const actionDestinationId = state.config.destination.id;
 
   if (path === "/api/run-backup" && !options.skipSave) {
     const nextConfig = collectConfig();
@@ -2598,6 +2807,7 @@ async function invokeAction(path, options = {}) {
       method: "POST",
       body: options.body ? JSON.stringify(options.body) : undefined
     });
+    if (state.config.destination.id !== actionDestinationId) return;
 
     if (path === "/api/run-backup" && payload.requiresConfirmation) {
       stopBackupProgressTimer();
@@ -2639,6 +2849,7 @@ async function invokeAction(path, options = {}) {
     state.status = normalizeStatus(payload.status);
     state.meta = payload.meta || state.meta;
     state.driveInsights = payload.driveInsights || null;
+    if (path === "/api/run-backup" || payload.catalog) applyBackupProjection(payload);
     renderStatus();
     renderMeta();
 
@@ -2686,6 +2897,11 @@ async function invokeAction(path, options = {}) {
       stopBackupProgressTimer();
       state.backupProgress = null;
       state.backupTiming = null;
+      if (isIncremental()) {
+        const view = backupView();
+        showResultModal({ title: view.title, message: view.message, list: [view.backupTimeLabel, view.limitations] });
+        return;
+      }
       const success = state.status.lastBackupResult === "success";
       const warning = state.status.lastBackupResult === "warning";
       showResultModal({
@@ -2699,6 +2915,7 @@ async function invokeAction(path, options = {}) {
 
     maybeShowDriveInsightPrompt();
   } catch (error) {
+    if (state.config.destination.id !== actionDestinationId) return;
     el.backupStatusCard.classList.remove("status-good", "status-warning");
     el.backupStatusCard.classList.add("status-error");
     el.protectionState.textContent = "Action Failed";
@@ -2719,6 +2936,7 @@ async function invokeAction(path, options = {}) {
       stopBackupProgressTimer();
       state.backupProgress = null;
       state.backupTiming = null;
+      showResultModal({ title: "Backup Needs Attention", message: error.message });
     }
   } finally {
     if (path !== "/api/run-backup") {
@@ -2851,6 +3069,7 @@ async function chooseRestoreTargetFolder() {
 }
 
 async function performRestore() {
+  if (isIncremental()) return;
   const snapshotName = el.restoreSnapshotSelect?.value || "";
   const jobId = el.restoreJobSelect?.value || "";
   const mode = el.restoreModeSelect?.value || "alternate";
@@ -2909,6 +3128,7 @@ async function performRestore() {
 }
 
 async function runRestore() {
+  if (isIncremental()) return;
   const selectedJob = getSelectedRestoreJob();
   const configuredJob = (state.config?.jobs || []).find((job) => job.id === selectedJob?.id) || null;
   const restoreMode = el.restoreModeSelect?.value || "alternate";
@@ -3041,6 +3261,11 @@ function clearHeaderLogo() {
 }
 
 el.saveConfig.addEventListener("click", saveConfig);
+el.betaConfirmManual?.addEventListener("change", renderBetaControls);
+el.betaConfirmLimitations?.addEventListener("change", renderBetaControls);
+el.enrollIncremental?.addEventListener("click", () => enrollIncrementalTest().catch(error => showResultModal({ title: "Incremental Setup Needs Attention", message: error.message })));
+el.refreshBackups?.addEventListener("click", () => refreshBackupCatalog().catch(error => showResultModal({ title: "History Needs Attention", message: error.message })));
+el.knownDestinationSelect?.addEventListener("change", () => switchPrimaryDestination(el.knownDestinationSelect.value).catch(error => showResultModal({ title: "Destination Needs Attention", message: error.message })));
 el.runBackup.addEventListener("click", () => {
   invokeAction("/api/run-backup").catch((error) => {
     el.protectionState.textContent = "Action Failed";

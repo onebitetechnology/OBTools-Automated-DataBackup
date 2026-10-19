@@ -59,7 +59,7 @@
             <p id="destination-health-summary" class="metric-value">Not selected</p>
           </article>
           <article class="operational-metric">
-            <p class="metric-label">Snapshots kept</p>
+            <p id="snapshot-count-label" class="metric-label">Snapshots kept</p>
             <p id="snapshot-count" class="metric-value">0</p>
           </article>
           <article class="operational-metric">
@@ -98,6 +98,15 @@
                 <p id="destination-picked-summary" class="destination-title">No backup location selected.</p>
                 <p id="destination-final-summary" class="destination-final-summary">Choose a connected drive or folder before the first backup.</p>
                 <button id="manage-destination" class="secondary" type="button">Choose backup location</button>
+                <label><span>Remembered backup sets</span><select id="known-destination-select" aria-label="Remembered backup sets"></select></label>
+                <button id="refresh-backups" class="secondary" type="button">Refresh backup history</button>
+                <details class="beta-enrollment">
+                  <summary>Incremental beta test</summary>
+                  <p id="beta-summary" class="hint">Refresh the selected drive before enrollment.</p>
+                  <label class="checkbox"><input id="beta-confirm-manual" type="checkbox"><span>Use manual testing: pause automatic backups, reminders and cloud checks, retaining my prior choices.</span></label>
+                  <label class="checkbox"><input id="beta-confirm-limitations" type="checkbox"><span>I selected compatible sample sources and understand recovery is browse-only. No automatic retention, migration or full point-in-time restore.</span></label>
+                  <button id="enroll-incremental" class="secondary" type="button" disabled>Start incremental beta test</button>
+                </details>
                 <div class="storage-analysis-grid">
                   <article class="storage-stat">
                     <p class="metric-label">Space needed</p>
@@ -280,9 +289,10 @@
               </section>
 
               <section class="settings-section settings-page" id="retention-section" data-nav-label="Retention" data-nav-copy="Daily, monthly, and yearly snapshot history rules.">
+                <p id="incremental-retention-note" class="hint" hidden>Automatic retention is unavailable for incremental beta. The disabled values below are saved Legacy choices, not incremental retention rules.</p>
                 <div class="settings-panel-hero">
                   <h3>Retention</h3>
-                  <div class="settings-section-copy settings-panel-hero-copy">Choose how many recent daily, monthly, and yearly snapshots to keep automatically.</div>
+                  <div class="settings-section-copy settings-panel-hero-copy">Legacy automatic retention choices. Incremental beta does not apply these rules.</div>
                 </div>
                 <div class="settings-panel-body">
                   <div class="grid three">
@@ -496,9 +506,17 @@
               <section class="settings-section settings-page" id="restore-section" data-nav-label="Restore" data-nav-copy="Recover files, browser data, or supported email data from a saved snapshot.">
                 <div class="settings-panel-hero">
                   <h3>Restore</h3>
-                  <div class="settings-section-copy settings-panel-hero-copy">Restore files, browser data, or supported email data from a saved snapshot back to the PC.</div>
+                  <div class="settings-section-copy settings-panel-hero-copy">Legacy sets support assisted restore. Incremental beta provides browse-only recovery of ordinary files.</div>
                 </div>
                 <div class="settings-panel-body">
+                  <p id="beta-limitations" class="hint"></p>
+                  <div id="backup-locations" aria-live="polite"></div>
+                  <div id="incremental-tools" hidden>
+                    <button type="button" class="secondary" disabled>Verify — unavailable in beta</button>
+                    <button type="button" class="secondary" disabled>Assisted restore — unavailable in beta</button>
+                    <button type="button" class="secondary" disabled>Automatic retention — unavailable in beta</button>
+                  </div>
+                  <div id="legacy-restore-controls">
                   <div class="grid two">
                     <label>
                       <span>Snapshot to restore</span>
@@ -530,6 +548,7 @@
                     <button id="run-restore" class="primary" type="button">Restore selected snapshot</button>
                   </div>
                   <p class="settings-guidance">DataSafe verifies the selected snapshot before restoring. A restore to the original location also creates and verifies a rollback copy of the current files first.</p>
+                  </div>
                 </div>
               </section>
 
@@ -668,6 +687,7 @@
       </section>
     </div>
 
+    <script src="backup-view.js" defer></script>
     <script src="app.js" defer></script>
   </body>
 </html>

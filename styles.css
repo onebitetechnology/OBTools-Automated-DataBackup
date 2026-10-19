@@ -2126,3 +2126,18 @@ select:focus {
     text-align: left;
   }
 }
+.beta-enrollment {
+  margin-top: 12px;
+}
+
+.beta-enrollment .checkbox {
+  margin: 12px 0;
+}
+
+.backup-location {
+  margin: 12px 0;
+}
+
+#beta-summary {
+  overflow-wrap: anywhere;
+}

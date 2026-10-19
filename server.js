@@ -399,6 +399,15 @@ function parseRequestBody(request) {
 }
 
 async function handleApi(request, response) {
+  // Web preview has no volume identity, confirmed task pause or v2 worker lane.
+  // Never let preview configuration or simulation impersonate enrollment.
+  const unsupportedBetaRoute = ["/api/enroll-incremental", "/api/open-backup-location"].includes(request.url);
+  const previewConfig = readJson(CONFIG_PATH);
+  const selectedFormat = previewConfig.destination?.backupFormatVersion ?? previewConfig.incrementalFormatVersion ?? 1;
+  if (unsupportedBetaRoute || (selectedFormat !== 1 && request.method === "POST")) {
+    sendJson(response, 409, { error: "Incremental actions are unavailable in web preview. Use the installed Windows app." });
+    return;
+  }
   if (request.method === "GET" && request.url === "/api/state") {
     sendJson(response, 200, {
       config: readJson(CONFIG_PATH),
@@ -410,6 +419,11 @@ async function handleApi(request, response) {
 
   if (request.method === "POST" && request.url === "/api/config") {
     const config = await parseRequestBody(request);
+    if ((config.destination?.backupFormatVersion ?? config.incrementalFormatVersion ?? 1) !== 1 || config.betaTest ||
+        (config.knownDestinations || []).some(destination => (destination.backupFormatVersion ?? 1) !== 1 || destination.volumeUniqueId || destination.manualBetaConfirmedAt)) {
+      sendJson(response, 409, { error: "Incremental enrollment cannot be saved in preview. Use the installed Windows app." });
+      return;
+    }
     writeJson(CONFIG_PATH, config);
     sendJson(response, 200, {
       config,
@@ -520,8 +534,8 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.url === "/app.js") {
-      serveFile(response, path.join(ROOT, "app.js"), "application/javascript; charset=utf-8");
+    if (request.url === "/app.js" || request.url === "/backup-view.js") {
+      serveFile(response, path.join(ROOT, request.url.slice(1)), "application/javascript; charset=utf-8");
       return;
     }
 
