@@ -15,14 +15,21 @@ function New-Repository($f,[string]$Name='Catalog PC',[string]$Id=([guid]::NewGu
   if (-not $Foreign) { Write-DataSafeJson (Join-Path $f.Root incremental-computer-id.json) ([PSCustomObject]@{formatVersion=1;computerId=$Id}) }
   return Initialize-DataSafeRepository $f.Destination $Name $Id
 }
-function Add-Backup($f,$repo,[switch]$Pending) {
+function Add-Backup($f,$repo,[switch]$Pending,[switch]$RollbackRetained) {
   $pointer=Read-DataSafeCurrentPointer $repo
   $old=if ($null -ne $pointer) { Read-DataSafeManifest (Join-Path $repo.MetadataRoot $pointer.manifestPath) } else { $null }
   $manifest=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;relativeDestination=@('Docs')})
   $plan=New-DataSafeIncrementalPlan $repo $old $manifest (Get-DataSafeDestinationCapabilities $repo.Root) (Get-DataSafeFreeBytes $repo.Root)
   $tx=New-DataSafeTransaction $repo $plan; $null=Stage-DataSafeTransaction $tx
   $owner=Get-DataSafeTransactionOwner $tx
-  if (-not $Pending) { $null=Invoke-DataSafeTransaction $tx }
+  if ($RollbackRetained) {
+    # Real rollback with a Windows sharing violation during qualified cleanup:
+    # reads/hashing remain allowed, deletion does not. No journal is fabricated.
+    $staged=@($tx.operations | Where-Object {$null -ne $_.stagedPath})[0].stagedPath
+    $handle=[IO.File]::Open($staged,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    try { $result=Undo-DataSafeTransaction $tx } finally { $handle.Dispose() }
+    Assert-True ($result.FinalState -ceq 'rolledBack' -and @($result.Warnings | Where-Object {$_.Code -ceq 'StagingCleanupFailed'}).Count -eq 1) 'Qualified rollback did not retain staging after sharing violation.'
+  } elseif (-not $Pending) { $null=Invoke-DataSafeTransaction $tx }
   if ($null -ne $owner.Handle) { Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath); $owner.Handle=$null }
   return $tx
 }
@@ -47,6 +54,10 @@ try {
     $resolved=Invoke-AppCatalog $f ResolveLocation $repo.ComputerId $location.locationId
     Assert-True ($resolved.path -ceq $repo.LatestRoot) 'Wrong private resolved path.'
     $null=Invoke-AppCatalog $f ResolveLocation $repo.ComputerId '..\..\Windows' 1
+    $latestFile=Join-Path $repo.LatestRoot 'Docs/a.txt'
+    [IO.File]::Delete($latestFile); $null=[IO.Directory]::CreateDirectory($latestFile)
+    $c=Read-Unchanged $f
+    Assert-True ($c.state -ceq 'invalid' -and -not $c.repositories[0].capabilities.manualBackup) 'Committed Latest type substitution was accepted.'
   }
   Test-Case 'same-name foreign PC and legacy layout coexist without adoption' {
     $f=New-Fixture; $repo=New-Repository $f; $null=Add-Backup $f $repo
@@ -85,6 +96,40 @@ try {
     $f=New-Fixture; $repo=New-Repository $f; $null=Add-Backup $f $repo
     [IO.File]::WriteAllText((Join-Path $f.Source a.txt),'changed'); $null=Add-Backup $f $repo -Pending
     $c=Read-Unchanged $f; Assert-True ($c.state -ceq 'recovery-required' -and $c.repositories[0].capabilities.manualBackup -and -not $c.repositories[0].capabilities.browse) 'Pending state fabricated complete backup or prevented explicit recovery.'
+  }
+  foreach ($transition in @('file-to-directory','directory-to-file')) {
+    foreach ($pendingState in @('prepared','rolledBack-retained')) {
+      Test-Case "pending type replacement $transition $pendingState preserves owned recovery" {
+        $f=New-Fixture; $repo=New-Repository $f
+        $sourcePath=Join-Path $f.Source a.txt
+        if ($transition -ceq 'directory-to-file') {
+          [IO.File]::Delete($sourcePath); $null=[IO.Directory]::CreateDirectory((Join-Path $sourcePath nested))
+          [IO.File]::WriteAllText((Join-Path $sourcePath 'nested/child.txt'),'old nested content')
+        }
+        $committed=Add-Backup $f $repo
+        if ($transition -ceq 'file-to-directory') {
+          [IO.File]::Delete($sourcePath); $null=[IO.Directory]::CreateDirectory((Join-Path $sourcePath nested))
+          [IO.File]::WriteAllText((Join-Path $sourcePath 'nested/child.txt'),'new nested content')
+        } else {
+          # The exact fixture-owned files/directories are removed bottom-up.
+          [IO.File]::Delete((Join-Path $sourcePath 'nested/child.txt'))
+          [IO.Directory]::Delete((Join-Path $sourcePath nested)); [IO.Directory]::Delete($sourcePath)
+          [IO.File]::WriteAllText($sourcePath,'new replacement file')
+        }
+        $tx=Add-Backup $f $repo -Pending -RollbackRetained:($pendingState -ceq 'rolledBack-retained')
+        $journal=Read-DataSafeTransaction (Join-Path $repo.TransactionRoot ($tx.transactionId+'.json'))
+        $expectedState=if ($pendingState -ceq 'prepared') {'prepared'} else {'rolledBack'}
+        Assert-True ($journal.state -ceq $expectedState) 'Fixture did not reach qualified pending state.'
+        $latestPath=Join-Path $repo.LatestRoot 'Docs/a.txt'
+        Assert-True ((Test-DataSafeDirectory $latestPath) -eq ($transition -ceq 'directory-to-file')) 'Fixture no longer has the old committed object type.'
+        $c=Read-Unchanged $f; $r=$c.repositories[0]
+        Assert-True ($c.state -ceq 'recovery-required' -and $r.state -ceq 'recovery-required' -and $r.capabilities.manualBackup -and -not $r.capabilities.browse) "Valid $transition $pendingState blocked owned recovery: $($c.state)"
+        Assert-True ($r.currentTransactionId -ceq $committed.transactionId) 'Pending projection replaced committed authority.'
+        [IO.File]::WriteAllText((Join-Path $repo.LatestRoot unowned.txt),'unknown')
+        $c=Read-Unchanged $f
+        Assert-True ($c.state -ceq 'invalid' -and -not $c.repositories[0].capabilities.manualBackup) 'Pending allowed-type union admitted an unknown path.'
+      }
+    }
   }
   foreach ($name in @('.transaction-0123456789abcdef0123456789abcdef.tmp','.datasafe-0123456789abcdef0123456789abcdef.tmp')) {
     Test-Case "exact abandoned writer temporary $name warns without becoming authority" {

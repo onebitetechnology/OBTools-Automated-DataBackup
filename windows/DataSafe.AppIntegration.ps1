@@ -186,12 +186,21 @@ function Get-DataSafeAppRepositoryProjection($Repository,$CurrentComputerId) {
     $recovering=$evidence.Pending.Count -gt 0 -or (Test-DataSafeFile (Join-Path $repo.MetadataRoot operation.lock))
     if (Test-DataSafeDirectory (Join-Path $repo.MetadataRoot operation.lock)) { throw 'Operation lock is not an ordinary file.' }
     $latestPaths=Get-DataSafeTransactionTreePaths $repo $manifest
+    # Committed paths have exactly one allowed type. During recovery the old
+    # object can legitimately remain while the current manifest describes its
+    # replacement, so retain both qualified types instead of overwriting one.
+    # The qualified path helper includes structural ancestor directories too.
+    foreach ($path in @($latestPaths.Keys)) { $latestPaths[$path]=@($latestPaths[$path].entryType) }
     if ($recovering) {
       foreach ($item in $evidence.Pending) {
         foreach ($candidate in @($item.Transaction.previousManifest,$item.Transaction.currentManifest)) {
           if ($null -ne $candidate) {
             $paths=Get-DataSafeTransactionTreePaths $repo $candidate
-            foreach ($path in $paths.Keys) { $latestPaths[$path]=$paths[$path] }
+            foreach ($path in $paths.Keys) {
+              $types=@($paths[$path].entryType)
+              if ($latestPaths.ContainsKey($path)) { $types+=@($latestPaths[$path]) }
+              $latestPaths[$path]=$types
+            }
           }
         }
       }
@@ -200,8 +209,8 @@ function Get-DataSafeAppRepositoryProjection($Repository,$CurrentComputerId) {
     # user content or advertise an integrity pass. Unknown/reparse paths fail.
     foreach ($path in @(Get-DataSafeAppTreeEntries $repo.LatestRoot)) {
       if (-not $latestPaths.ContainsKey($path)) { throw 'Unknown latest-tree object.' }
-      $entry=$latestPaths[$path]
-      if (($entry.entryType -ceq 'directory') -ne (Test-DataSafeDirectory $path)) { throw 'Latest-tree object type changed.' }
+      $actualType=if (Test-DataSafeDirectory $path) {'directory'} else {'file'}
+      if ($actualType -cnotin $latestPaths[$path]) { throw 'Latest-tree object type changed.' }
     }
     if (-not $recovering) {
       foreach ($path in $latestPaths.Keys) {
