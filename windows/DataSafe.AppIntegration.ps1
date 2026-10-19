@@ -1,7 +1,18 @@
 Set-StrictMode -Version Latest
 
+function Get-DataSafeAppDestinationRecord($Config) {
+  $property = $null
+  if ($null -ne $Config) { $property = $Config.PSObject.Properties['destination'] }
+  if ($null -eq $property) { return $null }
+  # Validate the raw deserialized JSON container before any pipeline can
+  # unwrap a one-item array. Only an absent property permits root fallback.
+  $destination = $property.Value
+  if ($destination -isnot [PSCustomObject]) { throw 'Backup destination must be an object.' }
+  return $destination
+}
+
 function Get-DataSafeBackupFormat($Config) {
-  $destination = Get-DataSafeProperty $Config 'destination'
+  $destination = Get-DataSafeAppDestinationRecord $Config
   $property = if ($null -ne $destination) { $destination.PSObject.Properties['backupFormatVersion'] } else { $null }
   if ($null -eq $property -and $null -ne $Config) { $property = $Config.PSObject.Properties['incrementalFormatVersion'] }
   if ($null -eq $property) { return 1 }
@@ -18,7 +29,7 @@ function Get-DataSafeBackupFormat($Config) {
 
 function Assert-DataSafeAppDestination($Config, [string]$ActualVolumeUniqueId, [bool]$ManualBetaRun) {
   $format = Get-DataSafeBackupFormat $Config
-  $destination = Get-DataSafeProperty $Config 'destination'
+  $destination = Get-DataSafeAppDestinationRecord $Config
   if ($format -ne 2 -or $null -eq $destination -or $null -eq $destination.PSObject.Properties['backupFormatVersion']) { return }
   if (-not $ManualBetaRun) { throw 'Explicit incremental beta destinations require a manual app invocation.' }
   # Raw values must stay raw: the general pipeline getter unwraps singleton

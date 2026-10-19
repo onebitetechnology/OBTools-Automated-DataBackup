@@ -17,6 +17,17 @@ test('format rejects coercion', () => {
   }
 });
 
+test('format rejects malformed destination containers without hiding root fallback', () => {
+  for (const destination of [[], [{}], [{ backupFormatVersion: 2 }], null, undefined, 'F:', 2, true, new Date(0)]) {
+    for (const root of [{}, { incrementalFormatVersion: 2 }]) {
+      assert.throws(() => getBackupFormat({ ...root, destination }), BackupPolicyError);
+    }
+  }
+  assert.equal(getBackupFormat({}), 1);
+  assert.equal(getBackupFormat({ incrementalFormatVersion: 2 }), 2);
+  assert.equal(getBackupFormat({ incrementalFormatVersion: 2, destination: {} }), 2);
+});
+
 test('destination metadata round trips without changing existing choices', () => {
   const record = { id: '9ea0c9e4-92d1-4819-9191-205f36a837ac', driveLetter: 'F:',
     baseFolder: 'Unchanged Legacy Folder', backupFormatVersion: 2,
@@ -29,7 +40,7 @@ test('destination metadata round trips without changing existing choices', () =>
 });
 
 test('destination rejects malformed metadata', () => {
-  for (const record of [null, [], 'F:', { backupFormatVersion: '2' },
+  for (const record of [null, [], 'F:', new Date(0), { backupFormatVersion: '2' },
     { volumeUniqueId: null }, { volumeUniqueId: ' ' }, { volumeUniqueId: 12 },
     { manualBetaConfirmedAt: null }, { manualBetaConfirmedAt: 'yesterday' },
     { manualBetaConfirmedAt: '2026-02-30T00:00:00Z' },

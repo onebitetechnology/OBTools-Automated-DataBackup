@@ -34,7 +34,7 @@ function New-Fixture {
   Write-DataSafeJson $f.StatusPath ([PSCustomObject]@{lastBackupAt='2026-01-01T00:00:00Z';lastBackupResult='success';lastBackupMessage='previous committed';destinationStatus='Connected';recentSnapshots=@()})
   return $f
 }
-function Invoke-Worker($Fixture,[int]$ExpectedExit=0,[string]$Extra='manual') {
+function Invoke-Worker($Fixture,[int]$ExpectedExit=0,[string]$Extra='manual',[switch]$Legacy) {
   Write-DataSafeJson $Fixture.ConfigPath $Fixture.Config
   $out=Join-Path $Fixture.Root out.txt; $err=Join-Path $Fixture.Root err.txt
   $args='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ConfigPath "{1}" -StatusPath "{2}"' -f (Join-Path $Fixture.Bin 'backup-engine.ps1'),$Fixture.ConfigPath,$Fixture.StatusPath
@@ -42,11 +42,17 @@ function Invoke-Worker($Fixture,[int]$ExpectedExit=0,[string]$Extra='manual') {
   $p=Start-Process (Get-Process -Id $PID).Path -WindowStyle Hidden -ArgumentList $args -Wait -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
   Assert-True ($p.ExitCode -eq $ExpectedExit) "Worker exit $($p.ExitCode), expected $ExpectedExit : $([IO.File]::ReadAllText($err))"
   $lines=@([IO.File]::ReadAllLines($out)); $results=@($lines | Where-Object { $_.StartsWith('__OB_RESULT__:') })
+  if ($Legacy) {
+    Assert-True ($results.Count -eq 0) 'Ordinary legacy call unexpectedly entered v2 app protocol.'
+    return Read-DataSafeJson $Fixture.StatusPath
+  }
   Assert-True ($results.Count -eq 1) 'Expected one fresh app result marker.'
   $r=$results[0].Substring(14) | ConvertFrom-Json
   Assert-True ($r.schema -ceq 'datasafe.app-backup-result' -and $r.formatVersion -eq 1 -and $r.backupFormatVersion -eq 2) 'Incorrect result schema.'
-  if ($Fixture.Config.destination.id -is [string]) { Assert-True ($r.destinationId -ceq $Fixture.Config.destination.id) 'Uncorrelated destination.' }
-  else { Assert-True ($null -eq $r.destinationId) 'Malformed destination identity was returned as usable.' }
+  $expectedDestinationId=$null
+  $rawDestination=$Fixture.Config.PSObject.Properties['destination'].Value
+  if ($rawDestination -is [PSCustomObject] -and $null -ne $rawDestination.PSObject.Properties['id'] -and $rawDestination.id -is [string]) { $expectedDestinationId=$rawDestination.id }
+  Assert-True ($r.destinationId -ceq $expectedDestinationId) 'Uncorrelated or malformed destination identity.'
   if ($Extra -eq 'manual') { Assert-True ($r.operationId -ceq $Fixture.OperationId) 'Uncorrelated operation.' }
   return $r
 }
@@ -74,6 +80,71 @@ try {
     Assert-True ($r.outcome -ceq 'blocked' -and $null -eq $r.transactionId -and $null -eq $r.committedAt) 'Wrong-volume outcome not safely blocked.'
     Assert-True ((Get-ByteTree $f.Drive) -ceq $before) 'Wrong volume wrote destination bytes.'
     Assert-True (-not [IO.File]::Exists((Join-Path $f.Root 'incremental-computer-id.json'))) 'Wrong volume created identity.'
+  }
+  Test-Case 'MalformedDestinationContainersRejectedWithFallbackParity' {
+    . (Join-Path $WindowsRoot 'DataSafe.AppIntegration.ps1')
+    foreach ($json in @('{"destination":[]}', '{"destination":[{}]}', '{"destination":[{"backupFormatVersion":2}]}',
+        '{"destination":null}', '{"destination":"F:"}', '{"destination":2}', '{"destination":true}')) {
+      $config=$json | ConvertFrom-Json
+      Assert-Throws { Get-DataSafeBackupFormat $config }
+      $config | Add-Member incrementalFormatVersion 2
+      Assert-Throws { Get-DataSafeBackupFormat $config }
+      Assert-Throws { Assert-DataSafeAppDestination $config 'fixture-volume' $true }
+    }
+    Assert-True ((Get-DataSafeBackupFormat ([PSCustomObject]@{})) -eq 1) 'Absent destination did not retain legacy fallback.'
+    Assert-True ((Get-DataSafeBackupFormat ([PSCustomObject]@{incrementalFormatVersion=2})) -eq 2) 'Absent destination hid root fallback.'
+  }
+  Test-Case 'MalformedDestinationContainerBeforeWrites' {
+    $f=New-Fixture; $f.Config.destination=@($f.Config.destination)
+    $before=[IO.File]::ReadAllText($f.StatusPath); $r=Invoke-Worker $f 1
+    Assert-True ($r.outcome -ceq 'blocked' -and $null -eq $r.destinationId) 'Malformed container was treated as enrolled destination.'
+    Assert-True ([IO.File]::ReadAllText($f.StatusPath) -ceq $before) 'Malformed destination overwrote committed status.'
+    Assert-True ((Get-ByteTree $f.Drive) -ceq '') 'Malformed destination wrote backup content.'
+  }
+  Test-Case 'LegacyFormatRejectsV2AppRequestBeforeLockOrWrites' {
+    foreach ($format in @('absent','explicit-legacy')) {
+      foreach ($held in @($true,$false)) {
+        $f=New-Fixture
+        if ($format -eq 'absent') { $f.Config.destination.PSObject.Properties.Remove('backupFormatVersion') }
+        else { $f.Config.destination.backupFormatVersion=1; $f.Config | Add-Member incrementalFormatVersion 2 }
+        $before=[IO.File]::ReadAllText($f.StatusPath); $beforeTree=Get-ByteTree $f.Drive
+        $handle=$null
+        if ($held) { $handle=Acquire-DataSafeOperationLock ($f.StatusPath+'.lock') }
+        try { $r=Invoke-Worker $f 1 ('-ManualBetaRun -AppOperationId '+$f.OperationId+' -AllowNewDestination') }
+        finally { if ($null -ne $handle) { Release-DataSafeOperationLock $handle ($f.StatusPath+'.lock') } }
+        Assert-True ($r.outcome -ceq 'blocked' -and $r.operationId -ceq $f.OperationId -and $null -eq $r.transactionId -and $null -eq $r.committedAt) 'Legacy app request entered success/busy/failure execution.'
+        Assert-True ([IO.File]::ReadAllText($f.StatusPath) -ceq $before) 'V2 app request changed prior legacy status.'
+        Assert-True ((Get-ByteTree $f.Drive) -ceq $beforeTree) 'V2 app request created legacy snapshot/destination metadata.'
+        Assert-True (-not [IO.File]::Exists((Join-Path $f.Root 'incremental-computer-id.json'))) 'V2 app request created identity on legacy selection.'
+        if (-not $held) { Assert-True (-not [IO.File]::Exists(($f.StatusPath+'.lock'))) 'Rejected protocol request acquired status lock.' }
+      }
+    }
+  }
+  Test-Case 'OrdinaryLegacyCallsStillCommitWithoutAppProtocol' {
+    foreach ($format in @('absent','explicit-legacy')) {
+      $f=New-Fixture
+      if ($format -eq 'absent') { $f.Config.destination.PSObject.Properties.Remove('backupFormatVersion') }
+      else { $f.Config.destination.backupFormatVersion=1; $f.Config | Add-Member incrementalFormatVersion 2 }
+      $s=Invoke-Worker $f 0 '-AllowNewDestination' -Legacy
+      Assert-True ($s.lastBackupResult -ceq 'success') 'Ordinary legacy worker was blocked.'
+      $snapshots=@(Get-DataSafeCompletedSnapshots (Join-Path $f.Drive 'Legacy/snapshots'))
+      Assert-True ($snapshots.Count -eq 1) 'Ordinary legacy invocation lost its completed snapshot.'
+      Assert-True ([IO.File]::ReadAllText((Join-Path $snapshots[0].FullName 'Docs/a.txt')) -ceq 'original-a') 'Ordinary legacy content changed.'
+      Assert-True (-not [IO.Directory]::Exists((Join-Path $f.Drive 'DataSafe Backups'))) 'Ordinary legacy invocation created v2 repository.'
+    }
+  }
+  Test-Case 'EitherV2AppSwitchRejectsLegacyBeforeUuidOrLockHandling' {
+    foreach ($request in @('operation-only','manual-only')) {
+      $f=New-Fixture; $f.Config.destination.backupFormatVersion=1
+      $before=[IO.File]::ReadAllText($f.StatusPath)
+      $extra=if ($request -eq 'operation-only') { '-AppOperationId '+$f.OperationId } else { '-ManualBetaRun' }
+      $r=Invoke-Worker $f 1 $extra
+      Assert-True ($r.outcome -ceq 'blocked' -and $r.message -match 'effective backup format 2') 'Single v2 switch did not enforce format before execution.'
+      if ($request -eq 'operation-only') { Assert-True ($r.operationId -ceq $f.OperationId) 'Single-switch request lost available operation correlation.' }
+      else { Assert-True ($null -eq $r.operationId) 'Missing operation UUID was manufactured.' }
+      Assert-True ([IO.File]::ReadAllText($f.StatusPath) -ceq $before -and (Get-ByteTree $f.Drive) -ceq '') 'Single v2 switch wrote legacy state.'
+      Assert-True (-not [IO.File]::Exists(($f.StatusPath+'.lock'))) 'Single-switch rejection acquired status lock.'
+    }
   }
   Test-Case 'ExplicitV2RequiresManualConfirmation' {
     foreach ($mode in @('confirmation','switch','operation','invalid-operation','binding','invalid-date','binding-array','confirmation-array','id-array')) {

@@ -6,10 +6,16 @@ class BackupPolicyError extends Error {
 }
 
 const owns = (value, name) => value != null && Object.hasOwn(value, name);
+const isDestinationRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 
 function getBackupFormat(config = {}) {
-  const value = owns(config.destination, 'backupFormatVersion')
-    ? config.destination.backupFormatVersion
+  const destination = owns(config, 'destination') ? config.destination : undefined;
+  if (owns(config, 'destination') && !isDestinationRecord(destination)) {
+    throw new BackupPolicyError('Backup destination must be an object.');
+  }
+  const value = owns(destination, 'backupFormatVersion')
+    ? destination.backupFormatVersion
     : owns(config, 'incrementalFormatVersion') ? config.incrementalFormatVersion : 1;
   if (typeof value !== 'number' || (value !== 1 && value !== 2)) {
     throw new BackupPolicyError('Unsupported backup format version; expected numeric 1 or 2.');
@@ -25,7 +31,7 @@ function isUtcTimestamp(value) {
 }
 
 function normalizeBackupDestination(record) {
-  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+  if (!isDestinationRecord(record)) {
     throw new BackupPolicyError('Backup destination must be an object.');
   }
   if (owns(record, 'backupFormatVersion')) getBackupFormat({ destination: record });

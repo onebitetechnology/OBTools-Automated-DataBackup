@@ -684,7 +684,7 @@ $appPreflight = $true
 try {
   $config = Read-Json $ConfigPath
   $configForNotification = $config
-  $destination = Get-DataSafeProperty $config 'destination'
+  $destination = Get-DataSafeAppDestinationRecord $config
   if ($null -ne $destination -and $null -ne $destination.PSObject.Properties['id']) {
     $script:appDestinationId = $destination.PSObject.Properties['id'].Value
   }
@@ -692,6 +692,9 @@ try {
     $destination.backupFormatVersion -is [ValueType] -and $destination.backupFormatVersion -eq 2
   if ($script:explicitAppV2) { $script:appRequest = $true }
   $script:effectiveFormat = Get-DataSafeBackupFormat $config
+  if ($script:appRequest -and $script:effectiveFormat -ne 2) {
+    throw 'The app backup protocol requires effective backup format 2; legacy backups require an ordinary legacy invocation.'
+  }
   if ($script:explicitAppV2 -or $script:appRequest) {
     $operationUuid = [guid]::Empty
     if (-not [guid]::TryParseExact($AppOperationId, 'D', [ref]$operationUuid) -or $operationUuid -eq [guid]::Empty) {
