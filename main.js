@@ -5,6 +5,9 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 const { inspectSnapshotsAtBaseRoot } = require("./backup-safety");
+const { getBackupFormat, normalizeBackupDestination } = require("./backup-format");
+const { createBackupCatalogReader } = require("./backup-catalog");
+const { createBackupService } = require("./backup-service");
 
 function mimeTypeForExtension(extension) {
   switch (String(extension || "").toLowerCase()) {
@@ -168,7 +171,7 @@ function normalizeDestinationRecord(record = {}, fallbackBaseFolder = "DataSafe 
     ? fallbackBaseFolder
     : record.baseFolder;
 
-  return {
+  return normalizeBackupDestination({
     id: String(record.id || crypto.randomUUID()),
     installId: String(record.installId || installId || ""),
     mode: String(record.mode || "driveLetter"),
@@ -179,8 +182,10 @@ function normalizeDestinationRecord(record = {}, fallbackBaseFolder = "DataSafe 
     label: String(record.label || "").trim(),
     lastSeenAt: record.lastSeenAt || null,
     lastSnapshotAt: record.lastSnapshotAt || null,
-    lastSnapshotName: record.lastSnapshotName || null
-  };
+    lastSnapshotName: record.lastSnapshotName || null,
+    ...Object.fromEntries(['backupFormatVersion', 'volumeUniqueId', 'manualBetaConfirmedAt']
+      .filter(key => Object.hasOwn(record, key)).map(key => [key, record[key]]))
+  });
 }
 
 function normalizeKnownDestinations(entries = [], currentDestination = null, installId = "") {
@@ -381,7 +386,7 @@ function normalizeConfigForMain(config) {
     updates: {
       channel: sanitizeUpdateChannel(config?.updates?.channel)
     },
-    jobs: normalizeBackupJobs(config?.jobs || []),
+    jobs: getBackupFormat(config) === 2 ? (config?.jobs || []) : normalizeBackupJobs(config?.jobs || []),
     knownDestinations: normalizeKnownDestinations(config?.knownDestinations || [], {
       ...existingDestination,
       id: existingDestination.id || crypto.randomUUID(),
@@ -532,7 +537,8 @@ function readReconciledState({ writeChanges = false } = {}) {
   const { configPath, statusPath } = dataPaths();
   const rawConfig = readJson(configPath);
   let config = normalizeConfigForMain(rawConfig);
-  const syncedDestinations = syncKnownDestinationsInConfig(config);
+  const syncedDestinations = getBackupFormat(config) === 2
+    ? { config, inspected: [] } : syncKnownDestinationsInConfig(config);
   config = syncedDestinations.config;
 
   if (writeChanges && JSON.stringify(rawConfig) !== JSON.stringify(config)) {
@@ -620,6 +626,15 @@ function automationSettingsChanged(previousConfig, nextConfig) {
 }
 
 function summarizeProtectionForTray(config, status) {
+  if (getBackupFormat(config) === 2) {
+    const attempt = status.appBackups?.[config.destination.id]?.lastAttempt;
+    if (attempt && attempt.outcome !== 'committed') {
+      return { level: 'warning', title: 'Incremental Beta Needs Attention', message: attempt.message || 'Review the latest manual backup attempt.' };
+    }
+    return { level: 'info', title: 'Incremental Manual Beta',
+      message: attempt?.outcome === 'committed' ? 'Manual backup confirmed by the repository catalog. Automatic protection is paused.'
+        : 'Manual testing only. Refresh the incremental catalog to inspect this destination.' };
+  }
   const staleDays = Math.max(Number(config?.reminders?.staleDays || 7) || 7, 1);
   const message = String(status?.lastBackupMessage || "").trim();
 
@@ -1066,6 +1081,9 @@ function checkDestinationContinuity(config, status, forceNewDestination = false)
 function inspectKnownDestinations(config) {
   const known = normalizeKnownDestinations(config?.knownDestinations || [], config?.destination, config?.installId);
   return known.map((destination) => {
+    if (getBackupFormat({ destination }) === 2) {
+      return { ...destination, connected: false, snapshotCount: 0, displayLabel: destinationDisplayLabel(destination) };
+    }
     const rootPath = resolveDestinationRoot(destination);
     const baseRoot = resolveDestinationBasePath(destination);
     const connected = Boolean(rootPath && fs.existsSync(rootPath));
@@ -1101,7 +1119,9 @@ function syncKnownDestinationsInConfig(config) {
     selectedPath: entry.selectedPath || "",
     lastSeenAt: entry.connected ? new Date().toISOString() : entry.lastSeenAt || null,
     lastSnapshotAt: entry.lastSnapshotAt || null,
-    lastSnapshotName: entry.lastSnapshotName || null
+    lastSnapshotName: entry.lastSnapshotName || null,
+    ...Object.fromEntries(['backupFormatVersion', 'volumeUniqueId', 'manualBetaConfirmedAt']
+      .filter(key => Object.hasOwn(entry, key)).map(key => [key, entry[key]]))
   }));
 
   return {
@@ -1189,6 +1209,16 @@ function snapshotCatalogEntry(snapshot) {
 }
 
 function reconcileStatusWithDisk(config, status) {
+  if (getBackupFormat(config) === 2) {
+    // Legacy snapshot paths/status can never stand in for v2 commit evidence.
+    const saved = status.appBackups?.[config.destination.id];
+    return { ...defaultStatus(), ...status, recentSnapshots: [], snapshotCatalog: [],
+      lastBackupAt: saved?.lastCommitted?.committedAt ?? null,
+      lastBackupResult: saved?.lastAttempt?.outcome === 'committed' ? 'success'
+        : saved?.lastAttempt?.outcome === 'committed-with-warning' ? 'warning'
+        : saved?.lastAttempt ? 'error' : null,
+      lastBackupMessage: saved?.lastAttempt?.message || 'Incremental beta: refresh the catalog to inspect this destination.' };
+  }
   const baseStatus = defaultStatus();
   const snapshotInfo = inspectSnapshots(config);
   const snapshotNames = snapshotInfo.snapshots.map((entry) => entry.name);
@@ -1701,7 +1731,8 @@ function simulateAction(scriptName, extraScriptArgs = []) {
   return { ok: true, message: `Preview mode: simulated ${scriptName}.` };
 }
 
-function runPowerShell(scriptName, extraScriptArgs = []) {
+function runPowerShell(scriptName, extraScriptArgs = [], options = {}) {
+  if (['restore-snapshot.ps1', 'verify-backup-integrity.ps1', 'install-scheduled-backup.ps1'].includes(scriptName)) assertLegacyAction();
   return new Promise((resolve) => {
     if (process.platform !== "win32") {
       resolve({
@@ -1711,7 +1742,8 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
       return;
     }
 
-    const { configPath, statusPath } = dataPaths();
+    const { configPath: persistedConfigPath, statusPath } = dataPaths();
+    const configPath = options.configPath || persistedConfigPath;
     const scriptPath = path.join(WINDOWS_DIR, scriptName);
     writeLauncherLog(`Running ${scriptName} with script path ${scriptPath}`);
     const args = [
@@ -1768,7 +1800,7 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
           const rawPayload = line.slice(progressPrefix.length);
           try {
             const progress = JSON.parse(rawPayload);
-            publishBackupProgress(progress);
+            (options.onProgress || publishBackupProgress)(progress);
             writeLauncherLog(`Backup progress from ${scriptForLog}: ${rawPayload}`);
           } catch (error) {
             writeLauncherLog(`Failed to parse backup progress from ${scriptForLog}: ${error.message}`);
@@ -1799,7 +1831,7 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
       if (line.startsWith(progressPrefix)) {
         const rawPayload = line.slice(progressPrefix.length);
         try {
-          publishBackupProgress(JSON.parse(rawPayload));
+          (options.onProgress || publishBackupProgress)(JSON.parse(rawPayload));
         } catch (_error) {
           // Ignore malformed trailing progress lines.
         }
@@ -1942,6 +1974,91 @@ function runPowerShell(scriptName, extraScriptArgs = []) {
 
     tryShell(0);
   });
+}
+
+// The inspector and worker resolve local identity beside ConfigPath. Adjacent,
+// exclusively-created shadows freeze proposed inputs without relocating that
+// identity or rewriting the persisted settings. Task ownership uses the real
+// ConfigPath instead (its exact command line is part of the fingerprint).
+async function withConfigSnapshot(config, action) {
+  const shadow = path.join(dataPaths().userDataDir, `.app-config-${crypto.randomUUID()}.json`);
+  fs.writeFileSync(shadow, JSON.stringify(config), { encoding: 'utf8', flag: 'wx' });
+  try { return await action(shadow); }
+  finally { fs.unlinkSync(shadow); }
+}
+
+async function inspectAppCatalog(action, config, identifiers = {}) {
+  return withConfigSnapshot(config, async configPath => {
+    const args = ['-Action', action];
+    if (identifiers.computerId) args.push('-ComputerId', identifiers.computerId);
+    if (identifiers.locationId) args.push('-LocationId', identifiers.locationId);
+    const result = await runPowerShell('inspect-backup-catalog.ps1', args, { configPath, onProgress: () => {} });
+    if (!result.ok || !result.data || result.data.error) throw new Error('Read-only catalog request could not be validated.');
+    return result.data;
+  });
+}
+
+const backupCatalogReader = createBackupCatalogReader({
+  runReadOnly: inspectAppCatalog,
+  inspectLegacy: async config => {
+    const info = inspectSnapshots(config);
+    const root = resolveDestinationRoot(config);
+    const connected = Boolean(root && fs.existsSync(root));
+    return { schema: 'datasafe.app-catalog', formatVersion: 1, destinationId: config.destination.id,
+      backupFormatVersion: 1, connection: connected ? 'connected' : 'disconnected', volumeMatch: null,
+      state: !connected ? 'disconnected' : info.snapshots.length ? 'committed' : 'empty',
+      checkedAtUtc: new Date().toISOString(), lastKnown: false, currentComputerId: null,
+      latestCommittedAt: info.snapshots[0]?.completedAt || null, repositories: [],
+      legacySnapshots: info.snapshots.map(snapshotCatalogEntry), warnings: [] };
+  }
+});
+
+const backupService = createBackupService({
+  readConfig: async () => readJson(dataPaths().configPath),
+  writeConfig: async config => writeJson(dataPaths().configPath, config),
+  readStatus: async () => readJson(dataPaths().statusPath),
+  writeStatus: async status => writeJson(dataPaths().statusPath, status),
+  catalogReader: backupCatalogReader,
+  getVolumeIdentity: config => inspectAppCatalog('InspectVolume', config),
+  taskControl: async (action, _config, confirmed) => {
+    const args = ['-Action', action, '-ScriptRoot', WINDOWS_DIR];
+    if (confirmed) args.push('-Confirmed');
+    const result = await runPowerShell('manage-beta-test-tasks.ps1', args, { onProgress: () => {} });
+    if (!result.ok || !result.data) throw new Error('Automation state could not be confirmed.');
+    return result.data;
+  },
+  runWorker: ({ config, operationId, manualBetaRun, allowNewDestination, onProgress }) => withConfigSnapshot(config, configPath => {
+    const args = ['-AppOperationId', operationId];
+    if (manualBetaRun) args.push('-ManualBetaRun');
+    if (allowNewDestination) args.push('-AllowNewDestination');
+    return runPowerShell('backup-engine.ps1', args, { configPath, onProgress });
+  }),
+  openPath: target => shell.openPath(target), publish: publishBackupProgress,
+  now: () => new Date(), newId: () => crypto.randomUUID()
+});
+
+function assertLegacyAction() {
+  if (getBackupFormat(readJson(dataPaths().configPath)) !== 1) {
+    throw new Error('This action is unsupported for the manual-only incremental beta.');
+  }
+}
+
+// Include legacy worker/settings side effects in the same main-process lane as
+// beta enrollment; otherwise an in-flight legacy installer could recreate
+// tasks after the beta pause had positively confirmed their absence.
+let mainBackupQueue = Promise.resolve();
+function withMainBackupOperation(action) {
+  const operation = mainBackupQueue.then(action);
+  mainBackupQueue = operation.catch(() => {});
+  return operation;
+}
+
+async function appStateWithBackup(projection) {
+  const { config, status, inspectedDestinations } = readReconciledState();
+  if (projection?.catalog && projection.catalog.destinationId !== config.destination.id) {
+    return appStateWithBackup(await backupService.getState());
+  }
+  return { config, status, meta: appMeta(), driveInsights: buildDriveInsights(config, inspectedDestinations), ...projection };
 }
 
 function createWindow() {
@@ -2276,24 +2393,20 @@ app.on("window-all-closed", () => {
   }
 });
 
-ipcMain.handle("state:get", () => {
-  const { config, status, inspectedDestinations } = readReconciledState({ writeChanges: true });
+ipcMain.handle("state:get", async () => {
+  const { config, status } = readReconciledState({ writeChanges: true });
   configureAutoUpdates(config);
   lastExternalStatusSignature = statusSignature(status);
   updateTrayStatus({ notify: true });
-  return {
-    config,
-    status,
-    meta: appMeta(),
-    driveInsights: buildDriveInsights(config, inspectedDestinations)
-  };
+  return appStateWithBackup(await backupService.getState());
 });
 
-ipcMain.handle("config:save", async (_event, config) => {
+ipcMain.handle("config:save", (_event, config) => withMainBackupOperation(async () => {
   const { configPath, statusPath } = dataPaths();
   const previousConfig = normalizeConfigForMain(readJson(configPath));
   const previousStatus = readJson(statusPath);
-  let normalizedConfig = normalizeConfigForMain(config);
+  const projection = await backupService.saveConfig(config);
+  let normalizedConfig = normalizeConfigForMain(readJson(configPath));
   const syncedDestinations = syncKnownDestinationsInConfig(normalizedConfig);
   normalizedConfig = syncedDestinations.config;
   writeJson(configPath, normalizedConfig);
@@ -2301,7 +2414,7 @@ ipcMain.handle("config:save", async (_event, config) => {
   let status = previousStatus;
   let automation = null;
 
-  if (automationSettingsChanged(previousConfig, normalizedConfig)) {
+  if (getBackupFormat(previousConfig) === 1 && getBackupFormat(normalizedConfig) === 1 && automationSettingsChanged(previousConfig, normalizedConfig)) {
     const automationEnabled = Boolean(normalizedConfig?.schedule?.enabled || normalizedConfig?.reminders?.enabled);
     const result = await runPowerShell("install-scheduled-backup.ps1");
     status = mergeStatus({
@@ -2324,9 +2437,14 @@ ipcMain.handle("config:save", async (_event, config) => {
     status,
     meta: appMeta(),
     automation,
-    driveInsights: buildDriveInsights(normalizedConfig, syncedDestinations.inspected)
+    driveInsights: buildDriveInsights(normalizedConfig, syncedDestinations.inspected),
+    ...projection
   };
-});
+}));
+
+ipcMain.handle('beta:enroll-incremental', (_event, request) => withMainBackupOperation(async () => appStateWithBackup(await backupService.enrollIncrementalTest(request))));
+ipcMain.handle('backups:refresh', async () => appStateWithBackup(await backupService.getState({ refresh: true })));
+ipcMain.handle('backups:open-location', (_event, request) => backupService.openLocation(request));
 
 ipcMain.handle("job:pick-path", async (_event, type) => {
   const properties = type === "file" ? ["openFile"] : ["openDirectory"];
@@ -2443,6 +2561,12 @@ ipcMain.handle("storage:analyze", async () => {
 });
 
 function restoreArguments(payload = {}, action = "restore") {
+  assertLegacyAction();
+  const config = readJson(dataPaths().configPath);
+  if ((payload.destinationId && payload.destinationId !== config.destination.id) ||
+      (Object.hasOwn(payload, 'backupFormatVersion') && payload.backupFormatVersion !== 1) || payload.locationId || payload.computerId) {
+    throw new Error('Restore destination must be the selected legacy catalog.');
+  }
   const snapshotName = String(payload.snapshotName || "").trim();
   const jobId = String(payload.jobId || "").trim();
   const mode = payload.mode === "alternate" ? "alternate" : "original";
@@ -2450,6 +2574,10 @@ function restoreArguments(payload = {}, action = "restore") {
 
   if (!snapshotName || !jobId) {
     throw new Error("Choose both a snapshot and a backup item before restoring.");
+  }
+  const snapshot = inspectSnapshots(config).snapshots.find(entry => entry.name === snapshotName);
+  if (!snapshot || !(snapshot.manifest?.jobs || []).some(job => job.id === jobId)) {
+    throw new Error('Choose a backup item from the current validated legacy snapshot catalog.');
   }
 
   if (mode === "alternate" && !targetPath) {
@@ -2480,6 +2608,7 @@ function restoreArguments(payload = {}, action = "restore") {
 }
 
 ipcMain.handle("restore:plan", async (_event, payload = {}) => {
+  assertLegacyAction();
   const request = restoreArguments(payload, "plan");
   writeLauncherLog(`IPC restore:plan received. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
   writeRuntimeLog(`Restore plan requested. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
@@ -2497,6 +2626,7 @@ ipcMain.handle("restore:plan", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("restore:run", async (_event, payload = {}) => {
+  assertLegacyAction();
   const request = restoreArguments(payload, "restore");
 
   writeLauncherLog(`IPC restore:run received. snapshot=${request.snapshotName} job=${request.jobId} mode=${request.mode}`);
@@ -2538,7 +2668,10 @@ ipcMain.handle("restore:run", async (_event, payload = {}) => {
   };
 });
 
-ipcMain.handle("backup:run", async (_event, options = {}) => {
+ipcMain.handle("backup:run", (_event, options = {}) => withMainBackupOperation(async () => {
+  if (getBackupFormat(readJson(dataPaths().configPath)) === 2) {
+    return appStateWithBackup(await backupService.runBackup({ allowNewDestination: Boolean(options.allowNewDestination || options.forceNewDestination) }));
+  }
   writeLauncherLog("IPC backup:run received.");
   writeRuntimeLog("Backup run requested.");
   const { configPath, statusPath } = dataPaths();
@@ -2633,7 +2766,7 @@ ipcMain.handle("backup:run", async (_event, options = {}) => {
     meta: appMeta(),
     driveInsights: buildDriveInsights(updatedConfig, inspectKnownDestinations(updatedConfig))
   };
-});
+}));
 
 ipcMain.handle("cloud:check", async () => {
   writeLauncherLog("IPC cloud:check received.");
@@ -2659,7 +2792,8 @@ ipcMain.handle("cloud:check", async () => {
   };
 });
 
-ipcMain.handle("automation:install", async () => {
+ipcMain.handle("automation:install", () => withMainBackupOperation(async () => {
+  assertLegacyAction();
   writeLauncherLog("IPC automation:install received.");
   writeRuntimeLog("Automation install requested.");
   const result = await runPowerShell("install-scheduled-backup.ps1");
@@ -2678,7 +2812,7 @@ ipcMain.handle("automation:install", async () => {
     status,
     meta: appMeta()
   };
-});
+}));
 
 ipcMain.handle("updates:check", async (_event, configOverride = null) => {
   configureAutoUpdates(configOverride);
