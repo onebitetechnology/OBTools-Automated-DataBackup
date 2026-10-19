@@ -238,9 +238,14 @@ function Get-DataSafeAppRepositoryProjection($Repository,$CurrentComputerId) {
     foreach ($item in $evidence.Transactions) {
       $tx=$item.Transaction
       foreach ($operation in $tx.operations) {
-        if ($null -eq $operation.historyPath -or $tx.state -ceq 'rolledBack') { continue }
+        if ($null -eq $operation.historyPath) { continue }
         $path=$operation.historyPath
-        $historyPaths[$path]=$operation.oldEntry.entryType
+        # Qualified rollback moves old files back but retains ordinary archive
+        # directories and their scaffolding. Admit only those exact journal-
+        # derived directories: never the old file leaf or arbitrary descendants.
+        if ($tx.state -cne 'rolledBack' -or $operation.oldEntry.entryType -ceq 'directory') {
+          $historyPaths[$path]=$operation.oldEntry.entryType
+        }
         $path=[IO.Path]::GetDirectoryName($path)
         while ($path.Length -gt $repo.HistoryRoot.Length) { $historyPaths[$path]='directory'; $path=[IO.Path]::GetDirectoryName($path) }
       }

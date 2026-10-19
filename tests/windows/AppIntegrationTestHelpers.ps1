@@ -95,8 +95,12 @@ function Invoke-AppFixtureInterruption([string]$Root,[ValidateSet('warning','rol
       # Windows sharing rules force qualified JournalFinalizationFailed recovery.
       $handle=[IO.File]::Open((Join-Path $repo.TransactionRoot ($tx.transactionId+'.json')),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
     } else {
-      # A process can terminate after durable rollback intent and before undo.
-      # Recovery must restore previous authority, not claim this as a backup.
+      # Reach the real archive mutation before durable rollback intent. Recovery
+      # must restore prior authority while leaving journal-owned history residue.
+      $stopped=$false
+      try { $null=Invoke-DataSafeTransaction $tx { param($boundary) if ($boundary.Phase -ceq 'archived') { throw 'app fixture interrupted after archive' } } }
+      catch { if ($_.Exception.Message -notmatch 'app fixture interrupted after archive') { throw }; $stopped=$true }
+      if (-not $stopped) { throw 'Archive interruption boundary was not reached.' }
       Set-DataSafeTransactionState $tx rollingBack
     }
     if ($null -ne $owner.Handle) { Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath); $owner.Handle=$null }

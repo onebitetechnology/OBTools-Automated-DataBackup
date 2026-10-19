@@ -32,7 +32,7 @@
       readOnly: !repository.ownedByCurrentComputer,
       locations: (repository.locations || []).map(location => ({
         locationId: location.locationId,
-        label: location.kind === "latest" ? "Latest Backup" : `Earlier Versions — ${location.kind === "deleted" ? "deleted files" : "changed files"}`,
+        label: location.kind === "latest" ? "Latest Backup" : `Earlier Versions — ${typeof location.label === "string" && location.label.trim() ? location.label : location.kind === "deleted" ? "deleted files" : "changed files"}`,
         partial: location.kind !== "latest",
         explanation: location.kind === "latest" ? "Complete latest committed backup." : "Partial changed/deleted-file history, not a complete snapshot of that date.",
         canOpen: connected && Boolean(repository.capabilities?.browse)
@@ -53,7 +53,12 @@
     } else if (attempt) {
       title = attempt.recoveryAction === "rolledBack" ? "Update rolled back" : attempt.outcome === "committed-with-warning" ? "Backup saved — attention needed" : attempt.outcome === "busy" ? "Backup already running" : "Backup needs attention";
       tone = attempt.outcome === "failed" ? "error" : "warning";
-      message = [attempt.message, ...(attempt.warnings || []), saved ? "The last confirmed Latest Backup is retained." : "No new commit has been confirmed."].filter(Boolean).join(" ");
+      const warnings = (attempt.warnings || []).map(warning => {
+        if (typeof warning === "string") return warning;
+        if (typeof warning?.Message === "string" && warning.Message.trim()) return warning.Message;
+        return typeof warning?.Code === "string" ? warning.Code : "";
+      });
+      message = [attempt.message, ...warnings, saved ? "The last confirmed Latest Backup is retained." : "No new commit has been confirmed."].filter(Boolean).join(" ");
     }
     if (!connected) {
       title = current?.connection === "disconnected" || current?.lastKnown ? "Backup drive disconnected" : "Backup catalog needs attention";

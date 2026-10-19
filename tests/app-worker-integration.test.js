@@ -11,6 +11,21 @@ const { inspectSnapshotsAtBaseRoot } = require('../backup-safety');
 const fixtureKeys = ['CONFIG', 'STATUS', 'BIN', 'ROOT'].map(key => `DATASAFE_APP_FIXTURE_${key}`);
 const supplied = fixtureKeys.filter(key => process.env[key]);
 
+function assertNoFixturePath(value, fixtureRoot) {
+  if (typeof value === 'string') assert.equal(value.includes(fixtureRoot), false, 'Public result leaked fixture path');
+  else if (value && typeof value === 'object') {
+    for (const field of Object.values(value)) assertNoFixturePath(field, fixtureRoot);
+  }
+}
+
+// Break caught: JSON escaping hides a real Windows path from the browse oracle.
+test('public result redaction oracle rejects intentionally leaking Windows string fields', () => {
+  const fixtureRoot = 'C:\\Users\\fixture\\AppData\\Local\\Temp\\datasafe-app-test';
+  const leaking = JSON.parse(JSON.stringify({ opened: true, details: [{ path: `${fixtureRoot}\\drive\\Latest Backup` }] }));
+  assert.throws(() => assertNoFixturePath(leaking, fixtureRoot), /Public result leaked fixture path/);
+  assert.doesNotThrow(() => assertNoFixturePath({ opened: true, message: 'Backup folder opened.' }, fixtureRoot));
+});
+
 test('actual copied worker connects to the app service', { timeout: 600000, skip: supplied.length === 0 ? 'Run tests/windows/Run-AppIntegrationTests.ps1 for actual-worker qualification.' : false }, async t => {
   assert.equal(supplied.length, 4, 'All four fixture paths must be supplied by the PowerShell wrapper.');
   const h = createActualWorkerHarness(t);
@@ -65,10 +80,10 @@ test('actual copied worker connects to the app service', { timeout: 600000, skip
     for (const location of repo.locations) {
       const result = await h.service.openLocation({ destinationId: h.config().destination.id, computerId: repo.computerId, locationId: location.locationId });
       assert.equal(result.opened, true);
-      assert.equal(JSON.stringify(result).includes(h.root), false);
+      assertNoFixturePath(result, h.root);
     }
     assert.deepEqual(h.inventory(h.root), before);
-    assert.equal(JSON.stringify(state.catalog).includes(h.root.replaceAll('\\', '\\\\')), false);
+    assertNoFixturePath(state.catalog, h.root);
     await h.authority();
   });
   await t.test('UnavailableDrivePreservesCommit', async () => {
@@ -127,6 +142,7 @@ test('actual copied worker connects to the app service', { timeout: 600000, skip
     const prior = (await h.service.getState()).lastCommitted, pointerBefore = fs.readFileSync(h.pointerPath());
     const latestBefore = h.latestBytes(), config = h.config();
     const fault = await h.interrupt('rollback'); await fault.release();
+    const rolledBackId = h.json(h.owned('fault-ready.json')).transactionId;
     h.writeConfig({ ...config, jobs: [{ ...config.jobs[0], path: h.owned('missing-source') }] });
     try {
       const state = await h.run();
@@ -134,7 +150,14 @@ test('actual copied worker connects to the app service', { timeout: 600000, skip
       assert.deepEqual(state.lastCommitted, prior); assert.deepEqual(fs.readFileSync(h.pointerPath()), pointerBefore);
       assert.deepEqual(h.latestBytes(), latestBefore); await h.authority();
       assert.notEqual(state.lastAttempt.transactionId, originalTransaction);
+      assert.equal(state.catalog.state, 'committed');
+      assert.equal(state.catalog.repositories[0].capabilities.browse, true);
+      assert.equal(state.catalog.repositories[0].capabilities.manualBackup, true);
+      assert.equal(state.catalog.repositories[0].locations.some(location => location.transactionId === rolledBackId), false);
     } finally { h.writeConfig(config); }
+    const next = await h.run(); await h.confirm(next);
+    assert.deepEqual(h.latestBytes(), h.sourceBytes());
+    assert.equal(next.catalog.repositories[0].locations.some(location => location.transactionId === rolledBackId), false);
   });
   await t.test('SameLetterWrongVolumeCannotWrite', async () => {
     const before = h.inventory(h.drive), pointerBefore = fs.readFileSync(h.pointerPath());

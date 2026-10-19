@@ -34,6 +34,24 @@ test('partial history is not a dated complete snapshot; unchanged does not incre
   assert.match(unchanged.message, /no file content needed copying/i); assert.match(unchanged.message, /still.*verification I\/O/i);
   assert.match(unchanged.backupTimeLabel, /backup created/i); assert.doesNotMatch(unchanged.backupTimeLabel, /completed|committed at/i);
 });
+// Break caught: same-kind groups lose their dates, making recovery navigation ambiguous.
+test('same-kind history groups retain distinguishable producer labels as text with partial-history copy', async () => {
+  const f = fixture();
+  const labels = ['Backup from 2026-10-18 10-00-00 - Previous Versions', 'Backup from 2026-10-19 11-00-00 <sample> - Previous Versions'];
+  f.catalog.repositories[0].locations = labels.map((label, i) => ({ locationId: `previous-${i}`, label, kind: 'previous', partial: true }));
+  const result = view.projectBackupView(f);
+  assert.notEqual(result.repositories[0].locations[0].label, result.repositories[0].locations[1].label);
+  const h = renderer(f); await settle();
+  const rows = h.node('backup-locations').children;
+  for (let i = 0; i < labels.length; i++) {
+    assert.ok(result.repositories[0].locations[i].label.includes(labels[i]));
+    assert.match(result.repositories[0].locations[i].explanation, /partial.*not a complete snapshot/i);
+    const button = rows[i + 1].children[0];
+    assert.ok(button.textContent.includes(labels[i]), 'Producer label must be rendered using textContent');
+    await button.click(); assert.equal(h.calls.at(-1)[1].locationId, `previous-${i}`);
+  }
+});
+
 // Break caught: latest failure/warning losing the last committed identity or inventing success.
 test('warning, rollback and failed attempt retain authoritative latest backup', () => {
   for (const [outcome, recoveryAction, title] of [['committed-with-warning', 'retained', /saved.*attention/i], ['failed', 'rolledBack', /rolled back/i], ['failed', 'none', /needs attention/i], ['busy', 'none', /already running/i]]) {
@@ -44,6 +62,24 @@ test('warning, rollback and failed attempt retain authoritative latest backup', 
   const f = fixture(); f.catalog.state = 'recovery-required'; f.catalog.repositories[0].state = 'recovery-required'; f.catalog.repositories[0].capabilities.browse = false;
   f.lastAttempt = { destinationId, backupFormatVersion: 2, outcome: 'committed-with-warning' };
   const result = view.projectBackupView(f); assert.match(result.title, /saved.*attention/i); assert.equal(result.repositories[0].locations[0].canOpen, false);
+});
+
+// Break caught: real worker Code/Message objects vanish into object coercion.
+test('structured worker warnings render readable safe Message and Code text', async () => {
+  const f = fixture();
+  f.lastAttempt = { destinationId, backupFormatVersion: 2, outcome: 'committed-with-warning', warnings: [
+    { Code: 'StagingCleanupFailed', Message: 'Staging cleanup needs review <sample>.' },
+    { Code: 'JournalFinalizationFailed' }, 'String warning remains visible',
+    { Message: { nested: 'not display text' }, Code: 42 }, null
+  ] };
+  const result = view.projectBackupView(f);
+  assert.match(result.message, /Staging cleanup needs review <sample>\./);
+  assert.match(result.message, /JournalFinalizationFailed/);
+  assert.match(result.message, /String warning remains visible/);
+  assert.doesNotMatch(result.message, /\[object Object\]|undefined|null|42/);
+  const h = renderer(f); await settle();
+  assert.ok(h.node('protection-message').textContent.includes('Staging cleanup needs review <sample>.'));
+  assert.doesNotMatch(h.node('protection-message').textContent, /\[object Object\]/);
 });
 test('disconnected last-known history and other PCs are read-only, estimates and unsupported tools are explicit', () => {
   const f = fixture(); f.catalog.connection = 'disconnected'; f.catalog.lastKnown = true;

@@ -16,13 +16,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const vm = require('vm');
-const { createRequire } = require('module');
+const Module = require('module');
+const { createRequire } = Module;
 if (!process.versions.electron) throw new Error('Package audit requires Electron');
 const source = process.env.DATASAFE_PACKAGE_AUDIT_SOURCE;
 const resources = path.join(process.env.DATASAFE_PACKAGE_AUDIT_ROOT, 'resources');
 const app = path.join(resources, 'app.asar');
 const loader = createRequire(path.join(app, 'package.json'));
 const baselineModules = new Set(Object.keys(require.cache));
+// Guard every CommonJS file-backed resolution BEFORE loading, including
+// transitive dependencies found in an ancestor node_modules directory. Built-in
+// modules are allowed. This is a containment audit, not an untrusted-code sandbox.
+const resolveFilename = Module._resolveFilename;
+Module._resolveFilename = function (...args) {
+  const resolved = resolveFilename.apply(this, args);
+  if (!Module.isBuiltin(resolved) && !resolved.startsWith(app + path.sep)) {
+    throw new Error('Dependency escaped packaged app: ' + resolved);
+  }
+  return resolved;
+};
 const hashes = [];
 function compare(relative, target) {
   const original = fs.readFileSync(path.join(source, relative));

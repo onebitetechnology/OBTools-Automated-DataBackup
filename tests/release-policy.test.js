@@ -280,6 +280,25 @@ test('package checker uses real Electron ASAR resolution and rejects omitted or 
     assert.notEqual(missingDependency.status, 0);
     assert.match(missingDependency.stderr, /fs-extra/);
     fs.renameSync(dependency + '-omitted', dependency);
+    // Break caught: a transitive CommonJS fallback executes outside the ASAR
+    // before the audit's post-load require.cache check can reject it.
+    const fallback = path.join(resources, 'node_modules', 'audit-external-fallback');
+    const marker = path.join(owned, 'external-module-executed');
+    fs.mkdirSync(fallback, { recursive: true });
+    fs.writeFileSync(path.join(fallback, 'index.js'), `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed'); module.exports = {};`);
+    const viewSource = fs.readFileSync(path.join(source, 'backup-view.js'));
+    const fixtureView = Buffer.concat([viewSource, Buffer.from("\nrequire('audit-external-fallback');\n")]);
+    fs.writeFileSync(path.join(source, 'backup-view.js'), fixtureView);
+    fs.writeFileSync(path.join(app, 'backup-view.js'), fixtureView);
+    await asar.createPackage(app, archive);
+    for (const shell of ['powershell.exe', 'pwsh']) {
+      const escaped = run(shell);
+      assert.notEqual(escaped.status, 0);
+      assert.match(escaped.stderr, /Dependency escaped packaged app/);
+      assert.equal(fs.existsSync(marker), false, 'External transitive module executed before containment rejection');
+    }
+    fs.writeFileSync(path.join(source, 'backup-view.js'), viewSource);
+    fs.writeFileSync(path.join(app, 'backup-view.js'), viewSource);
     fs.unlinkSync(path.join(app, 'backup-format.js'));
     await asar.createPackage(app, archive);
     const missingModule = run('pwsh');

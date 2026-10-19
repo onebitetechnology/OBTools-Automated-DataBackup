@@ -15,21 +15,46 @@ function New-Repository($f,[string]$Name='Catalog PC',[string]$Id=([guid]::NewGu
   if (-not $Foreign) { Write-DataSafeJson (Join-Path $f.Root incremental-computer-id.json) ([PSCustomObject]@{formatVersion=1;computerId=$Id}) }
   return Initialize-DataSafeRepository $f.Destination $Name $Id
 }
-function Add-Backup($f,$repo,[switch]$Pending,[switch]$RollbackRetained) {
+function Add-Backup($f,$repo,[switch]$Pending,[switch]$RollbackRetained,[string]$PostArchiveRollback='') {
   $pointer=Read-DataSafeCurrentPointer $repo
   $old=if ($null -ne $pointer) { Read-DataSafeManifest (Join-Path $repo.MetadataRoot $pointer.manifestPath) } else { $null }
   $manifest=New-DataSafeSourceManifest @([PSCustomObject]@{id='docs';path=$f.Source;relativeDestination=@('Docs')})
   $plan=New-DataSafeIncrementalPlan $repo $old $manifest (Get-DataSafeDestinationCapabilities $repo.Root) (Get-DataSafeFreeBytes $repo.Root)
+  Assert-True ($plan.BlockingErrors.Count -eq 0 -and -not $plan.DeletionReviewRequired) 'Fixture plan requires deletion approval or has blocking errors.'
   $tx=New-DataSafeTransaction $repo $plan; $null=Stage-DataSafeTransaction $tx
   $owner=Get-DataSafeTransactionOwner $tx
-  if ($RollbackRetained) {
+  if ($PostArchiveRollback) {
+    $stopped=$false
+    try {
+      $null=Invoke-DataSafeTransaction $tx { param($boundary)
+        # Stop only after ALL old objects have actually been archived, including
+        # the parent directories (the core archives deepest-first).
+        if ($boundary.Phase -ceq 'archived' -and @($tx.operations | Where-Object {$null -ne $_.historyPath -and $_.archiveState -cne 'done'}).Count -eq 0) { throw 'catalog fixture stopped after archive' }
+      }
+    } catch { if ($_.Exception.Message -notmatch 'catalog fixture stopped after archive') { throw }; $stopped=$true }
+    Assert-True $stopped 'Actual archived boundary not reached.'
+    foreach ($op in @($tx.operations | Where-Object {$null -ne $_.historyPath})) {
+      Assert-True (Test-DataSafeTransactionObject $op.historyPath $op.oldEntry) 'Actual old history object not archived.'
+    }
+    if ($PostArchiveRollback -cin @('rollingBack','missing-stage')) {
+      if ($PostArchiveRollback -ceq 'rollingBack') { Set-DataSafeTransactionState $tx rollingBack }
+      else { [IO.File]::Delete(@($tx.operations | Where-Object {$null -ne $_.stagedPath})[0].stagedPath) }
+      Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath); $owner.Handle=$null
+      $result=Recover-DataSafeTransaction $repo (Join-Path $repo.TransactionRoot ($tx.transactionId+'.json'))
+      Assert-True ($result.FinalState -ceq 'rolledBack') 'Recovery did not roll back.'
+    } elseif ($PostArchiveRollback -cne 'retained') {
+      $result=Undo-DataSafeTransaction $tx
+      Assert-True ($result.FinalState -ceq 'rolledBack') 'Undo did not roll back.'
+    }
+  }
+  if ($RollbackRetained -or $PostArchiveRollback -ceq 'retained') {
     # Real rollback with a Windows sharing violation during qualified cleanup:
     # reads/hashing remain allowed, deletion does not. No journal is fabricated.
     $staged=@($tx.operations | Where-Object {$null -ne $_.stagedPath})[0].stagedPath
     $handle=[IO.File]::Open($staged,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
     try { $result=Undo-DataSafeTransaction $tx } finally { $handle.Dispose() }
     Assert-True ($result.FinalState -ceq 'rolledBack' -and @($result.Warnings | Where-Object {$_.Code -ceq 'StagingCleanupFailed'}).Count -eq 1) 'Qualified rollback did not retain staging after sharing violation.'
-  } elseif (-not $Pending) { $null=Invoke-DataSafeTransaction $tx }
+  } elseif (-not $Pending -and -not $PostArchiveRollback) { $null=Invoke-DataSafeTransaction $tx }
   if ($null -ne $owner.Handle) { Release-DataSafeOperationLock $owner.Handle (ConvertTo-DataSafeExtendedPath $owner.LockPath); $owner.Handle=$null }
   return $tx
 }
@@ -40,6 +65,89 @@ function Read-Unchanged($f) {
   return $catalog
 }
 try {
+  # Break caught: valid qualified post-archive rollback residue strands catalog
+  # and app backup, or a permissive fix admits unknown history descendants.
+  foreach ($scenario in @('replace','delete','directory-delete','directory-to-file','file-to-directory','retained','rollingBack','missing-stage')) {
+    Test-Case "post-archive rollback $scenario preserves authority and future manual app backup" {
+      $f=New-Fixture; $repo=New-Repository $f
+      $sourcePath=Join-Path $f.Source a.txt
+      if ($scenario -cin @('directory-delete','directory-to-file')) {
+        [IO.File]::Delete($sourcePath); $null=[IO.Directory]::CreateDirectory((Join-Path $sourcePath nested))
+        [IO.File]::WriteAllText((Join-Path $sourcePath 'nested/child.txt'),'old nested bytes')
+      }
+      $committed=Add-Backup $f $repo
+      $pointerPath=Join-Path $repo.MetadataRoot current-manifest.json
+      $pointerBefore=[IO.File]::ReadAllText($pointerPath)
+      $latestBefore=Get-AppFixtureInventory ([PSCustomObject]@{Root=$repo.LatestRoot})
+      $oldManifest=$committed.currentManifest
+      if ($scenario -cin @('directory-delete','directory-to-file')) {
+        [IO.File]::Delete((Join-Path $sourcePath 'nested/child.txt'))
+        [IO.Directory]::Delete((Join-Path $sourcePath nested)); [IO.Directory]::Delete($sourcePath)
+        if ($scenario -ceq 'directory-to-file') { [IO.File]::WriteAllText($sourcePath,'new file replacing directory') }
+      } elseif ($scenario -ceq 'delete') { [IO.File]::Delete($sourcePath) }
+      elseif ($scenario -ceq 'file-to-directory') {
+        [IO.File]::Delete($sourcePath); $null=[IO.Directory]::CreateDirectory((Join-Path $sourcePath nested))
+        [IO.File]::WriteAllText((Join-Path $sourcePath 'nested/new.txt'),'new nested bytes')
+      } else { [IO.File]::WriteAllText($sourcePath,'replacement bytes') }
+      $mode=if ($scenario -cin @('retained','rollingBack','missing-stage')) {$scenario} else {'undo'}
+      $tx=Add-Backup $f $repo -PostArchiveRollback $mode
+      $journal=Read-DataSafeTransaction (Join-Path $repo.TransactionRoot ($tx.transactionId+'.json'))
+      Assert-True ($journal.state -ceq 'rolledBack') 'Fixture is not a real terminal rollback.'
+      Assert-True ([IO.File]::ReadAllText($pointerPath) -ceq $pointerBefore) 'Rollback changed prior pointer bytes.'
+      Assert-True ((Get-AppFixtureInventory ([PSCustomObject]@{Root=$repo.LatestRoot})) -ceq $latestBefore) 'Rollback changed Latest paths, types or file hashes.'
+      # Qualified independent tree oracle checks bytes, entry types and metadata.
+      Assert-DataSafeTransactionTree $repo $oldManifest -Metadata -TimestampToleranceTicks $journal.timestampToleranceTicks
+      $residue=@(Get-DataSafeAppTreeEntries $repo.HistoryRoot)
+      Assert-True ($residue.Count -gt 0 -and @($residue | Where-Object {-not (Test-DataSafeDirectory $_)}).Count -eq 0) 'Fixture did not retain ordinary archive directories.'
+      $c=Read-Unchanged $f; $r=$c.repositories[0]
+      $expected=if ($scenario -ceq 'retained') {'recovery-required'} else {'committed'}
+      Assert-True ($c.state -ceq $expected -and $r.capabilities.manualBackup -and $r.capabilities.browse -eq ($scenario -cne 'retained')) "Valid post-archive rollback became $($c.state), expected $expected."
+      Assert-True ($r.currentTransactionId -ceq $committed.transactionId -and @($r.locations | Where-Object {$_.transactionId -ceq $tx.transactionId}).Count -eq 0) 'Rolled-back attempt advertised as committed history.'
+      if ($r.capabilities.browse) {
+        $before=Get-AppFixtureInventory $f
+        $resolved=Invoke-AppCatalog $f ResolveLocation $repo.ComputerId $r.locations[0].locationId
+        Assert-True ($resolved.path -ceq $repo.LatestRoot -and (Get-AppFixtureInventory $f) -ceq $before) 'Rollback Latest resolution mutated inventory or returned a different path.'
+      }
+      # The normal copied app worker must recover retained staging if needed and
+      # commit the still-selected source changes; no installed state is touched.
+      Write-DataSafeJson $f.StatusPath ([PSCustomObject]@{lastBackupAt=$null;lastBackupResult=$null;lastBackupMessage='';destinationStatus='Unknown';recentSnapshots=@()})
+      $start=New-Object Diagnostics.ProcessStartInfo
+      $start.FileName=(Get-Process -Id $PID).Path; $start.UseShellExecute=$false; $start.CreateNoWindow=$true
+      $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+      $start.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -ConfigPath "{1}" -StatusPath "{2}" -ManualBetaRun -AppOperationId {3} -AllowNewDestination' -f (Join-Path $f.Bin backup-engine.ps1),$f.ConfigPath,$f.StatusPath,([guid]::NewGuid().ToString('D'))
+      $process=[Diagnostics.Process]::Start($start); $stdout=$process.StandardOutput.ReadToEnd(); $stderr=$process.StandardError.ReadToEnd(); $process.WaitForExit()
+      Assert-True ($process.ExitCode -eq 0) "Subsequent manual worker failed: $stdout $stderr"
+      $status=Read-DataSafeJson $f.StatusPath
+      Assert-True ($status.lastBackupResult -ceq 'success') 'Subsequent worker did not report success.'
+      $c=Read-Unchanged $f
+      Assert-True ($c.state -ceq 'committed' -and $c.repositories[0].capabilities.browse -and $c.repositories[0].capabilities.manualBackup -and $c.repositories[0].currentTransactionId -cne $committed.transactionId) 'Subsequent backup not catalog-authorized.'
+      Assert-True (@($c.repositories[0].locations | Where-Object {$_.transactionId -ceq $tx.transactionId}).Count -eq 0) 'Future commit exposed rolled-back history.'
+      $pointer=Read-DataSafeCurrentPointer $repo
+      Assert-DataSafeTransactionTree $repo (Read-DataSafeManifest (Join-Path $repo.MetadataRoot $pointer.manifestPath)) -Metadata
+    }
+  }
+  Test-Case 'post-archive rollback residue does not authorize unknown files directories types or reparses' {
+    $f=New-Fixture; $repo=New-Repository $f; $null=Add-Backup $f $repo
+    [IO.File]::WriteAllText((Join-Path $f.Source a.txt),'replacement bytes')
+    $tx=Add-Backup $f $repo -PostArchiveRollback undo
+    $oldFile=@($tx.operations | Where-Object {$null -ne $_.historyPath -and $_.oldEntry.entryType -ceq 'file'})[0].historyPath
+    $ancestor=[IO.Path]::GetDirectoryName($oldFile)
+    foreach ($variant in @('unknown-file','unowned-directory','old-file-directory','ancestor-file','reparse')) {
+      $target=if ($variant -ceq 'old-file-directory') {$oldFile} elseif ($variant -cin @('ancestor-file','reparse')) {$ancestor} else {Join-Path $ancestor $variant}
+      if ($variant -cin @('ancestor-file','reparse')) { [IO.Directory]::Delete($ancestor) }
+      if ($variant -cin @('unknown-file','ancestor-file')) { [IO.File]::WriteAllText($target,'unowned') }
+      elseif ($variant -ceq 'reparse') { $null=New-Item -ItemType Junction -Path $target -Target $f.Source }
+      else { $null=[IO.Directory]::CreateDirectory($target) }
+      try {
+        $c=Read-Unchanged $f
+        Assert-True ($c.state -ceq 'invalid' -and -not $c.repositories[0].capabilities.browse -and -not $c.repositories[0].capabilities.manualBackup) "Rollback accepted $variant."
+      } finally {
+        if ($variant -cin @('unknown-file','ancestor-file')) { [IO.File]::Delete($target) } else { [IO.Directory]::Delete($target) }
+        if ($variant -cin @('ancestor-file','reparse')) { $null=[IO.Directory]::CreateDirectory($ancestor) }
+      }
+    }
+    $c=Read-Unchanged $f; Assert-True ($c.state -ceq 'committed') 'Restored known residue is not valid.'
+  }
   Test-Case 'missing identity is read-only and never generated, even on an empty destination' {
     $f=New-Fixture; $c=Read-Unchanged $f
     Assert-True ($c.state -ceq 'identity-missing' -and $null -eq $c.currentComputerId) 'Missing identity was not explicit.'
