@@ -1867,6 +1867,9 @@ function applyBackupProjection(payload) {
     clearBackupSelection();
     return false;
   }
+  // Every accepted replacement supersedes reads started before it, including
+  // same-destination reads still holding a pre-terminal operation snapshot.
+  state.catalogRequest++;
   state.catalog = catalog;
   state.lastAttempt = payload.lastAttempt?.destinationId === destinationId && payload.lastAttempt.backupFormatVersion === format ? payload.lastAttempt : null;
   const operation = payload.activeOperation;

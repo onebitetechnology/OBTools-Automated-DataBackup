@@ -129,6 +129,43 @@ test('renderer stale refresh cannot import a catalog after selection changes', a
   const pending = h.run('refreshBackupCatalog()'); await settle(); h.run("state.config.destination = { id: 'new-destination', backupFormatVersion: 2 }");
   resolve(h.payload); await pending; assert.notEqual(h.run('state.catalog?.destinationId'), destinationId);
 });
+// Break caught: a same-destination read started before a terminal action can
+// resurrect its old operation or erase the terminal attempt after it arrives.
+for (const [snapshot, force, outcome] of [['active', true, 'failed'], ['idle', false, 'failed'], ['active', false, 'committed'], ['idle', true, 'committed']]) {
+  test(`older same-destination ${snapshot} refresh cannot replace a newer ${outcome} action result`, async () => {
+    const f = fixture(), h = renderer(f); await settle();
+    const old = JSON.parse(JSON.stringify(f));
+    old.catalog.repositories[0].currentTransactionId = 'older-transaction';
+    old.activeOperation = snapshot === 'active' ? { operationId: 'old-op', destinationId, backupFormatVersion: 2, startedAt: '2026-10-19T00:00:00Z' } : null;
+    let resolve;
+    h.api[force ? 'refreshBackups' : 'getState'] = () => new Promise(r => { resolve = r; });
+    const pending = h.run(`refreshBackupCatalog({ force: ${force} })`); await settle();
+    const terminal = { ...f, lastAttempt: { operationId: 'new-op', destinationId, backupFormatVersion: 2, outcome, transactionId: 'tx-A', message: 'Latest run result' }, activeOperation: null };
+    h.api.runBackup = async () => terminal;
+    await h.run("invokeAction('/api/run-backup', { skipSave: true })");
+    const expectedTitle = outcome === 'failed' ? 'Backup needs attention' : 'Your backup is up to date';
+    assert.equal(h.node('protection-state').textContent, expectedTitle);
+    resolve(old); await pending;
+    assert.equal(h.node('protection-state').textContent, expectedTitle);
+    assert.equal(h.node('run-backup').disabled, false);
+    assert.equal(h.run('state.activeOperation'), null);
+    assert.equal(h.run('state.lastAttempt.operationId'), 'new-op');
+    assert.equal(h.run('state.catalog.repositories[0].currentTransactionId'), 'tx-A');
+  });
+}
+test('a current same-destination refresh and matching progress still apply after a terminal result', async () => {
+  const f = fixture(), h = renderer(f); await settle();
+  h.api.runBackup = async () => ({ ...f, lastAttempt: { destinationId, backupFormatVersion: 2, outcome: 'failed', message: 'Earlier run failed' } });
+  await h.run("invokeAction('/api/run-backup', { skipSave: true })");
+  const current = { ...f, activeOperation: { operationId: 'next-op', destinationId, backupFormatVersion: 2, startedAt: '2026-10-19T00:00:00Z' } };
+  h.api.refreshBackups = async () => current; await h.run('refreshBackupCatalog()');
+  assert.equal(h.node('protection-state').textContent, 'Backup in progress');
+  assert.equal(h.node('run-backup').disabled, true);
+  h.subscriptions.progress({ operationId: 'next-op', destinationId, backupFormatVersion: 2, phase: 'scanning', percent: 90 }); await settle();
+  assert.equal(h.run('state.backupProgress.operationId'), 'next-op');
+  assert.equal(h.run('state.backupProgress.phase'), 'scanning');
+  assert.equal(h.run('getBackupProgressView().indeterminate'), true);
+});
 test('untagged stale status notifications do not import v2 success into a selected Legacy set', async () => {
   const f = fixture(); f.config.destination.backupFormatVersion = 1; f.catalog.backupFormatVersion = 1; f.catalog.volumeMatch = null; f.catalog.repositories = [];
   const h = renderer(f); await settle();
