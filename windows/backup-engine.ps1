@@ -3,7 +3,9 @@ param(
   [string]$ConfigPath,
   [Parameter(Mandatory = $true)]
   [string]$StatusPath,
-  [switch]$AllowNewDestination
+  [switch]$AllowNewDestination,
+  [switch]$ManualBetaRun,
+  [string]$AppOperationId
 )
 
 Set-StrictMode -Version Latest
@@ -15,8 +17,14 @@ $safetyModulePath = Join-Path $PSScriptRoot "DataSafe.Safety.ps1"
 . (Join-Path $PSScriptRoot 'DataSafe.Manifest.ps1')
 . (Join-Path $PSScriptRoot 'DataSafe.IncrementalPlan.ps1')
 . (Join-Path $PSScriptRoot 'DataSafe.Transaction.ps1')
+. (Join-Path $PSScriptRoot 'DataSafe.AppIntegration.ps1')
 
 function Read-Json([string]$Path) {
+  # PowerShell 7.5+ otherwise converts ISO JSON strings to DateTime before
+  # enrollment validation, unlike Windows PowerShell and JSON in Node.
+  if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) {
+    return Get-Content -Raw -Path $Path | ConvertFrom-Json -DateKind String
+  }
   Get-Content -Raw -Path $Path | ConvertFrom-Json
 }
 
@@ -206,7 +214,13 @@ function Write-ProgressMarker(
     totalSteps = $TotalSteps
     percent = [int]$percent
     detail = $Detail
-  } | ConvertTo-Json -Compress
+  }
+  if ($script:appRequest) {
+    $payload.operationId = $AppOperationId
+    $payload.destinationId = $script:appDestinationId
+    $payload.backupFormatVersion = $script:effectiveFormat
+  }
+  $payload = $payload | ConvertTo-Json -Compress
 
   Write-Output "__OB_PROGRESS__:$payload"
 }
@@ -544,6 +558,11 @@ function Invoke-IncrementalBackup($Config, $Status) {
   $driveRoot = Resolve-DataSafeDestination $Config.destination
   $capabilities = Get-DataSafeDestinationCapabilities $driveRoot
   if (-not $capabilities.Supported) { throw 'DataSafe destination filesystem is unsupported.' }
+  if ($script:explicitAppV2) {
+    # Re-resolve and bind immediately before the first identity/repository
+    # metadata write; do not trust an earlier app or worker check.
+    Assert-DataSafeAppDestination -Config $Config -ActualVolumeUniqueId (Get-DataSafeAppVolumeUniqueId $driveRoot) -ManualBetaRun ([bool]$ManualBetaRun)
+  }
   # Identity belongs beside the local config, not in the friendly PC name or
   # on removable media. The repository API atomically creates/validates it.
   $identityPath = Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($ConfigPath))) 'incremental-computer-id.json'
@@ -656,18 +675,45 @@ $stagingSnapshotPath = $null
 $operationBusyMessage = "A DataSafe backup or restore is already running. Wait for it to finish before starting another operation."
 $script:incrementalStatus = $null
 $script:incrementalOwner = $null
+$script:appRequest = $ManualBetaRun -or $PSBoundParameters.ContainsKey('AppOperationId')
+$script:appDestinationId = $null
+$script:effectiveFormat = $null
+$script:explicitAppV2 = $false
+$appPreflight = $true
 
 try {
-  $lockHandle = Acquire-DataSafeOperationLock $lockPath
   $config = Read-Json $ConfigPath
   $configForNotification = $config
+  $destination = Get-DataSafeProperty $config 'destination'
+  if ($null -ne $destination -and $null -ne $destination.PSObject.Properties['id']) {
+    $script:appDestinationId = $destination.PSObject.Properties['id'].Value
+  }
+  $script:explicitAppV2 = $null -ne $destination -and $null -ne $destination.PSObject.Properties['backupFormatVersion'] -and
+    $destination.backupFormatVersion -is [ValueType] -and $destination.backupFormatVersion -eq 2
+  if ($script:explicitAppV2) { $script:appRequest = $true }
+  $script:effectiveFormat = Get-DataSafeBackupFormat $config
+  if ($script:explicitAppV2 -or $script:appRequest) {
+    $operationUuid = [guid]::Empty
+    if (-not [guid]::TryParseExact($AppOperationId, 'D', [ref]$operationUuid) -or $operationUuid -eq [guid]::Empty) {
+      throw 'Manual app backup requires a valid AppOperationId UUID.'
+    }
+  }
+  if ($script:explicitAppV2) {
+    Assert-DataSafeAppDestination -Config $config -ActualVolumeUniqueId (Get-DataSafeAppVolumeUniqueId (Resolve-DataSafeDestination $destination)) -ManualBetaRun ([bool]$ManualBetaRun)
+  }
+  $lockHandle = Acquire-DataSafeOperationLock $lockPath
+  $appPreflight = $false
   $status = Read-Json $StatusPath
 
-  if ((Get-DataSafeProperty $config 'incrementalFormatVersion') -ceq 2) {
+  if ($script:effectiveFormat -eq 2) {
     Invoke-IncrementalBackup $config $status
     Write-Json $StatusPath $status
     Write-ProgressMarker -Phase 'complete' -JobName '' -Step 4 -TotalSteps 4 -Detail $status.lastBackupMessage
     Write-Output $status.lastBackupMessage
+    if ($script:appRequest) {
+      $outcome = if ($status.warnings.Count) { 'committed-with-warning' } else { 'committed' }
+      Write-DataSafeAppBackupResult $AppOperationId $script:appDestinationId $outcome $status $status.lastBackupMessage
+    }
   } else {
 
   $baseRoot = Get-DataSafeBaseRoot $config
@@ -753,11 +799,18 @@ try {
 } catch {
   $message = if ($_.Exception -and $_.Exception.Message) { $_.Exception.Message } else { "$_" }
   if ($message -eq $operationBusyMessage) {
+    if ($script:appRequest) { Write-DataSafeAppBackupResult $AppOperationId $script:appDestinationId 'busy' $null $message }
     Write-Output $message
     exit 0
   }
 
-  Write-FailedBackupStatus $StatusPath $message
+  if ($script:appRequest) {
+    $outcome = if ($appPreflight) { 'blocked' } else { 'failed' }
+    Write-DataSafeAppBackupResult $AppOperationId $script:appDestinationId $outcome $script:incrementalStatus $message
+  }
+  # A registered background worker must not overwrite existing committed
+  # status when explicit v2 enrollment forbids its nonmanual invocation.
+  if (-not $appPreflight -or -not $script:appRequest) { Write-FailedBackupStatus $StatusPath $message }
 
   $notificationConfig = $configForNotification
   if (-not $notificationConfig) {

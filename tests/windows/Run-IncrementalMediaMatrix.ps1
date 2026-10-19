@@ -153,13 +153,13 @@ function Test-Fat32Candidate($Repository, $Capabilities, [string]$Source) {
 }
 try {
   # Refuse stale/mixed packages before creating any fixture.
-  foreach ($file in @('backup-engine.ps1','DataSafe.Safety.ps1','DataSafe.Repository.ps1','DataSafe.Manifest.ps1','DataSafe.IncrementalPlan.ps1','DataSafe.Transaction.ps1','DataSafeTaskRunner.vbs')) {
+  foreach ($file in @('backup-engine.ps1','DataSafe.Safety.ps1','DataSafe.Repository.ps1','DataSafe.Manifest.ps1','DataSafe.IncrementalPlan.ps1','DataSafe.Transaction.ps1','DataSafe.AppIntegration.ps1','DataSafeTaskRunner.vbs')) {
     $sourceHash = Get-DataSafeSha256 (Join-Path $SourceWindowsRoot $file)
     $packageHash = Get-DataSafeSha256 (Join-Path $PackagedWindowsRoot $file)
     Assert-Matrix ($sourceHash -ceq $packageHash) "Package/source mismatch: $file"
     $hashes.Add([PSCustomObject]@{File=$file;Sha256=$packageHash;SourceMatch=$true})
   }
-  Add-Result 'package' 'seven packaged worker/launcher hashes match source' 'PASS' 'Before disposable Safety resolver shim; all other copied bytes unchanged.'
+  Add-Result 'package' 'required packaged worker/launcher hashes match source' 'PASS' 'Before disposable Safety resolver shim; all other copied bytes unchanged.'
   $null = New-OwnedRoot ([IO.Path]::GetTempPath()) ('datasafe-media-' + $runId)
   foreach ($media in @(@{Fs='NTFS';Base=$NtfsRoot}, @{Fs='exFAT';Base=$ExFatRoot}, @{Fs='FAT32';Base=$Fat32Root})) {
     $fs = $media.Fs; $destination = $null

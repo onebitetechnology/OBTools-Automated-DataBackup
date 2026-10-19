@@ -28,7 +28,7 @@ function New-Fixture([bool]$Incremental = $true) {
   if ($Incremental) { $config | Add-Member incrementalFormatVersion 2 }
   $status = [PSCustomObject]@{lastBackupAt=$null;lastBackupResult=$null;lastBackupMessage='';destinationStatus='Unknown';recentSnapshots=@()}
   $bin=Join-Path $root windows; Ensure-DataSafeDirectory $bin
-  foreach ($file in @('backup-engine.ps1','DataSafe.Repository.ps1','DataSafe.Manifest.ps1','DataSafe.IncrementalPlan.ps1','DataSafe.Transaction.ps1')) {
+  foreach ($file in @('backup-engine.ps1','DataSafe.Repository.ps1','DataSafe.Manifest.ps1','DataSafe.IncrementalPlan.ps1','DataSafe.Transaction.ps1','DataSafe.AppIntegration.ps1')) {
     [IO.File]::Copy((Join-Path $WindowsRoot $file),(Join-Path $bin $file))
   }
   # Only replace the destination-resolution boundary. The real worker, drive
@@ -87,6 +87,14 @@ try {
     Assert-True ($snapshots.Count -eq 1) 'Legacy snapshot not published.'
     Assert-True (Test-DataSafeFile (Join-Path $snapshots[0].FullName 'Personal/Documents/a.txt')) 'Legacy destination changed.'
     Assert-True (-not (Test-DataSafeDirectory (Join-Path $f.Drive 'DataSafe Backups'))) 'Legacy routed to incremental.'
+  }
+  Test-Case 'explicit legacy destination overrides internal incremental flag' {
+    $f=New-Fixture; $f.Config.destination | Add-Member backupFormatVersion 1
+    $s=Invoke-Worker $f
+    $snapshots=@(Get-DataSafeCompletedSnapshots (Join-Path $f.Drive 'Legacy Backup/snapshots'))
+    Assert-True ($snapshots.Count -eq 1) 'Explicit legacy did not publish a legacy snapshot.'
+    Assert-True ([IO.File]::ReadAllText((Join-Path $snapshots[0].FullName 'Personal/Documents/a.txt')) -ceq 'original-a') 'Explicit legacy lost ordinary bytes.'
+    Assert-True (-not (Test-DataSafeDirectory (Join-Path $f.Drive 'DataSafe Backups'))) 'Internal flag overrode explicit legacy destination.'
   }
   Test-Case 'merged public configuration refuses before apply' {
     $f=New-Fixture; $f.Config.jobs[0] | Add-Member includePublicFolder Desktop
