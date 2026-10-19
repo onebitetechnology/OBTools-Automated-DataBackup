@@ -2,7 +2,7 @@
 
 Date: 2026-10-19 (America/Edmonton)
 
-Status: Draft for written-spec approval. No implementation or publishing authorized by this document alone.
+Status: Approved by Jeff on 2026-10-19. Implementation-plan review is the next gate; this document alone does not authorize publishing.
 
 ## Intended outcome
 
