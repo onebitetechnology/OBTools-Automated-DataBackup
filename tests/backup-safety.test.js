@@ -338,28 +338,58 @@ if ((Split-Path -Leaf $stagingPath) -ne '.stage-2') { throw "Expected next short
   assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
 });
 
-test("incomplete staging cleanup warns when Windows cannot remove the folder", (context) => {
-  const powerShell = findPowerShell();
-  if (!powerShell) {
-    context.skip("PowerShell is not installed in this test environment.");
-    return;
-  }
+for (const useShortAlias of [false, true]) {
+  test(`incomplete staging cleanup warns when Windows cannot remove the folder${useShortAlias ? " through a genuine 8.3 alias" : ""}`, (context) => {
+    if (useShortAlias && process.platform !== "win32") {
+      context.skip("The 8.3 alias regression requires Windows.");
+      return;
+    }
+    const powerShell = findPowerShell();
+    if (!powerShell) {
+      context.skip("PowerShell is not installed in this test environment.");
+      return;
+    }
 
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "datasafe-staging-cleanup-"));
-  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const safetyModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.Safety.ps1"));
-  const snapshotsRoot = powerShellLiteral(path.join(root, "snapshots"));
-  const result = runPowerShellScript(powerShell, `
+    const prefix = useShortAlias ? `datasafe staging alias ${crypto.randomUUID()}-` : "datasafe-staging-cleanup-";
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    let fixtureRoot = root;
+    if (useShortAlias) {
+      const alias = runPowerShellScript(powerShell, `
+$ErrorActionPreference = 'Stop'
+$folder = (New-Object -ComObject Scripting.FileSystemObject).GetFolder('${powerShellLiteral(root)}')
+Write-Output $folder.ShortPath
+`);
+      assert.equal(alias.status, 0, `${alias.stderr}\n${alias.stdout}`);
+      fixtureRoot = alias.stdout.trim();
+      if (fixtureRoot.toLowerCase() === root.toLowerCase()) {
+        context.skip("This volume does not provide a distinct 8.3 spelling for the owned fixture.");
+        return;
+      }
+      assert.equal(fs.realpathSync.native(fixtureRoot), fs.realpathSync.native(root));
+    }
+    const safetyModule = powerShellLiteral(path.join(__dirname, "..", "windows", "DataSafe.Safety.ps1"));
+    const snapshotsRoot = powerShellLiteral(path.join(fixtureRoot, "snapshots"));
+    const result = runPowerShellScript(powerShell, `
 $ErrorActionPreference = 'Stop'
 . '${safetyModule}'
 $snapshotsRoot = '${snapshotsRoot}'
 $stagingPath = Get-DataSafeStagingSnapshotPath -SnapshotsRoot $snapshotsRoot
 New-Item -ItemType Directory -Force -Path $stagingPath | Out-Null
+# Bind the expected owned folder independently after creation: enumeration
+# expands 8.3 parent aliases, whereas the staging-path helper preserves them.
+$expectedStagingPath = (Get-Item -LiteralPath $stagingPath -Force).FullName
 function Remove-DataSafeDirectoryTree {
   param([string]$Path)
-  if ($Path -ne $stagingPath) { throw "unexpected cleanup target: $Path" }
+  if ($Path -ne $expectedStagingPath) { throw "unexpected cleanup target: $Path" }
   throw 'simulated locked staging folder'
 }
+$wrongTargetRejected = $false
+try { Remove-DataSafeDirectoryTree -Path $snapshotsRoot } catch {
+  if ($_.Exception.Message -notlike 'unexpected cleanup target:*') { throw }
+  $wrongTargetRejected = $true
+}
+if (-not $wrongTargetRejected) { throw 'wrong cleanup target was accepted' }
 $warnings = @(& { Remove-DataSafeIncompleteSnapshots -SnapshotsRoot $snapshotsRoot } 3>&1)
 if ($warnings.Count -eq 0) { throw 'staging cleanup did not report the deletion failure' }
 if ("$warnings" -notmatch 'could not remove incomplete backup folder') { throw "unexpected cleanup warning: $warnings" }
@@ -367,8 +397,9 @@ if ("$warnings" -notmatch 'simulated locked staging folder') { throw "cleanup di
 if (-not (Test-Path -LiteralPath $stagingPath)) { throw 'locked staging folder was unexpectedly removed' }
 `);
 
-  assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
-});
+    assert.equal(result.status, 0, `${result.stderr}\n${result.stdout}`);
+  });
+}
 
 test("snapshot metadata retains the source identity needed for recovery", (context) => {
   const powerShell = findPowerShell();
