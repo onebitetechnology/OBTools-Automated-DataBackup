@@ -2,7 +2,7 @@
 
 ## Current disposition (2026-10-19)
 
-**Historical candidate `1.0.10-beta.70` passed nonpublishing CI verification at source `5f9edf360a6786cf6a7a81fa9466d964c828a8a1`; those immutable artifact bytes are independently verified and unsigned. The dependency-maintained source below preserves beta.70 but requires a new nonpublishing build and exact-artifact verification. This is not overall Task 7 release readiness, Task 8 acceptance or publication authorization.**
+**Dependency-maintained candidate `1.0.10-beta.70` passed nonpublishing CI at exact source `5bde080556d986ee2378e1e0f5c66ffc2f05035a`, run `39367832253` attempt 1; the new immutable artifact bytes are independently verified and unsigned. It supersedes the older Electron 43.2.0 artifact only as the verification candidate. Residual security/signing/publication gates remain open. This is not overall Task 7 release readiness, Task 8 acceptance or publication authorization.**
 
 - Task 7 originally started at `03de22512da190919f8ce9aa965016e9918cfa64` on the existing `codex/browseable-incremental-core` worktree. Independent Task 7 and final whole-branch review findings were fixed and reviewed through `7ac30bf4cbdd9efa2d8e5b79747b76efc2ae3101`, the base for the version-only continuation. The subsequent evidence-only commit `a378400` changed documentation, not dependencies or implementation behavior; the bounded dependency maintenance below follows that commit without changing storage primitives, schemas or app identity.
 - Controller's fresh read-only remote refs preflight on 2026-10-19 returned main and `v1.0.10-beta.69` at `e7815bd6742c0eb706d28e90192676837216562c`, with tags only through beta.69. Remote package version is `1.0.10-beta.69`, and remote main is already an ancestor of the reviewed local source. Controller's authenticated releases GET (`per_page=100`) returned 22 total entries, all at or below beta.69, with no beta.70 release/draft. No tag or release was created/reserved by the version continuation.
@@ -13,6 +13,7 @@
 - Historical beta.69 local development build command was `node node_modules/electron-builder/out/cli/cli.js --config electron-builder.config.js --win nsis --publish never --config.directories.output=C:\Users\baker\AppData\Local\Temp\datasafe-task7-dev-35ef38e347b948bd840c27e9f00ca1c3`. It failed during dependency enumeration: `No JSON content found in output`. npm is absent on PATH. Electron 43.2.0 was extracted into that owned output; **no installer was produced**. This is preserved historical failure evidence, not a beta.70 build result. No dependency installation, local rebuild or alternate package-manager mutation was attempted in the version continuation.
 - Historical CI run `39355592461` at `7f327d1` failed at the cleanup fixture's short/long TEMP identity oracle; run `39356431145` at `8a61f87` failed at the actual-worker fixture's TEMP parent guard. Neither produced a qualified artifact. Independently reviewed test-only fixes `8a61f87` and `5f9edf3` corrected those fixture identity boundaries without a production engine change.
 - Run `39358364026` passed both harnesses' seven suites, the actual builder package audits and packaged-worker smoke, then sealed/uploaded the immutable bundle recorded below. The later documentation-only evidence commit is **not** the built/tested source; do not relabel its HEAD as artifact provenance or require a rebuild solely for this evidence update.
+- Bounded dependency maintenance `5bde080556d986ee2378e1e0f5c66ffc2f05035a` was independently approved for spec compliance and quality. Controller pushed that feature source and completed new nonpublishing run `39367832253` (#88), then independently checked the downloaded artifact. This later checklist-only commit is **not** the built/tested source. The older source/run/artifact record remains frozen below.
 - No push, workflow dispatch, tag/release creation, upload, signing-secret change or other-chat coordination was performed by this implementer.
 - The earlier controller-approved script-only change made `release:win` exit nonzero with guidance to `publish-qualified`, closing the old manual publishing bypass. That guard and `dist:win --publish never` remain unchanged.
 
@@ -24,6 +25,7 @@
 - [x] Complete independent Task 7 and final whole-branch review/fixes through `7ac30bf4cbdd9efa2d8e5b79747b76efc2ae3101`, including final source findings.
 - [x] Jeff explicitly authorizes feature-branch push and nonpublishing Windows verification; this authorization does not include publication.
 - [x] Controller reviews scoped candidate metadata and test-only CI fixes, then performs the authorized feature-branch push and `verify-build`; exact-source run `39358364026` succeeds. Publication is not included.
+- [x] Controller reviews bounded dependency maintenance `5bde080`, pushes that feature source and completes new exact-source `verify-build` run `39367832253` plus independent artifact verification. Publication and residual security acceptance are not included.
 
 ## Nonpublishing CI qualification
 
@@ -40,7 +42,9 @@ After building, `Test-AppPackage.ps1 -PackagedRoot dist/win-unpacked -SourceRoot
 
 Separate disposable NTFS `Run-AppIntegrationTests.ps1 -WorkerRoot dist/win-unpacked/resources/windows` runs in both PowerShell versions after equality checks. A successful job seals exactly the installer, its blockmap, `beta.yml`, `package-audit.json`, and `qualification.json`. Stable metadata is rejected; `builder-debug.yml` is diagnostic only and excluded. Upload-artifact v4 retains the run/attempt/SHA-specific immutable bundle for 30 days; no overwrite is enabled.
 
-Record from the successful CI run, not from memory:
+### Historical qualification: run 39358364026 / Electron 43.2.0
+
+This record is retained without rewriting its source or bytes; the later qualification candidate is recorded separately below.
 
 | Evidence | Required value |
 | --- | --- |
@@ -62,7 +66,7 @@ The controller downloaded the immutable ZIP into workspace `DataSafe-Verificatio
 
 Evidence retained in `.superpowers/sdd/2026-10-19-incremental-beta-app-integration-plan/ci-39358364026-artifact-verification.json` and `ci-39358364026-job-118418404771.log`, with a human-readable workspace `DataSafe-Verification-39358364026/HANDOFF.txt`. The controller's fresh post-verification releases GET still returned 22 entries, no beta.70; all three beta.69 asset digests match baseline, and main remains `e7815bd6742c0eb706d28e90192676837216562c`. Old beta.69 handoff snapshots and failed-run evidence remain frozen.
 
-### Recorded CI commands and results
+### Historical run 39358364026 commands and results
 
 `npm ci` succeeded. `npm test` (`node --test`) reported **109 total, 107 pass, 0 fail, 2 explicit skips**: the actual worker requires its PowerShell wrapper, and the optional synthetic Electron audit fixture was unavailable before packaging. Actual-worker and actual-package checks ran separately later; these skips are not relabeled as passes.
 
@@ -103,7 +107,7 @@ foreach ($suite in $suites) {
 & pwsh -NoProfile -File tests/windows/Run-AppIntegrationTests.ps1 -WorkerRoot dist/win-unpacked/resources/windows
 ```
 
-### Dependency security maintenance (2026-10-20 UTC / October 19 local; new build pending)
+### Dependency security maintenance (2026-10-20 UTC / October 19 local)
 
 Historical CI reported **15 npm vulnerabilities (9 moderate, 6 high)** and action Node.js 20 deprecation. A fresh full local `npm audit --json` reproduced those counts before this change; the older read-only `dependency-advisories-5f9edf3.json` remains a separate semver-filtered bulk report, not an audit aggregate or proof of an app exploit.
 
@@ -124,15 +128,61 @@ After a clean `npm ci --ignore-scripts`, full audit reports **8 moderate, 0 high
 
 The vulnerable primitive accepts attacker-controlled high-precision format strings. In the installed global-agent use sites, log message templates are literals and URL/proxy/header/error values are structured context; no attacker-controlled format-string route was identified. This is a bounded source inspection, not proof that every possible build invocation is safe. Proxy bootstrap can execute when `ELECTRON_GET_USE_PROXY` is set or explicitly initialized. The chain remains a build-process risk to track, not a shipped app dependency. `npm audit --omit=dev` reports zero but excludes the shipped Electron runtime too, so it is not the overall security result.
 
-Regression evidence: before dependency changes the offline known-range checks and actual updater/parser compatibility check failed (8 failures, 3 passes); after changes all 11 pass. Tests use the updater-resolved parser for valid beta metadata, file/hash/size resolution, malformed/duplicate-key/executable-tag feeds, and missing files/checksums. Full `npm test`: **120 total, 119 pass, 0 fail, 1 intentional skip** (actual worker requires its PowerShell wrapper). The synthetic real-Electron ASAR checker passed using the existing `43.2.0` fixture; it is not qualification of new `43.8.1` package bytes. `npm ls --all --json` exits 0 with no dependency problems. Clean install emitted upstream deprecation notices for rimraf, inflight, lodash.isequal, glob and boolean; no suppression or claim of pristine install output is made.
+Local pre-CI regression evidence: before dependency changes the offline known-range checks and actual updater/parser compatibility check failed (8 failures, 3 passes); after changes all 11 pass. Tests use the updater-resolved parser for valid beta metadata, file/hash/size resolution, malformed/duplicate-key/executable-tag feeds, and missing files/checksums. Local full `npm test`: **120 total, 119 pass, 0 fail, 1 intentional skip** (actual worker requires its PowerShell wrapper). The local synthetic real-Electron ASAR checker passed using the existing `43.2.0` fixture; that fixture was not qualification of new `43.8.1` package bytes. `npm ls --all --json` exited 0 with no dependency problems. Clean local install emitted upstream deprecation notices for rimraf, inflight, lodash.isequal, glob and boolean; no suppression or claim of pristine install output is made.
 
-Raw pre/post audit, tree and test logs are local `task-7-security-*` evidence beside the task brief. Install scripts were deliberately not run locally; the controller must independently review, push the feature source, and perform a new ordinary `npm ci` / nonpublishing Windows build with package audit and smoke. All exact-source/artifact evidence above remains historical, not evidence for the updated dependency source. Residual security acceptance, action Node.js 20 deprecation triage, an explicit signing/unsigned-release decision and all publication controls remain open.
+Raw pre/post audit, tree and local test logs are `task-7-security-*` evidence beside the task brief. Install scripts were deliberately not run locally. The controller subsequently completed independent maintenance review, the feature push and an ordinary CI `npm ci` / nonpublishing Windows build with package audits and smoke, recorded next. The older run `39358364026` remains historical, not evidence for the updated dependency source. Residual security acceptance, action warning triage, an explicit signing/unsigned-release decision and all publication controls remain open.
+
+### Current qualification: run 39367832253 / Electron 43.8.1
+
+The controller's supplied exact-byte verification JSON and full CI log establish the following. These are recorded completed results, not new network checks or test runs by this documentation implementer. Built source remains `5bde080556d986ee2378e1e0f5c66ffc2f05035a`; the forthcoming documentation-only commit is not artifact provenance and does not require another build solely for these prose changes.
+
+| Evidence | Verified value |
+| --- | --- |
+| CI verification run / attempt / source | [39367832253](https://github.com/onebitetechnology/OBTools-Automated-DataBackup/actions/runs/39367832253), #88, attempt 1; source `5bde080556d986ee2378e1e0f5c66ffc2f05035a`; 2026-10-20 04:06:53Z–04:50:25Z (October 19 local), 43m32s |
+| Job outcomes | Verification job `118448620437` and all its steps succeeded; publisher job `118448623173` skipped |
+| Ordinary install and build | Node `22.23.3`, npm `10.9.9`; ordinary `npm ci` succeeded, 288 packages added / 289 audited; 8 moderate findings, 0 high; `npm run dist:win` succeeded with `--publish never`, builder `26.17.0`, packaged Electron `43.8.1` |
+| Immutable artifact / ID | `qualified-beta-39367832253-1-5bde080556d986ee2378e1e0f5c66ffc2f05035a`; ID `12241468171`; 119485669 bytes; expires 2026-11-19 04:50:14Z |
+| ZIP digest | SHA-256 `0de7206b980bc129ad79c57c36fbdf8c6146b87c5341c09ffc03fa6cbfabd41c`; independently downloaded bytes match GitHub's API/upload digest |
+| Installer | `OBTools-Automated-Backups-Setup-1.0.10-beta.70.exe`; version `1.0.10-beta.70`; 119350019 bytes; SHA-256 `8c81a81be0c3cab97dddfa4fe84dc8514f7dfef39df6ea6b7a256c9076aa140a` |
+| Source/resource and packaged-worker checks | Both package audits passed strict CI-source/package byte equality for 36 hashes with actual `43.8.1` `packaged-electron-asar` resolution; packaged worker 15/15, 0 failures, 0 skips in each native runtime |
+| Signing | Independent Authenticode `NotSigned`; signer subject/thumbprint null. CI explicitly reports no signing certificate configured. No installer execution or installation occurred. |
+
+`qualification.json` validates schema/version and exact run/attempt/source binding plus all four payload SHA-256 values. The ZIP has exactly five allowed entries: installer, its blockmap, `beta.yml`, `package-audit.json`, `qualification.json`; no `latest.yml`. Additional independently verified file hashes:
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `OBTools-Automated-Backups-Setup-1.0.10-beta.70.exe.blockmap` | 123515 | `e5806bddcb9212ff0ea4f99aeeb380de9f9f7bef9563fb06c5c7b84baf88474d` |
+| `beta.yml` | 406 | `0f9e98e334c26003e16f52d75108a2fe49b11ae6b5cdf8ee6120b5dd173cf043` |
+| `package-audit.json` | 4151 | `3e220f83bab96159cb603ec50bac3a00413e3d8d2681cf3d8369c1467e12feaa` |
+| `qualification.json` (independent own-file checksum, not a self-hash in its payload list) | Not recorded in verification JSON | `ba16e717b1ef89f6cafd03da47569ae2c484b2655e4ed16f3305e7fe14bdc620` |
+
+Both `beta.yml` SHA-512 fields independently match the installer: `sVVRQt99tyEnJI55ljxMQPfJIPCFW1r7Naa1w44axekWTqjY1h55C54UIs7kiVrtkPvpA98IwSzdnz+4wb+Frg==`. Version, installer URL/path and size `119350019` also match; metadata releaseDate is `2026-10-20T04:45:02.224Z`.
+
+CI `npm test` reported **120 total, 118 pass, 0 fail, 2 explicit skips**, distinct from the local 119-pass/1-skip result. The skips were the actual-worker test requiring its PowerShell wrapper and the optional prepack synthetic Electron fixture. Actual workers and actual built-package audits ran separately later; the skips are not relabeled as passes. Both seven-suite harnesses ran the same commands listed in the historical command section above with these new results in each:
+
+| Suite | Windows PowerShell harness | PowerShell 7 harness |
+| --- | --- | --- |
+| App format policy | 18/18 | 18/18 |
+| Backup catalog | 38/38, 0 skips | 38/38, 0 skips |
+| Beta automation | 21/21 | 21/21 |
+| Actual app worker | 15/15, 0 skips | 15/15, 0 skips |
+| Incremental engine integration | 20/20 | 20/20 |
+| Recovery regression | 11/11 | 11/11 |
+| Final regression | 8/8 | 8/8 |
+
+All suites had zero failures. Native actual-worker children and actual packaged-worker smoke used Windows PowerShell `5.1.26100.33438` and PowerShell `7.6.6`. Older engine/recovery/final subprocesses may invoke Windows PowerShell internally; PowerShell 7 harness coverage is not a claim that all their children ran natively in PowerShell 7. The exact `Test-AppPackage.ps1 -PackagedRoot dist/win-unpacked -SourceRoot .` and `Run-AppIntegrationTests.ps1 -WorkerRoot dist/win-unpacked/resources/windows` invocations above also succeeded in both runtimes for this run.
+
+Independent controller source reconciliation distinguishes CI's strict 36-file source-to-package equality from a separate cross-machine comparison: 25 artifact hashes equal raw local bytes, and the other 11 equal the exact committed Git blobs after Windows LF→CRLF checkout conversion (`core.autocrlf=true`). There is no remaining content difference and no file/artifact was changed. The initial strict raw-local check stopped at `backup-format.js`; an explanatory Git-blob probe hit Node's default child-process buffer limit on `assets/BG.jpg`. The corrected check examined only mismatches with a bounded larger buffer and exited 0. Those diagnostic limitations were not product/CI failures and do not justify claiming all 36 matched raw local bytes.
+
+Retained warnings: the same eight-moderate unpatched sprintf-js build chain (no new security acceptance), npm dependency deprecations (rimraf, inflight, lodash.isequal, glob, boolean), action Node.js 20 deprecation/forced Node 24 runtime, `DEP0040` punycode and `DEP0169` url.parse warnings in action setup/upload/post-node tooling. No warning is hidden or treated as proof of an app exploit. Signing/unsigned-release decision and explicit publication approval remain open.
+
+Exact evidence is retained in `.superpowers/sdd/2026-10-19-incremental-beta-app-integration-plan/ci-39367832253-artifact-verification.json` and `ci-39367832253-job-118448620437.log`; the controller's separate new local handoff is `DataSafe-Verification-39367832253/HANDOFF.txt`, not an overwrite of the older handoff. Controller's supplied post-verification remote state remains main `e7815bd6742c0eb706d28e90192676837216562c`, feature `5bde080`, latest release beta.69, no beta.70 tag/release. No main merge or publication occurred.
 
 ## Separately approved exact-artifact publication
 
 - [ ] Repository owner configures the `incremental-beta-release` environment with required reviewers, prevent-self-review and appropriate branch restrictions. An environment name in YAML alone is **not proof of approval protection**. Do not dispatch until protection is confirmed.
-- [ ] After the dependency-maintained source passes a new nonpublishing build and independent byte/provenance verification, obtain explicit release approval for that exact source SHA and new run/attempt/artifact. Do not substitute the historical artifact above. Credentials/permission availability remains an external gate.
-- [ ] Dispatch `publish-qualified` with that verified run ID and exact 40-character source SHA; do not run `release:win` manually.
+- [ ] Obtain explicit release approval for exact source `5bde080556d986ee2378e1e0f5c66ffc2f05035a`, run `39367832253` attempt 1 and its verified immutable artifact, after security/signing decisions. Do not substitute the historical artifact. Credentials/permission availability remains an external gate.
+- [ ] Only after those gates, dispatch `publish-qualified` with that verified run ID and exact 40-character built source SHA, not the later documentation commit; do not run `release:win` manually.
 
 The publish job verifies successful run provenance, workflow/job identity, run attempt and immutable artifact name, downloads the existing bundle and verifies its exact file allowlist, hashes, audit/version/source binding. It refuses beta.69 and any existing tag/release instead of reusing or overwriting it. Only this approved path creates a draft prerelease, uploads the verified bytes and makes it visible. It does not rebuild; the legacy `release:win` command is fail-closed. An interrupted upload can leave a draft; stop for operator reconciliation rather than deleting/reusing/replacing assets automatically.
 
@@ -143,8 +193,8 @@ The publish job verifies successful run provenance, workflow/job identity, run a
 - [ ] Production performance qualification.
 - [ ] Installed UI/update-path manual acceptance.
 - [ ] Mac reproduction; source reconciliation is cleared by operator evidence and remote ancestry, not direct Mac checkout inspection.
-- [x] Nonpublishing CI-qualified exact artifact and independent byte/provenance verification, limited to built source `5f9edf360a6786cf6a7a81fa9466d964c828a8a1` and run `39358364026` attempt 1.
+- [x] Current nonpublishing CI-qualified exact artifact and independent byte/provenance verification, limited to built source `5bde080556d986ee2378e1e0f5c66ffc2f05035a` and run `39367832253` attempt 1. Historical source `5f9edf3` / run `39358364026` stays frozen separately.
 - [ ] Signing/unsigned-release decision; verified installer is `NotSigned`.
-- [ ] Review residual eight-moderate build-chain findings and action Node.js 20 deprecation; obtain security acceptance and new exact-source build qualification. Actual app exploitability is not proven or exhaustively assessed.
+- [ ] Obtain security acceptance for residual eight-moderate build-chain findings and triage retained npm/action deprecations (`Node.js 20`, `DEP0040`, `DEP0169`). Exact-source build qualification is complete, not security acceptance; actual app exploitability is not proven or exhaustively assessed.
 
 Manual-only v2 enrollment, preserved legacy operation and ordinary-file browsing do not qualify full point-in-time restore, retention/pruning, migration/deletion approval or merged-Public mapping. A single-tester beta does not close the original Phase-1 consumer gate. Preserve historical evidence separately.
