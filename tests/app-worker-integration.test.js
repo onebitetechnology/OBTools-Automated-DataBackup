@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { createBackupService } = require('../backup-service');
 const { createBackupCatalogReader } = require('../backup-catalog');
 const { inspectSnapshotsAtBaseRoot } = require('../backup-safety');
@@ -24,6 +24,34 @@ test('public result redaction oracle rejects intentionally leaking Windows strin
   const leaking = JSON.parse(JSON.stringify({ opened: true, details: [{ path: `${fixtureRoot}\\drive\\Latest Backup` }] }));
   assert.throws(() => assertNoFixturePath(leaking, fixtureRoot), /Public result leaked fixture path/);
   assert.doesNotThrow(() => assertNoFixturePath({ opened: true, message: 'Backup folder opened.' }, fixtureRoot));
+});
+
+test('actual-worker fixture boundary binds genuine TEMP aliases and rejects wrong parents, escapes and reparses', { skip: process.platform !== 'win32' }, t => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `datasafe harness boundary ${crypto.randomUUID()}-`));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const root = path.join(tempRoot, `datasafe-app-${crypto.randomUUID().replaceAll('-', '')}`);
+  fs.mkdirSync(root);
+  const paths = [path.join(root, 'config.json'), path.join(root, 'status.json'), path.join(root, 'bin'), root];
+  fs.writeFileSync(paths[0], '{}'); fs.writeFileSync(paths[1], '{}'); fs.mkdirSync(paths[2]);
+  assert.deepEqual(validateActualWorkerFixturePaths(paths, tempRoot), paths);
+  const otherParent = path.join(tempRoot, 'wrong-parent'); fs.mkdirSync(otherParent);
+  assert.throws(() => validateActualWorkerFixturePaths(paths, otherParent), /real temp parent/);
+  const escaped = path.join(tempRoot, 'escaped.json'); fs.writeFileSync(escaped, '{}');
+  assert.throws(() => validateActualWorkerFixturePaths([escaped, ...paths.slice(1)], tempRoot), /escaped/);
+  const alias = spawnSync('powershell.exe', ['-NoProfile', '-Command',
+    `(New-Object -ComObject Scripting.FileSystemObject).GetFolder('${tempRoot.replaceAll("'", "''")}').ShortPath`], { encoding: 'utf8' });
+  assert.equal(alias.status, 0, alias.stderr);
+  const shortTemp = alias.stdout.trim();
+  if (shortTemp.toLowerCase() !== tempRoot.toLowerCase()) {
+    assert.equal(fs.realpathSync.native(shortTemp), fs.realpathSync.native(tempRoot));
+    assert.deepEqual(validateActualWorkerFixturePaths(paths, shortTemp), paths);
+  } else {
+    t.diagnostic('Volume has no distinct 8.3 alias; wrong-parent/escape/reparse guards still run.');
+  }
+  const linkedRoot = path.join(tempRoot, `datasafe-app-${crypto.randomUUID().replaceAll('-', '')}`);
+  fs.symlinkSync(root, linkedRoot, 'junction');
+  const linkedPaths = paths.map(value => path.join(linkedRoot, path.relative(root, value)));
+  assert.throws(() => validateActualWorkerFixturePaths(linkedPaths, tempRoot), /reparse/);
 });
 
 test('actual copied worker connects to the app service', { timeout: 600000, skip: supplied.length === 0 ? 'Run tests/windows/Run-AppIntegrationTests.ps1 for actual-worker qualification.' : false }, async t => {
@@ -216,16 +244,28 @@ test('actual copied worker connects to the app service', { timeout: 600000, skip
   });
 });
 
-function createActualWorkerHarness(t) {
-  const [configPath, statusPath, bin, root] = fixtureKeys.map(key => path.resolve(process.env[key]));
-  assert.equal(path.dirname(root).toLowerCase(), path.resolve(os.tmpdir()).toLowerCase());
+function validateActualWorkerFixturePaths(paths, tempRoot = os.tmpdir()) {
+  const [configPath, statusPath, bin, root] = paths.map(value => path.resolve(value));
+  assert.equal(fs.realpathSync.native(path.dirname(root)).toLowerCase(), fs.realpathSync.native(tempRoot).toLowerCase(), 'Fixture root must have the real temp parent.');
   assert.match(path.basename(root), /^datasafe-app-[0-9a-f]{32}$/);
+  for (const value of [configPath, statusPath, bin]) assert.ok(value.startsWith(root + path.sep), 'Fixture path escaped the owned root.');
+  // Check original spellings before operations; resolving identity must never
+  // turn a junction/symlink into apparent ownership of its target.
+  for (const value of [configPath, statusPath, bin, root]) {
+    for (let current = value; current !== path.dirname(current); current = path.dirname(current)) {
+      assert.equal(fs.lstatSync(current).isSymbolicLink(), false, 'Fixture path contains a reparse point.');
+    }
+  }
+  return [configPath, statusPath, bin, root];
+}
+
+function createActualWorkerHarness(t) {
+  const [configPath, statusPath, bin, root] = validateActualWorkerFixturePaths(fixtureKeys.map(key => process.env[key]));
   function owned(relative) {
     const value = path.resolve(root, relative);
     assert.ok(value.startsWith(root + path.sep), 'Fixture path escaped the owned root.');
     return value;
   }
-  for (const value of [configPath, statusPath, bin]) assert.ok(value.startsWith(root + path.sep));
   const json = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
   const runtime = json(owned('runtime.json'));
   const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').toUpperCase();
