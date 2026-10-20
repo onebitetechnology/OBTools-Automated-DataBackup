@@ -2,25 +2,28 @@
 
 ## Current disposition (2026-10-19)
 
-**Source handoff only. Not a qualified installer or release authorization.**
+**Candidate `1.0.10-beta.70` selected for authorized nonpublishing verification. Not a qualified installer or publication authorization.**
 
-- Task 7 started at `03de22512da190919f8ce9aa965016e9918cfa64` on the existing `codex/browseable-incremental-core` worktree. No storage primitives, schemas, app identity, package version or lockfile were changed.
-- Read-only `git ls-remote origin refs/heads/main 'refs/tags/v*'` returned main and `v1.0.10-beta.69` at `e7815bd6742c0eb706d28e90192676837216562c`. This commit is already an ancestor of the local source (`git merge-base --is-ancestor ... HEAD`, exit 0). `git show <remote-main-sha>:package.json` reports `1.0.10-beta.69`. No higher version tag appeared in that read-only listing.
-- **Mac current commit, dirty/unpushed changes and version: pending operator evidence.** Remote main does not establish Mac synchronization. No new release version has been selected. Package/lock remain beta.69; no existing artifact was overwritten.
+- Task 7 originally started at `03de22512da190919f8ce9aa965016e9918cfa64` on the existing `codex/browseable-incremental-core` worktree. Independent Task 7 and final whole-branch review findings are now fixed and reviewed through `7ac30bf4cbdd9efa2d8e5b79747b76efc2ae3101`, the base for this version-only continuation. No storage primitives, schemas, app identity, dependencies or implementation behavior change in this continuation.
+- Controller's fresh read-only remote refs preflight on 2026-10-19 returned main and `v1.0.10-beta.69` at `e7815bd6742c0eb706d28e90192676837216562c`, with tags only through beta.69. Remote package version is `1.0.10-beta.69`, and remote main is already an ancestor of the reviewed local source. Controller's authenticated releases GET (`per_page=100`) returned 22 total entries, all at or below beta.69, with no beta.70 release/draft. No tag or release was created/reserved by the version continuation.
+- **Operator evidence, 2026-10-19:** Jeff confirms all Mac changes are pushed to GitHub; there are no Mac-only/unpushed changes to reconcile. The Mac checkout's exact SHA/version was not directly inspected, and no direct-inspection claim is made. Combined with remote ancestry, this clears the source-reconciliation gate without resetting or editing Mac/local work.
+- Candidate `1.0.10-beta.70` is selected as the unused higher beta. `package.json`, lockfile root version and lockfile root package version are updated together; dependency resolutions are unchanged. Old beta.69 handoff artifacts remain frozen at reviewed `7ac30bf4cbdd9efa2d8e5b79747b76efc2ae3101` and are not overwritten.
+- Jeff explicitly authorizes the feature-branch push and nonpublishing Windows `verify-build`. The controller will perform those actions after scoped metadata review; this implementer performs neither. `publish-qualified` and actual publication remain separately unapproved.
 - Local release-policy/config/workflow and synthetic real-Electron checker tests are recorded in the Task 7 report. Synthetic ASAR fixtures are tests of the checker, not electron-builder output qualification or installed-app smoke.
-- Local development build command was `node node_modules/electron-builder/out/cli/cli.js --config electron-builder.config.js --win nsis --publish never --config.directories.output=C:\Users\baker\AppData\Local\Temp\datasafe-task7-dev-35ef38e347b948bd840c27e9f00ca1c3`. It failed during dependency enumeration: `No JSON content found in output`. npm is absent on PATH. Electron 43.2.0 was extracted into that owned output; **no installer was produced**. No dependency installation or alternate package-manager mutation was attempted.
+- Historical beta.69 local development build command was `node node_modules/electron-builder/out/cli/cli.js --config electron-builder.config.js --win nsis --publish never --config.directories.output=C:\Users\baker\AppData\Local\Temp\datasafe-task7-dev-35ef38e347b948bd840c27e9f00ca1c3`. It failed during dependency enumeration: `No JSON content found in output`. npm is absent on PATH. Electron 43.2.0 was extracted into that owned output; **no installer was produced**. This is preserved historical failure evidence, not a beta.70 build result. No dependency installation, local rebuild or alternate package-manager mutation was attempted in the version continuation.
 - Required app/PowerShell integration gates previously ran in Task 6; Task 7 embeds them in both Windows PowerShell and PowerShell 7 before the build. They have **not run in CI for this candidate**.
 - **CI run ID, final source SHA, installer filename/version/SHA-256, actual builder bundle equality, packaged-worker smoke: pending.** Do not fill these from a local fixture or previous October 17–18 artifact.
-- No push, workflow dispatch, tag/release creation, upload, signing-secret change or other-chat coordination was performed.
-- A narrow controller-approved exception permits a script-only `package.json` edit before version choice: `release:win` now exits nonzero with guidance to `publish-qualified`, closing the old manual publishing bypass. Version/dependencies and the lockfile remain unchanged.
+- No push, workflow dispatch, tag/release creation, upload, signing-secret change or other-chat coordination was performed by this implementer.
+- The earlier controller-approved script-only change made `release:win` exit nonzero with guidance to `publish-qualified`, closing the old manual publishing bypass. That guard and `dist:win --publish never` remain unchanged.
 
-## Before choosing a release version
+## Candidate source/version gates
 
-- [ ] Obtain the Mac project's actual current source SHA, package version and dirty/unpushed status from its checkout or explicit operator evidence. Record the evidence and timestamp; do not assume it matches GitHub.
-- [ ] Repeat read-only remote main/tag preflight and inspect the remote package version. Reconcile any newer Mac/remote changes on the feature branch without resetting local/Mac work.
-- [ ] Choose an unused higher beta version only after reconciliation. Update `package.json` and root/package entry in `package-lock.json` consistently. Never reuse beta.69 or a published tag.
-- [ ] Complete independent Task 7 and whole-branch review. Include the previously deferred history-label finding in final review triage.
-- [ ] Obtain explicit permission for the shared push and CI verification dispatch. Push is not authorized by this checklist.
+- [x] Obtain explicit operator evidence that all Mac changes are pushed (Jeff, 2026-10-19); exact Mac checkout SHA/version was not directly read.
+- [x] Controller repeats remote main/tag/package and authenticated release/draft preflight; reviewed local source already contains remote main and no reconciliation edit is needed.
+- [x] Select unused higher beta `1.0.10-beta.70`; align all three package/lock version fields without reusing beta.69 or a published tag.
+- [x] Complete independent Task 7 and final whole-branch review/fixes through `7ac30bf4cbdd9efa2d8e5b79747b76efc2ae3101`, including final source findings.
+- [x] Jeff explicitly authorizes feature-branch push and nonpublishing Windows verification; this authorization does not include publication.
+- [ ] Controller reviews the scoped version/checklist diff, then performs the authorized feature-branch push and `verify-build` dispatch. This checklist does not record those actions as completed.
 
 ## Nonpublishing CI qualification
 
@@ -41,7 +44,7 @@ Record from the successful CI run, not from memory:
 
 | Evidence | Required value |
 | --- | --- |
-| Source SHA and reconciled Mac evidence | Pending |
+| Reviewed source and Mac evidence | Base `7ac30bf4cbdd9efa2d8e5b79747b76efc2ae3101`; Jeff confirms all Mac changes pushed, 2026-10-19; final beta.70 CI source SHA pending |
 | CI verification run ID / attempt / URL | Pending |
 | Exact commands and per-suite results in both runtimes | Pending |
 | Immutable artifact name / ID / digest | Pending |
@@ -63,7 +66,7 @@ The publish job verifies successful run provenance, workflow/job identity, run a
 - [ ] Physical in-flight interruption on real media.
 - [ ] Production performance qualification.
 - [ ] Installed UI/update-path manual acceptance.
-- [ ] Mac reproduction and source reconciliation.
+- [ ] Mac reproduction; source reconciliation is cleared by operator evidence and remote ancestry, not direct Mac checkout inspection.
 - [ ] Release signing and CI-qualified exact artifact.
 
 Manual-only v2 enrollment, preserved legacy operation and ordinary-file browsing do not qualify full point-in-time restore, retention/pruning, migration/deletion approval or merged-Public mapping. A single-tester beta does not close the original Phase-1 consumer gate. Preserve historical evidence separately.
